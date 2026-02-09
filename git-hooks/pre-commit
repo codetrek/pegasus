@@ -6,6 +6,6 @@ echo "🔍 Running typecheck..."
 bunx tsc --noEmit
 
 echo "🧪 Running tests..."
-bun test
+PEGASUS_LOG_LEVEL=silent bun test
 
 echo "✅ All checks passed."

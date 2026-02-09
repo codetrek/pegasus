@@ -8,7 +8,7 @@ install-hooks:
 	chmod +x git-hooks/*
 
 test:
-	bun test
+	PEGASUS_LOG_LEVEL=silent bun test
 
 lint:
 	bunx biome check src/ tests/
@@ -20,7 +20,7 @@ typecheck:
 	bunx tsc --noEmit
 
 coverage:
-	bun test --coverage
+	PEGASUS_LOG_LEVEL=silent bun test --coverage
 
 clean:
 	rm -rf node_modules dist coverage *.tsbuildinfo

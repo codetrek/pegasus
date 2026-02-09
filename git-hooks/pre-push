@@ -7,7 +7,7 @@ THRESHOLD=95
 echo "📊 Running coverage check (threshold: ${THRESHOLD}% per file)..."
 
 # Run coverage, capture output (strip ANSI color codes)
-COVERAGE_OUTPUT=$(bun test --coverage 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
+COVERAGE_OUTPUT=$(PEGASUS_LOG_LEVEL=silent bun test --coverage 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
 
 # Check if tests failed
 if echo "$COVERAGE_OUTPUT" | grep -qE "[1-9][0-9]* fail"; then
