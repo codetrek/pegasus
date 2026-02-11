@@ -2,6 +2,15 @@
 # Pre-commit hook: run typecheck and tests before committing.
 set -euo pipefail
 
+# Prevent direct commits to main branch
+BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "detached")
+if [ "$BRANCH" = "main" ]; then
+  echo "❌ Direct commits to main branch are not allowed!"
+  echo "   Please create a feature branch instead:"
+  echo "   git checkout -b feature/your-feature-name"
+  exit 1
+fi
+
 echo "🔍 Running typecheck..."
 bunx tsc --noEmit
 
