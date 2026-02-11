@@ -4,8 +4,10 @@
 import { z } from "zod";
 
 export const LLMConfigSchema = z.object({
-  provider: z.string().default("anthropic"),
-  model: z.string().default("claude-sonnet-4-20250514"),
+  provider: z.enum(["anthropic", "openai", "openai-compatible"]).default("openai"),
+  model: z.string().default("gpt-4o-mini"),
+  apiKey: z.string().optional(),
+  baseURL: z.string().optional(), // For OpenAI-compatible providers (e.g., local models)
   maxConcurrentCalls: z.coerce.number().int().positive().default(3),
   timeout: z.coerce.number().int().positive().default(120),
 });
@@ -45,7 +47,8 @@ export type Settings = z.infer<typeof SettingsSchema>;
  * Load settings from environment variables.
  *
  * Env prefixes:
- *   LLM_PROVIDER, LLM_MODEL, LLM_MAX_CONCURRENT_CALLS, LLM_TIMEOUT
+ *   LLM_PROVIDER, LLM_MODEL, LLM_API_KEY, LLM_BASE_URL
+ *   LLM_MAX_CONCURRENT_CALLS, LLM_TIMEOUT
  *   MEMORY_DB_PATH, MEMORY_VECTOR_DB_PATH
  *   AGENT_MAX_ACTIVE_TASKS, AGENT_MAX_CONCURRENT_TOOLS, ...
  *   PEGASUS_LOG_LEVEL, PEGASUS_DATA_DIR
@@ -56,6 +59,8 @@ function loadFromEnv(): Settings {
     llm: {
       provider: env["LLM_PROVIDER"],
       model: env["LLM_MODEL"],
+      apiKey: env["LLM_API_KEY"] || env["OPENAI_API_KEY"] || env["ANTHROPIC_API_KEY"],
+      baseURL: env["LLM_BASE_URL"],
       maxConcurrentCalls: env["LLM_MAX_CONCURRENT_CALLS"],
       timeout: env["LLM_TIMEOUT"],
     },

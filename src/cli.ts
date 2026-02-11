@@ -5,6 +5,8 @@
  */
 import { createInterface } from "readline";
 import { createAnthropic } from "@ai-sdk/anthropic";
+import { createOpenAI } from "@ai-sdk/openai";
+import type { LanguageModel } from "ai";
 import { Agent } from "./agent.ts";
 import { loadPersona } from "./identity/persona.ts";
 import { getSettings } from "./infra/config.ts";
@@ -13,9 +15,28 @@ import { getLogger } from "./infra/logger.ts";
 const logger = getLogger("cli");
 
 /** Create a language model from settings. */
-function createModel(settings: ReturnType<typeof getSettings>) {
-  const provider = createAnthropic();
-  return provider(settings.llm.model);
+function createModel(settings: ReturnType<typeof getSettings>): LanguageModel {
+  const { provider, model, apiKey, baseURL } = settings.llm;
+
+  switch (provider) {
+    case "anthropic": {
+      const anthropic = createAnthropic({ apiKey });
+      return anthropic(model);
+    }
+    case "openai": {
+      const openai = createOpenAI({ apiKey, baseURL });
+      return openai(model);
+    }
+    case "openai-compatible": {
+      if (!baseURL) {
+        throw new Error("LLM_BASE_URL is required for openai-compatible provider");
+      }
+      const compatible = createOpenAI({ apiKey: apiKey || "dummy", baseURL });
+      return compatible(model);
+    }
+    default:
+      throw new Error(`Unsupported LLM provider: ${provider}`);
+  }
 }
 
 /** Print a styled banner. */

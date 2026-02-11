@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.39",
+    "@ai-sdk/openai": "^3.0.26",
     "ai": "^6.0.78",
     "pino": "^9.0.0",
     "pino-pretty": "^13.0.0",

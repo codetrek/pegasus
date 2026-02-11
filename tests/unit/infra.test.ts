@@ -28,8 +28,8 @@ import { getLogger, rootLogger, resolveTransport } from "@pegasus/infra/logger.t
 describe("Config schemas", () => {
   test("LLMConfigSchema applies defaults", () => {
     const config = LLMConfigSchema.parse({});
-    expect(config.provider).toBe("anthropic");
-    expect(config.model).toBe("claude-sonnet-4-20250514");
+    expect(config.provider).toBe("openai");
+    expect(config.model).toBe("gpt-4o-mini");
     expect(config.maxConcurrentCalls).toBe(3);
     expect(config.timeout).toBe(120);
   });
@@ -63,7 +63,7 @@ describe("Config schemas", () => {
 
   test("SettingsSchema applies nested defaults", () => {
     const settings = SettingsSchema.parse({});
-    expect(settings.llm.provider).toBe("anthropic");
+    expect(settings.llm.provider).toBe("openai");
     expect(settings.memory.dbPath).toBe("data/memory.db");
     expect(settings.agent.maxActiveTasks).toBe(5);
     expect(settings.logLevel).toBe("info");
@@ -118,7 +118,7 @@ describe("getSettings / setSettings", () => {
     const reloaded = getSettings();
     // Should have reloaded (not the custom override)
     expect(reloaded).not.toBe(custom);
-    expect(reloaded.llm.provider).toBe("anthropic"); // default from env/schema
+    expect(reloaded.llm.provider).toBe("openai"); // default from env/schema
   });
 
   test("loadFromEnv reads all env var fields", () => {
@@ -126,8 +126,8 @@ describe("getSettings / setSettings", () => {
     resetSettings();
     const s = getSettings();
     // Verify the full structure is populated
-    expect(s.llm.provider).toBe("anthropic");
-    expect(s.llm.model).toBe("claude-sonnet-4-20250514");
+    expect(s.llm.provider).toBe("openai");
+    expect(s.llm.model).toBe("gpt-4o-mini");
     expect(s.llm.maxConcurrentCalls).toBe(3);
     expect(s.llm.timeout).toBe(120);
     expect(s.memory.dbPath).toBe("data/memory.db");
