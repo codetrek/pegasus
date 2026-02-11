@@ -18,6 +18,7 @@ docs/plans
 
 # Project data
 data/
+!data/personas/
 
 # Environment
 .env
