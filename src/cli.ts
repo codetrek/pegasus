@@ -9,8 +9,8 @@ import { Agent } from "./agent.ts";
 import { loadPersona } from "./identity/persona.ts";
 import { getSettings, getActiveProviderConfig } from "./infra/config.ts";
 import { getLogger } from "./infra/logger.ts";
-import { createOpenAICompatibleModel } from "./infra/llm-clients.ts";
-import { createAnthropicCompatibleModel } from "./infra/llm-clients.ts";
+import { createOpenAICompatibleModel } from "./infra/openai-client.ts";
+import { createAnthropicCompatibleModel } from "./infra/anthropic-client.ts";
 
 const logger = getLogger("cli");
 
