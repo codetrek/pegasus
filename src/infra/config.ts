@@ -22,10 +22,15 @@ export const AgentConfigSchema = z.object({
   heartbeatInterval: z.coerce.number().positive().default(60),
 });
 
+export const IdentityConfigSchema = z.object({
+  personaPath: z.string().default("data/personas/default.json"),
+});
+
 export const SettingsSchema = z.object({
   llm: LLMConfigSchema.default({}),
   memory: MemoryConfigSchema.default({}),
   agent: AgentConfigSchema.default({}),
+  identity: IdentityConfigSchema.default({}),
   logLevel: z.string().default("info"),
   dataDir: z.string().default("data"),
 });
@@ -33,6 +38,7 @@ export const SettingsSchema = z.object({
 export type LLMConfig = z.infer<typeof LLMConfigSchema>;
 export type MemoryConfig = z.infer<typeof MemoryConfigSchema>;
 export type AgentConfig = z.infer<typeof AgentConfigSchema>;
+export type IdentityConfig = z.infer<typeof IdentityConfigSchema>;
 export type Settings = z.infer<typeof SettingsSchema>;
 
 /**
@@ -62,6 +68,9 @@ function loadFromEnv(): Settings {
       maxConcurrentTools: env["AGENT_MAX_CONCURRENT_TOOLS"],
       maxCognitiveIterations: env["AGENT_MAX_COGNITIVE_ITERATIONS"],
       heartbeatInterval: env["AGENT_HEARTBEAT_INTERVAL"],
+    },
+    identity: {
+      personaPath: env["IDENTITY_PERSONA_PATH"],
     },
     logLevel: env["PEGASUS_LOG_LEVEL"],
     dataDir: env["PEGASUS_DATA_DIR"],

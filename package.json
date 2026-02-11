@@ -6,7 +6,7 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "bun run src/index.ts",
+    "dev": "bun run src/cli.ts",
     "test": "PEGASUS_LOG_LEVEL=silent bun test",
     "test:watch": "PEGASUS_LOG_LEVEL=silent bun test --watch",
     "coverage": "PEGASUS_LOG_LEVEL=silent bun test --coverage",
@@ -18,8 +18,10 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "zod": "^3.24",
+    "@ai-sdk/anthropic": "^3.0.39",
+    "ai": "^6.0.78",
     "pino": "^9.0.0",
-    "pino-pretty": "^13.0.0"
+    "pino-pretty": "^13.0.0",
+    "zod": "^3.24"
   }
 }

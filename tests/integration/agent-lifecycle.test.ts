@@ -1,16 +1,57 @@
 import { describe, expect, test } from "bun:test";
 import { Agent } from "@pegasus/agent.ts";
+import type { AgentDeps } from "@pegasus/agent.ts";
 import { createEvent, EventType } from "@pegasus/events/types.ts";
 import { TaskState } from "@pegasus/task/states.ts";
-import type { Settings } from "@pegasus/infra/config.ts";
 import { SettingsSchema } from "@pegasus/infra/config.ts";
+import type { LanguageModel } from "ai";
+import type { Persona } from "@pegasus/identity/persona.ts";
 
-function testSettings(): Settings {
-  return SettingsSchema.parse({
-    llm: { maxConcurrentCalls: 3 },
-    agent: { maxActiveTasks: 10 },
-    logLevel: "warn",
+/** Minimal mock LanguageModel that returns stub text. */
+function createMockModel(): LanguageModel {
+  const responseText = JSON.stringify({
+    taskType: "conversation",
+    intent: "test",
+    urgency: "normal",
+    keyEntities: [],
   });
+  return {
+    specificationVersion: "v2",
+    provider: "test",
+    modelId: "test-model",
+    defaultObjectGenerationMode: "json",
+    doGenerate: async () => ({
+      text: responseText,
+      content: [{ type: "text" as const, text: responseText }],
+      finishReason: "stop" as const,
+      usage: { inputTokens: 10, outputTokens: 10 },
+      rawCall: { rawPrompt: "", rawSettings: {} },
+      response: { id: "test", timestamp: new Date(), modelId: "test-model" },
+    }),
+    doStream: async () => {
+      throw new Error("Not implemented");
+    },
+  } as unknown as LanguageModel;
+}
+
+const testPersona: Persona = {
+  name: "TestBot",
+  role: "test assistant",
+  personality: ["helpful"],
+  style: "concise",
+  values: ["accuracy"],
+};
+
+function testAgentDeps(): AgentDeps {
+  return {
+    model: createMockModel(),
+    persona: testPersona,
+    settings: SettingsSchema.parse({
+      llm: { maxConcurrentCalls: 3 },
+      agent: { maxActiveTasks: 10 },
+      logLevel: "warn",
+    }),
+  };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -19,7 +60,7 @@ function sleep(ms: number): Promise<void> {
 
 describe("Agent lifecycle", () => {
   test("single task completes end-to-end", async () => {
-    const agent = new Agent(testSettings());
+    const agent = new Agent(testAgentDeps());
     await agent.start();
 
     try {
@@ -52,7 +93,7 @@ describe("Agent lifecycle", () => {
   }, 10_000);
 
   test("concurrent tasks (3 simultaneous)", async () => {
-    const agent = new Agent(testSettings());
+    const agent = new Agent(testAgentDeps());
     await agent.start();
 
     try {
@@ -79,7 +120,7 @@ describe("Agent lifecycle", () => {
   }, 10_000);
 
   test("event history recorded", async () => {
-    const agent = new Agent(testSettings());
+    const agent = new Agent(testAgentDeps());
     await agent.start();
 
     try {
@@ -110,7 +151,7 @@ describe("Agent lifecycle", () => {
   }, 10_000);
 
   test("submit and waitForTask", async () => {
-    const agent = new Agent(testSettings());
+    const agent = new Agent(testAgentDeps());
     await agent.start();
 
     try {

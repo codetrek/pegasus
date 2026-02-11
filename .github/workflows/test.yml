@@ -1,0 +1,70 @@
+name: Test
+
+on:
+  workflow_call:
+    inputs:
+      coverage-threshold:
+        description: 'Minimum line coverage percentage required'
+        required: false
+        type: number
+        default: 0
+    outputs:
+      coverage:
+        description: 'Test coverage percentage'
+        value: ${{ jobs.test.outputs.coverage }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    outputs:
+      coverage: ${{ steps.coverage.outputs.percentage }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Run typecheck
+        run: bun run typecheck
+
+      - name: Run tests with coverage
+        run: bun run coverage
+
+      - name: Parse coverage
+        id: coverage
+        run: |
+          # Extract line coverage percentage from coverage output
+          COVERAGE=$(bun run coverage 2>&1 | grep "All files" | awk '{print $4}' | tr -d '%')
+          echo "percentage=$COVERAGE" >> $GITHUB_OUTPUT
+          echo "Line Coverage: $COVERAGE%"
+
+      - name: Check coverage threshold
+        if: ${{ inputs.coverage-threshold > 0 }}
+        run: |
+          COVERAGE=${{ steps.coverage.outputs.percentage }}
+          THRESHOLD=${{ inputs.coverage-threshold }}
+
+          echo "Coverage: $COVERAGE%"
+          echo "Threshold: $THRESHOLD%"
+
+          if (( $(echo "$COVERAGE < $THRESHOLD" | bc -l) )); then
+            echo "❌ Coverage $COVERAGE% is below threshold $THRESHOLD%"
+            exit 1
+          else
+            echo "✅ Coverage $COVERAGE% meets threshold $THRESHOLD%"
+          fi
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 7

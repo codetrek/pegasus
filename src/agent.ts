@@ -6,6 +6,7 @@
  *
  * Agent itself holds NO task execution state. All state lives in TaskFSM.
  */
+import type { LanguageModel } from "ai";
 import type { Event } from "./events/types.ts";
 import { EventType, createEvent } from "./events/types.ts";
 import { EventBus } from "./events/bus.ts";
@@ -18,6 +19,7 @@ import { getLogger } from "./infra/logger.ts";
 import { InvalidStateTransition, TaskNotFoundError } from "./infra/errors.ts";
 import type { Settings } from "./infra/config.ts";
 import { getSettings } from "./infra/config.ts";
+import type { Persona } from "./identity/persona.ts";
 import { TaskFSM } from "./task/fsm.ts";
 import { TaskRegistry } from "./task/registry.ts";
 import { TaskState } from "./task/states.ts";
@@ -66,16 +68,22 @@ class Semaphore {
 
 // ── Agent ────────────────────────────────────────────
 
+export interface AgentDeps {
+  model: LanguageModel;
+  persona: Persona;
+  settings?: Settings;
+}
+
 export class Agent {
   readonly eventBus: EventBus;
   readonly taskRegistry: TaskRegistry;
 
   // Cognitive processors (stateless)
-  private perceiver = new Perceiver();
-  private thinker = new Thinker();
-  private planner = new Planner();
-  private actor = new Actor();
-  private reflector = new Reflector();
+  private perceiver: Perceiver;
+  private thinker: Thinker;
+  private planner: Planner;
+  private actor: Actor;
+  private reflector: Reflector;
 
   // Concurrency control
   private llmSemaphore: Semaphore;
@@ -86,12 +94,19 @@ export class Agent {
   private backgroundTasks = new Set<Promise<void>>();
   private settings: Settings;
 
-  constructor(settings?: Settings) {
-    this.settings = settings ?? getSettings();
+  constructor(deps: AgentDeps) {
+    this.settings = deps.settings ?? getSettings();
     this.eventBus = new EventBus({ keepHistory: true });
     this.taskRegistry = new TaskRegistry(this.settings.agent.maxActiveTasks);
     this.llmSemaphore = new Semaphore(this.settings.llm.maxConcurrentCalls);
     this.toolSemaphore = new Semaphore(this.settings.agent.maxConcurrentTools);
+
+    // Initialize cognitive processors with model + persona
+    this.perceiver = new Perceiver(deps.model, deps.persona);
+    this.thinker = new Thinker(deps.model, deps.persona);
+    this.planner = new Planner(deps.model, deps.persona);
+    this.actor = new Actor(deps.model, deps.persona);
+    this.reflector = new Reflector(deps.model, deps.persona);
   }
 
   // ═══════════════════════════════════════════════════
@@ -387,9 +402,14 @@ export class Agent {
   }
 
   private _compileResult(task: TaskFSM): Record<string, unknown> {
+    // For conversation tasks, extract the response text from the last "respond" action
+    const respondAction = task.context.actionsDone.find((a) => a.actionType === "respond");
+    const responseText = respondAction?.result as string | undefined;
+
     return {
       taskId: task.taskId,
       input: task.context.inputText,
+      response: responseText ?? null,
       actions: task.context.actionsDone,
       reflections: task.context.reflections,
       iterations: task.context.iteration,
