@@ -1,0 +1,42 @@
+{
+  "$schema": "./config.schema.json",
+  "llm": {
+    "provider": "openai",
+    "providers": {
+      "openai": {
+        "apiKey": "${OPENAI_API_KEY}",
+        "model": "gpt-4o-mini",
+        "baseURL": null
+      },
+      "anthropic": {
+        "apiKey": "${ANTHROPIC_API_KEY}",
+        "model": "claude-sonnet-4-20250514",
+        "baseURL": null
+      },
+      "ollama": {
+        "apiKey": "dummy",
+        "model": "llama3.2:latest",
+        "baseURL": "http://localhost:11434/v1"
+      }
+    },
+    "maxConcurrentCalls": 3,
+    "timeout": 120
+  },
+  "identity": {
+    "personaPath": "data/personas/default.json"
+  },
+  "agent": {
+    "maxActiveTasks": 5,
+    "maxConcurrentTools": 3,
+    "maxCognitiveIterations": 10,
+    "heartbeatInterval": 60
+  },
+  "memory": {
+    "dbPath": "data/memory.db",
+    "vectorDbPath": "data/vectors"
+  },
+  "system": {
+    "logLevel": "info",
+    "dataDir": "data"
+  }
+}

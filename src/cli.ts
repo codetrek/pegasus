@@ -9,31 +9,66 @@ import { createOpenAI } from "@ai-sdk/openai";
 import type { LanguageModel } from "ai";
 import { Agent } from "./agent.ts";
 import { loadPersona } from "./identity/persona.ts";
-import { getSettings } from "./infra/config.ts";
+import { getSettings, getActiveProviderConfig } from "./infra/config.ts";
 import { getLogger } from "./infra/logger.ts";
 
 const logger = getLogger("cli");
 
 /** Create a language model from settings. */
 function createModel(settings: ReturnType<typeof getSettings>): LanguageModel {
-  const { provider, model, apiKey, baseURL } = settings.llm;
+  const { provider } = settings.llm;
+  const config = getActiveProviderConfig(settings);
 
   switch (provider) {
     case "anthropic": {
-      const anthropic = createAnthropic({ apiKey });
-      return anthropic(model);
-    }
-    case "openai": {
-      const openai = createOpenAI({ apiKey, baseURL });
-      return openai(model);
-    }
-    case "openai-compatible": {
-      if (!baseURL) {
-        throw new Error("LLM_BASE_URL is required for openai-compatible provider");
+      if (!config.apiKey) {
+        throw new Error(
+          "ANTHROPIC_API_KEY is required. Set it in .env:\n" +
+            "  ANTHROPIC_API_KEY=sk-ant-api03-your-key-here",
+        );
       }
-      const compatible = createOpenAI({ apiKey: apiKey || "dummy", baseURL });
-      return compatible(model);
+      const anthropicClient = createAnthropic({
+        apiKey: config.apiKey,
+        baseURL: config.baseURL,
+      });
+      logger.info({ provider, model: config.model }, "llm_initialized");
+      return anthropicClient(config.model);
     }
+
+    case "openai": {
+      if (!config.apiKey) {
+        throw new Error(
+          "OPENAI_API_KEY is required. Set it in .env:\n" +
+            "  OPENAI_API_KEY=sk-proj-your-key-here",
+        );
+      }
+      const openaiClient = createOpenAI({
+        apiKey: config.apiKey,
+        baseURL: config.baseURL,
+      });
+      logger.info({ provider, model: config.model, baseURL: config.baseURL }, "llm_initialized");
+      return openaiClient(config.model);
+    }
+
+    case "openai-compatible": {
+      if (!config.baseURL) {
+        throw new Error(
+          "LLM_BASE_URL is required for openai-compatible provider. Set it in .env:\n" +
+            "  LLM_BASE_URL=http://localhost:11434/v1  # For Ollama\n" +
+            "  LLM_BASE_URL=http://localhost:1234/v1   # For LM Studio",
+        );
+      }
+      const compatibleClient = createOpenAI({
+        apiKey: config.apiKey || "dummy", // Many local models don't need real key
+        baseURL: config.baseURL,
+      });
+      logger.info(
+        { provider, model: config.model, baseURL: config.baseURL },
+        "llm_initialized",
+      );
+      return compatibleClient(config.model);
+    }
+
     default:
       throw new Error(`Unsupported LLM provider: ${provider}`);
   }

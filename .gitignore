@@ -20,10 +20,15 @@ docs/plans
 data/
 !data/personas/
 
-# Environment
+# Environment & Config
 .env
 .env.*
 !.env.example
+!.env.ollama
+config.json
+config.local.json
+.pegasus.json
+!config.example.json
 
 # OS
 .DS_Store

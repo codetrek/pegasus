@@ -7,6 +7,7 @@ import {
   getSettings,
   setSettings,
   resetSettings,
+  getActiveProviderConfig,
 } from "@pegasus/infra/config.ts";
 import type { Settings } from "@pegasus/infra/config.ts";
 import {
@@ -264,5 +265,93 @@ describe("resolveTransport", () => {
   test("returns undefined for production", () => {
     const transport = resolveTransport("production");
     expect(transport).toBeUndefined();
+  });
+});
+
+// ── Provider Config ─────────────────────────────────
+
+describe("getActiveProviderConfig", () => {
+  test("returns OpenAI config when provider is openai", () => {
+    const settings = SettingsSchema.parse({
+      llm: {
+        provider: "openai",
+        model: "gpt-4",
+        openai: {
+          apiKey: "sk-test",
+          model: "gpt-4o",
+          baseURL: "https://custom.com",
+        },
+      },
+    });
+
+    const config = getActiveProviderConfig(settings);
+    expect(config.apiKey).toBe("sk-test");
+    expect(config.model).toBe("gpt-4o"); // Provider-specific overrides global
+    expect(config.baseURL).toBe("https://custom.com");
+  });
+
+  test("returns Anthropic config when provider is anthropic", () => {
+    const settings = SettingsSchema.parse({
+      llm: {
+        provider: "anthropic",
+        model: "default-model",
+        anthropic: {
+          apiKey: "sk-ant-test",
+          model: "claude-4",
+        },
+      },
+    });
+
+    const config = getActiveProviderConfig(settings);
+    expect(config.apiKey).toBe("sk-ant-test");
+    expect(config.model).toBe("claude-4");
+    expect(config.baseURL).toBeUndefined();
+  });
+
+  test("falls back to global model if provider-specific not set", () => {
+    const settings = SettingsSchema.parse({
+      llm: {
+        provider: "openai",
+        model: "gpt-4o-mini",
+        openai: {
+          apiKey: "sk-test",
+        },
+      },
+    });
+
+    const config = getActiveProviderConfig(settings);
+    expect(config.model).toBe("gpt-4o-mini"); // Fallback to global
+  });
+
+  test("returns compatible config with LLM_BASE_URL", () => {
+    const settings = SettingsSchema.parse({
+      llm: {
+        provider: "openai-compatible",
+        model: "llama3",
+        baseURL: "http://localhost:11434/v1",
+        openai: {
+          apiKey: "dummy",
+          model: "llama3.2",
+        },
+      },
+    });
+
+    const config = getActiveProviderConfig(settings);
+    expect(config.apiKey).toBe("dummy");
+    expect(config.baseURL).toBe("http://localhost:11434/v1");
+    expect(config.model).toBe("llama3.2");
+  });
+
+  test("throws for unknown provider", () => {
+    const settings = {
+      llm: {
+        provider: "unknown" as any,
+        model: "test",
+        openai: {},
+        anthropic: {},
+      },
+    } as Settings;
+
+    expect(() => getActiveProviderConfig(settings)).toThrow("Unknown provider");
   });
 });
