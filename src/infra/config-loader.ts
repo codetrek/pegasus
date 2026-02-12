@@ -1,11 +1,13 @@
 /**
- * ConfigLoader — Load configuration from JSON/YAML file with env var support.
+ * ConfigLoader — Load configuration from YAML files with env var support.
  *
  * Features:
- * - Load from config.yaml/.json (or custom path via PEGASUS_CONFIG env var)
+ * - Load from config.yaml (base) + config.local.yaml (override)
+ * - config.local.yaml overrides config.yaml settings
  * - Support ${ENV_VAR} interpolation in strings
- * - Environment variables override file config
+ * - Environment variables override all file configs
  * - Fallback to env-only mode if no config file found
+ * - Custom config path via PEGASUS_CONFIG env var
  */
 import { existsSync, readFileSync } from "fs";
 import yaml from "js-yaml";
@@ -17,11 +19,52 @@ const logger = getLogger("config_loader");
 
 /**
  * Interpolate ${VAR_NAME} placeholders with environment variables.
+ * Supports bash-style default value syntax:
+ * - ${VAR:-default}  Use default if VAR is unset or empty
+ * - ${VAR:=default}  Use and assign default if VAR is unset or empty
+ * - ${VAR:?error}    Error if VAR is unset or empty
+ * - ${VAR:+alternate} Use alternate if VAR is set
  */
 function interpolateEnvVars(obj: any): any {
   if (typeof obj === "string") {
-    return obj.replace(/\$\{([^}]+)\}/g, (_, varName) => {
-      return process.env[varName] || "";
+    return obj.replace(/\$\{([^}]+)\}/g, (_match, content) => {
+      // Check for bash-style operators
+      const operatorMatch = content.match(/^([^:]+)(:-|:=|:\?|:\+)(.*)$/);
+
+      if (operatorMatch) {
+        const [, varName, operator, value] = operatorMatch;
+        const envValue = process.env[varName];
+        const isEmpty = !envValue || envValue === "";
+
+        switch (operator) {
+          case ":-": // Use default if unset or empty
+            return isEmpty ? value : envValue;
+
+          case ":=": // Use and assign default if unset or empty
+            if (isEmpty) {
+              process.env[varName] = value;
+              return value;
+            }
+            return envValue;
+
+          case ":?": // Error if unset or empty
+            if (isEmpty) {
+              throw new ConfigError(
+                `Environment variable ${varName} is required but not set: ${value || "missing value"}`
+              );
+            }
+            return envValue;
+
+          case ":+": // Use alternate if set
+            return isEmpty ? "" : value;
+
+          default:
+            return isEmpty ? "" : envValue;
+        }
+      }
+
+      // Simple ${VAR} syntax (no operator)
+      return process.env[content] || "";
     }) || undefined; // Empty string becomes undefined
   }
   if (Array.isArray(obj)) {
@@ -58,28 +101,86 @@ function loadConfigFile(path: string): any {
 }
 
 /**
- * Find config file from standard locations.
+ * Deep merge two objects, with source overriding target.
  */
-function findConfigFile(): string | null {
-  const paths = [
-    process.env["PEGASUS_CONFIG"],
-    "config.local.yaml",
-    "config.local.yml",
-    "config.local.json",
-    "config.yaml",
-    "config.yml",
-    "config.json",
-    ".pegasus.yaml",
-    ".pegasus.yml",
-    ".pegasus.json",
-  ].filter(Boolean) as string[];
+function deepMerge(target: any, source: any): any {
+  if (!source) return target;
+  if (!target) return source;
 
-  for (const path of paths) {
-    if (existsSync(path)) {
-      return path;
+  const result = { ...target };
+
+  for (const [key, value] of Object.entries(source)) {
+    if (value === undefined) continue;
+
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      result[key] = deepMerge(target[key], value);
+    } else {
+      result[key] = value;
     }
   }
-  return null;
+
+  return result;
+}
+
+/**
+ * Find and load config files with layered merging.
+ * Priority: config.local.yml/yaml overrides config.yml/yaml
+ */
+function findAndMergeConfigs(): any {
+  // Check for custom config path first
+  if (process.env["PEGASUS_CONFIG"]) {
+    const customPath = process.env["PEGASUS_CONFIG"];
+    if (existsSync(customPath)) {
+      logger.info({ path: customPath }, "loading_config_from_custom_path");
+      return loadConfigFile(customPath);
+    }
+  }
+
+  // Check for conflicting base config files
+  const basePaths = ["config.yaml", "config.yml"];
+  const foundBasePaths = basePaths.filter(existsSync);
+
+  if (foundBasePaths.length > 1) {
+    throw new ConfigError(
+      `Multiple base config files found: ${foundBasePaths.join(", ")}. ` +
+      `Please keep only one (config.yaml or config.yml).`
+    );
+  }
+
+  // Check for conflicting local config files
+  const localPaths = ["config.local.yaml", "config.local.yml"];
+  const foundLocalPaths = localPaths.filter(existsSync);
+
+  if (foundLocalPaths.length > 1) {
+    throw new ConfigError(
+      `Multiple local config files found: ${foundLocalPaths.join(", ")}. ` +
+      `Please keep only one (config.local.yaml or config.local.yml).`
+    );
+  }
+
+  // Load base config
+  let baseConfig: any = null;
+  if (foundBasePaths.length === 1) {
+    const path = foundBasePaths[0]!;  // We know array has exactly 1 element
+    logger.info({ path }, "loading_base_config");
+    baseConfig = loadConfigFile(path);
+  }
+
+  // Load local config
+  let localConfig: any = null;
+  if (foundLocalPaths.length === 1) {
+    const path = foundLocalPaths[0]!;  // We know array has exactly 1 element
+    logger.info({ path }, "loading_local_config_override");
+    localConfig = loadConfigFile(path);
+  }
+
+  // Merge configs: local overrides base
+  if (baseConfig && localConfig) {
+    logger.info("merging_base_and_local_configs");
+    return deepMerge(baseConfig, localConfig);
+  }
+
+  return localConfig || baseConfig || null;
 }
 
 /**
@@ -133,6 +234,7 @@ function configToSettings(config: any, env = process.env): Settings {
     },
     logLevel: env["PEGASUS_LOG_LEVEL"] || config.system?.logLevel,
     dataDir: env["PEGASUS_DATA_DIR"] || config.system?.dataDir,
+    logConsoleEnabled: env["PEGASUS_LOG_CONSOLE_ENABLED"] === "true" || config.system?.logConsoleEnabled,
   });
 }
 
@@ -173,6 +275,7 @@ export function loadFromEnv(env = process.env): Settings {
     },
     logLevel: env["PEGASUS_LOG_LEVEL"],
     dataDir: env["PEGASUS_DATA_DIR"],
+    logConsoleEnabled: env["PEGASUS_LOG_CONSOLE_ENABLED"] === "true",
   });
 }
 
@@ -181,20 +284,23 @@ export function loadFromEnv(env = process.env): Settings {
  *
  * Priority:
  * 1. Environment variables (highest)
- * 2. Config file (config.yaml/.json, config.local.yaml/.json, .pegasus.yaml/.json)
- * 3. Schema defaults
+ * 2. config.local.yml/yaml (overrides base config)
+ * 3. config.yml/yaml (base config)
+ * 4. Schema defaults
  */
 export function loadSettings(): Settings {
-  const configPath = findConfigFile();
+  try {
+    const mergedConfig = findAndMergeConfigs();
 
-  if (configPath) {
-    logger.info({ path: configPath }, "loading_config_from_file");
-    try {
-      const config = loadConfigFile(configPath);
-      return configToSettings(config);
-    } catch (err) {
-      logger.warn({ path: configPath, error: err }, "config_file_load_failed_fallback_to_env");
+    if (mergedConfig) {
+      return configToSettings(mergedConfig);
     }
+  } catch (err) {
+    // Re-throw ConfigError for conflicts and required env vars
+    if (err instanceof ConfigError) {
+      throw err;
+    }
+    logger.warn({ error: err }, "config_file_load_failed_fallback_to_env");
   }
 
   logger.info("loading_config_from_env");

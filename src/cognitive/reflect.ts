@@ -4,7 +4,7 @@
  * For conversation tasks: always returns "complete" verdict (no LLM call needed).
  * Complex reflection with LLM evaluation will be added in M4.
  */
-import type { LanguageModel } from "ai";
+import type { LanguageModel } from "../infra/llm-types.ts";
 import { getLogger } from "../infra/logger.ts";
 import type { Persona } from "../identity/persona.ts";
 import type { TaskContext, Reflection } from "../task/context.ts";

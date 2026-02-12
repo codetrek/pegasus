@@ -16,6 +16,9 @@ lint:
 lint-fix:
 	bunx biome check --fix src/ tests/
 
+run:
+	bun run dev
+
 typecheck:
 	bunx tsc --noEmit
 
