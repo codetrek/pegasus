@@ -1,0 +1,79 @@
+# Pegasus Default Configuration
+#
+# This is the default configuration file that ships with Pegasus.
+# You can edit this file directly, or create config.local.yml for local overrides.
+#
+# Configuration Loading Strategy:
+# 1. This file (config.yml) provides base configuration
+# 2. Create config.local.yml for local overrides (gitignored)
+# 3. config.local.yml values will deep-merge and override config.yml
+# 4. Environment variables will override all file-based configs
+#
+# Priority (highest to lowest):
+#   Environment Variables > config.local.yml > config.yml > Schema Defaults
+#
+# IMPORTANT: This project uses .yml as the standard extension.
+# Do not create config.yaml as it will conflict with this file.
+#
+# Environment Variable Interpolation:
+# Supports bash-style syntax in ${...} placeholders:
+#   ${VAR}           - Use environment variable (empty if unset)
+#   ${VAR:-default}  - Use default if VAR is unset or empty
+#   ${VAR:=default}  - Use and assign default if VAR is unset or empty
+#   ${VAR:?error}    - Error if VAR is unset or empty (required)
+#   ${VAR:+alternate}- Use alternate if VAR is set
+
+llm:
+  # Active provider: openai | anthropic | openai-compatible
+  # Use LLM_PROVIDER env var to override, defaults to openai
+  provider: ${LLM_PROVIDER:-openai}
+
+  # Provider-specific configurations
+  providers:
+    openai:
+      # OpenAI API key (required when using OpenAI provider)
+      apiKey: ${OPENAI_API_KEY}
+      # Default model if not specified
+      model: ${OPENAI_MODEL:-gpt-5.2}
+      # Optional: override API endpoint (e.g., for proxies)
+      baseURL: ${OPENAI_BASE_URL}
+
+    anthropic:
+      # Anthropic API key (required when using Anthropic provider)
+      apiKey: ${ANTHROPIC_API_KEY}
+      # Default model if not specified
+      model: ${ANTHROPIC_MODEL:-claude-opus-4.5}
+      # Optional: override API endpoint
+      baseURL: ${ANTHROPIC_BASE_URL}
+
+    # For Ollama, LM Studio, or other OpenAI-compatible endpoints
+    ollama:
+      apiKey: dummy  # Most local models don't need a real key
+      model: ${OLLAMA_MODEL:-llama3.2:latest}
+      baseURL: ${OLLAMA_BASE_URL:-http://localhost:11434/v1}
+
+  # Concurrent request settings
+  maxConcurrentCalls: ${LLM_MAX_CONCURRENT_CALLS:-3}
+  timeout: ${LLM_TIMEOUT:-120}  # seconds
+
+identity:
+  personaPath: ${IDENTITY_PERSONA_PATH:-data/personas/default.json}
+
+agent:
+  maxActiveTasks: 5
+  maxConcurrentTools: 3
+  maxCognitiveIterations: 10
+  heartbeatInterval: 60  # seconds
+
+memory:
+  dbPath: ${MEMORY_DB_PATH:-data/memory.db}
+  vectorDbPath: ${MEMORY_VECTOR_DB_PATH:-data/vectors}
+
+system:
+  logLevel: ${PEGASUS_LOG_LEVEL:-info}  # debug | info | warn | error
+  dataDir: ${PEGASUS_DATA_DIR:-data}
+
+  # Log output configuration
+  # File logging is always enabled (saved to {dataDir}/logs/pegasus.log)
+  # Set to true to also output logs to console (useful for debugging)
+  logConsoleEnabled: ${PEGASUS_LOG_CONSOLE_ENABLED:-false}

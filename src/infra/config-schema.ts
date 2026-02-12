@@ -53,6 +53,8 @@ export const SettingsSchema = z.object({
   identity: IdentityConfigSchema.default({}),
   logLevel: z.string().default("info"),
   dataDir: z.string().default("data"),
+  // Log output configuration
+  logConsoleEnabled: z.boolean().default(false), // Enable console logging (default: false)
 });
 
 export type LLMConfig = z.infer<typeof LLMConfigSchema>;

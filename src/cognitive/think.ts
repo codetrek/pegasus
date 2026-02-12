@@ -4,8 +4,8 @@
  * For conversation tasks: calls the LLM to generate a direct response.
  * The response text is stored in `reasoning.response` for the Actor to extract.
  */
-import type { LanguageModel, ModelMessage } from "ai";
-import { generateText } from "ai";
+import type { LanguageModel, Message } from "../infra/llm-types.ts";
+import { generateText } from "../infra/llm-utils.ts";
 import { getLogger } from "../infra/logger.ts";
 import type { Persona } from "../identity/persona.ts";
 import { buildSystemPrompt } from "../identity/prompt.ts";
@@ -25,7 +25,7 @@ export class Thinker {
     const system = buildSystemPrompt(this.persona, "think");
 
     // Build conversation history for multi-turn support
-    const messages: ModelMessage[] = context.messages.map((m) => ({
+    const messages: Message[] = context.messages.map((m) => ({
       role: m.role as "user" | "assistant",
       content: String(m.content ?? ""),
     }));

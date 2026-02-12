@@ -11,18 +11,22 @@
     "test:watch": "PEGASUS_LOG_LEVEL=silent bun test --watch",
     "coverage": "PEGASUS_LOG_LEVEL=silent bun test --coverage",
     "check": "bun run typecheck && bun run test",
-    "typecheck": "bunx tsc --noEmit"
+    "typecheck": "bunx tsc --noEmit",
+    "logs": "tail -f data/logs/pegasus.log | pino-pretty",
+    "logs:all": "cat data/logs/pegasus.log* | pino-pretty"
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/js-yaml": "^4.0.9",
     "typescript": "^5"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
-    "ai": "^6.0.78",
+    "js-yaml": "^4.1.1",
     "openai": "^6.21.0",
     "pino": "^9.0.0",
     "pino-pretty": "^13.0.0",
+    "pino-roll": "^4.0.0",
     "zod": "^3.24"
   }
 }

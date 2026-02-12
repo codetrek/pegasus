@@ -38,6 +38,12 @@ export function getSettings(): Settings {
     // Use dynamic import to avoid circular dependency
     const { loadSettings } = require("./config-loader.ts") as typeof import("./config-loader.ts");
     _settings = loadSettings();
+
+    // Reinitialize logger with configuration
+    const { reinitLogger } = require("./logger.ts") as typeof import("./logger.ts");
+    const { join } = require("path") as typeof import("path");
+    const logFile = join(_settings.dataDir, "logs/pegasus.log");
+    reinitLogger(logFile, _settings.logConsoleEnabled);
   }
   return _settings;
 }

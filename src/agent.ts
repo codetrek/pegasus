@@ -6,7 +6,7 @@
  *
  * Agent itself holds NO task execution state. All state lives in TaskFSM.
  */
-import type { LanguageModel } from "ai";
+import type { LanguageModel } from "./infra/llm-types.ts";
 import type { Event } from "./events/types.ts";
 import { EventType, createEvent } from "./events/types.ts";
 import { EventBus } from "./events/bus.ts";

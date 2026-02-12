@@ -4,7 +4,7 @@
  * Uses Bun's native readline for zero-dependency terminal interaction.
  */
 import { createInterface } from "readline";
-import type { LanguageModel } from "ai";
+import type { LanguageModel } from "./infra/llm-types.ts";
 import { Agent } from "./agent.ts";
 import { loadPersona } from "./identity/persona.ts";
 import { getSettings, getActiveProviderConfig } from "./infra/config.ts";

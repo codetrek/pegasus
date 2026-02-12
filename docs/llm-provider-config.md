@@ -1,49 +1,49 @@
-# LLM Provider Configuration Design
+# LLM Provider Configuration
 
-## 设计理念
+## Overview
 
-提供统一的抽象接口配置多个 LLM provider，每个 provider 可以独立配置 API key、model 和 baseURL。
+Pegasus provides a unified abstraction for configuring multiple LLM providers. Each provider can have independent configuration for API key, model, and base URL.
 
-## 核心特性
+## Core Features
 
 ### 1. Provider-Specific Configuration
 
-每个 provider 有独立的配置命名空间：
+Each provider has its own configuration namespace:
 
 ```bash
 # OpenAI
-OPENAI_API_KEY=...
-OPENAI_MODEL=...
-OPENAI_BASE_URL=...  # Optional
+OPENAI_API_KEY=sk-proj-...
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_BASE_URL=https://api.openai.com/v1  # Optional
 
 # Anthropic
-ANTHROPIC_API_KEY=...
-ANTHROPIC_MODEL=...
-ANTHROPIC_BASE_URL=...  # Optional
+ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_MODEL=claude-sonnet-4
+ANTHROPIC_BASE_URL=https://api.anthropic.com  # Optional
 ```
 
-### 2. 智能默认值
+### 2. Smart Defaults
 
-- **baseURL**: 如果不设置，使用官方 API 地址
-- **model**: 如果 provider-specific 不设置，使用全局 `LLM_MODEL`
+- **baseURL**: Uses official API endpoint if not specified
+- **model**: Falls back to global `LLM_MODEL` if provider-specific model not set
 
-### 3. 多 Provider 共存
+### 3. Multi-Provider Support
 
-可以同时配置多个 provider，通过 `LLM_PROVIDER` 切换：
+Configure multiple providers simultaneously and switch between them via `LLM_PROVIDER`:
 
 ```bash
-LLM_PROVIDER=openai  # 改这里切换
+LLM_PROVIDER=openai  # Switch provider here
 
 OPENAI_API_KEY=sk-proj-...
 OPENAI_MODEL=gpt-4o-mini
 
 ANTHROPIC_API_KEY=sk-ant-...
-ANTHROPIC_MODEL=claude-sonnet-4-20250514
+ANTHROPIC_MODEL=claude-sonnet-4
 ```
 
-### 4. OpenAI-Compatible 支持
+### 4. OpenAI-Compatible Endpoints
 
-使用 `LLM_BASE_URL` 配置 Ollama、LM Studio 等：
+Support for Ollama, LM Studio, and other OpenAI-compatible services:
 
 ```bash
 LLM_PROVIDER=openai-compatible
@@ -51,40 +51,43 @@ LLM_BASE_URL=http://localhost:11434/v1
 OPENAI_MODEL=llama3.2:latest
 ```
 
-## 配置优先级
+## Configuration Priority
 
-以 OpenAI 为例：
+For OpenAI provider:
 
 ```
 OPENAI_MODEL > LLM_MODEL (fallback)
-OPENAI_API_KEY > LLM_API_KEY (legacy)
-OPENAI_BASE_URL > (官方 API - default)
+OPENAI_API_KEY > LLM_API_KEY (legacy fallback)
+OPENAI_BASE_URL > (official API endpoint as default)
 ```
 
-## 实现细节
+## Configuration Schema
 
-### 配置 Schema
+### Provider Config
 
 ```typescript
-// Provider-specific config
 ProviderConfigSchema = {
   apiKey: string | undefined,
   baseURL: string | undefined,
   model: string | undefined,
 }
+```
 
-// LLM config
+### LLM Config
+
+```typescript
 LLMConfigSchema = {
   provider: "openai" | "anthropic" | "openai-compatible",
   model: string,  // Global default
   openai: ProviderConfigSchema,
   anthropic: ProviderConfigSchema,
   baseURL: string | undefined,  // For openai-compatible
-  ...
+  maxConcurrentCalls: number,
+  timeout: number,
 }
 ```
 
-### Helper Function
+## Helper Function
 
 ```typescript
 function getActiveProviderConfig(settings: Settings): {
@@ -94,30 +97,30 @@ function getActiveProviderConfig(settings: Settings): {
 }
 ```
 
-根据 `settings.llm.provider` 返回当前 provider 的配置，自动处理 fallback。
+Returns configuration for the active provider based on `settings.llm.provider`, automatically handling fallbacks.
 
-## 使用示例
+## Usage Examples
 
-### Example 1: OpenAI (简单)
+### Example 1: OpenAI (Simple)
 
 ```bash
 LLM_PROVIDER=openai
 OPENAI_API_KEY=sk-proj-...
 ```
 
-结果：
-- Model: `gpt-4o-mini` (默认值)
-- BaseURL: 官方 API
+Result:
+- Model: `gpt-4o-mini` (default)
+- BaseURL: Official OpenAI API
 
-### Example 2: Anthropic (自定义 model)
+### Example 2: Anthropic (Custom Model)
 
 ```bash
 LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-...
-ANTHROPIC_MODEL=claude-opus-4-20250514
+ANTHROPIC_MODEL=claude-opus-4
 ```
 
-### Example 3: OpenAI + 自定义 baseURL
+### Example 3: OpenAI with Proxy
 
 ```bash
 LLM_PROVIDER=openai
@@ -125,7 +128,7 @@ OPENAI_API_KEY=your-key
 OPENAI_BASE_URL=https://your-proxy.com/v1
 ```
 
-### Example 4: Ollama (本地)
+### Example 4: Ollama (Local)
 
 ```bash
 LLM_PROVIDER=openai-compatible
@@ -133,50 +136,50 @@ LLM_BASE_URL=http://localhost:11434/v1
 OPENAI_MODEL=llama3.2:latest
 ```
 
-### Example 5: 多 Provider 快速切换
+### Example 5: Quick Provider Switching
 
 ```bash
-# 配置多个
-OPENAI_API_KEY=...
-ANTHROPIC_API_KEY=...
+# Configure multiple providers
+OPENAI_API_KEY=sk-proj-...
+ANTHROPIC_API_KEY=sk-ant-...
 
-# 只需改这一行切换
+# Switch by changing this line only
 LLM_PROVIDER=openai  # or anthropic
 ```
 
-## 优势
+## Advantages
 
-### vs 之前的设计
+### Comparison with Generic Configuration
 
-**之前**:
+**Before (Generic)**:
 ```bash
 LLM_PROVIDER=openai
 LLM_API_KEY=...
 LLM_MODEL=...
-LLM_BASE_URL=...  # 不清楚是给哪个 provider
+LLM_BASE_URL=...  # Unclear which provider this is for
 ```
 
-**现在**:
+**Now (Provider-Specific)**:
 ```bash
 LLM_PROVIDER=openai
 OPENAI_API_KEY=...
 OPENAI_MODEL=...
-OPENAI_BASE_URL=...  # 明确是 OpenAI 的
+OPENAI_BASE_URL=...  # Clearly for OpenAI
 ```
 
-### 好处
+### Benefits
 
-1. **清晰性** - 每个配置项明确属于哪个 provider
-2. **灵活性** - 可以同时配置多个 provider，快速切换
-3. **扩展性** - 添加新 provider 不影响现有配置
-4. **向后兼容** - `LLM_API_KEY` 仍然可用作 fallback
-5. **智能默认** - baseURL 默认官方地址，model 有全局 fallback
+1. **Clarity** - Each configuration explicitly belongs to a specific provider
+2. **Flexibility** - Configure multiple providers and switch between them easily
+3. **Extensibility** - Adding new providers doesn't affect existing configuration
+4. **Backward Compatibility** - `LLM_API_KEY` still works as fallback
+5. **Smart Defaults** - BaseURL defaults to official endpoint, model has global fallback
 
 ## Migration Guide
 
-### 从旧版本迁移
+### From Previous Version
 
-如果你之前使用：
+If you previously used:
 
 ```bash
 LLM_PROVIDER=openai
@@ -184,7 +187,7 @@ LLM_API_KEY=sk-proj-...
 LLM_MODEL=gpt-4o
 ```
 
-现在推荐（但旧的仍然有效）：
+Now recommended (but old format still works):
 
 ```bash
 LLM_PROVIDER=openai
@@ -192,20 +195,23 @@ OPENAI_API_KEY=sk-proj-...
 OPENAI_MODEL=gpt-4o
 ```
 
-或者保持旧配置不变（通过 fallback 仍然有效）。
+Legacy configuration continues to work through fallback mechanism.
 
-## 未来扩展
+## Extending with New Providers
 
-可以轻松添加新 provider：
+Adding a new provider is straightforward:
 
+**1. Update Schema**:
 ```typescript
-// 1. Add to provider enum
+// Add to provider enum
 provider: "openai" | "anthropic" | "gemini" | ...
 
-// 2. Add config namespace
+// Add config namespace
 gemini: ProviderConfigSchema.default({})
+```
 
-// 3. Update loader
+**2. Update Config Loader**:
+```typescript
 gemini: {
   apiKey: env["GEMINI_API_KEY"] || env["LLM_API_KEY"],
   baseURL: env["GEMINI_BASE_URL"],
@@ -213,10 +219,25 @@ gemini: {
 }
 ```
 
-用户配置：
-
+**3. User Configuration**:
 ```bash
 LLM_PROVIDER=gemini
 GEMINI_API_KEY=...
 GEMINI_MODEL=gemini-pro
 ```
+
+## Environment Variables Reference
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `LLM_PROVIDER` | Active provider | `openai` |
+| `LLM_MODEL` | Global model fallback | `gpt-4o-mini` |
+| `LLM_BASE_URL` | Base URL for openai-compatible | - |
+| `OPENAI_API_KEY` | OpenAI API key | - |
+| `OPENAI_MODEL` | OpenAI model | Uses `LLM_MODEL` |
+| `OPENAI_BASE_URL` | OpenAI API endpoint | Official API |
+| `ANTHROPIC_API_KEY` | Anthropic API key | - |
+| `ANTHROPIC_MODEL` | Anthropic model | Uses `LLM_MODEL` |
+| `ANTHROPIC_BASE_URL` | Anthropic API endpoint | Official API |
+| `LLM_MAX_CONCURRENT_CALLS` | Max concurrent requests | `3` |
+| `LLM_TIMEOUT` | Request timeout (seconds) | `120` |

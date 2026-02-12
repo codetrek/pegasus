@@ -22,6 +22,13 @@ IMMEDIATELY STOP and ask user when:
 - Start coding without a **confirmed plan** from the user.
 - Adding "Generated with Claude Code", "via Happy", or any co-author credits in commit messages.
 - **Git force push**: Never use `git push --force` or `git push -f`. Use `git push --force-with-lease` only when absolutely necessary and with explicit user consent.
+- **NEVER push directly to main**: All changes must go through Pull Request workflow:
+  1. Commit to feature branch
+  2. Push feature branch to remote
+  3. Create Pull Request
+  4. Wait for CI to pass
+  5. Merge to main (CI passed)
+  6. DO NOT merge or push to main directly under any circumstances
 
 ## 🔄 DECISION TREE
 

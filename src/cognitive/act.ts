@@ -4,7 +4,7 @@
  * For "respond" action: extracts the LLM-generated response from context.reasoning.
  * For other actions: stub implementation (tool calling added in M3).
  */
-import type { LanguageModel } from "ai";
+import type { LanguageModel } from "../infra/llm-types.ts";
 import { getLogger } from "../infra/logger.ts";
 import type { Persona } from "../identity/persona.ts";
 import type { TaskContext, PlanStep, ActionResult } from "../task/context.ts";
