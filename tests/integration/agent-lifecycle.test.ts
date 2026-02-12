@@ -4,7 +4,7 @@ import type { AgentDeps } from "@pegasus/agent.ts";
 import { createEvent, EventType } from "@pegasus/events/types.ts";
 import { TaskState } from "@pegasus/task/states.ts";
 import { SettingsSchema } from "@pegasus/infra/config.ts";
-import type { LanguageModel } from "ai";
+import type { LanguageModel } from "@pegasus/infra/llm-types.ts";
 import type { Persona } from "@pegasus/identity/persona.ts";
 
 /** Minimal mock LanguageModel that returns stub text. */
@@ -16,22 +16,16 @@ function createMockModel(): LanguageModel {
     keyEntities: [],
   });
   return {
-    specificationVersion: "v2",
     provider: "test",
     modelId: "test-model",
-    defaultObjectGenerationMode: "json",
-    doGenerate: async () => ({
-      text: responseText,
-      content: [{ type: "text" as const, text: responseText }],
-      finishReason: "stop" as const,
-      usage: { inputTokens: 10, outputTokens: 10 },
-      rawCall: { rawPrompt: "", rawSettings: {} },
-      response: { id: "test", timestamp: new Date(), modelId: "test-model" },
-    }),
-    doStream: async () => {
-      throw new Error("Not implemented");
+    async generate() {
+      return {
+        text: responseText,
+        finishReason: "stop",
+        usage: { promptTokens: 10, completionTokens: 10 },
+      };
     },
-  } as unknown as LanguageModel;
+  };
 }
 
 const testPersona: Persona = {

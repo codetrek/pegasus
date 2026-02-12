@@ -4,7 +4,7 @@
  * For conversation tasks: generates a single "respond" step (no LLM call needed).
  * Complex multi-step planning will be added in M4.
  */
-import type { LanguageModel } from "ai";
+import type { LanguageModel } from "../infra/llm-types.ts";
 import { getLogger } from "../infra/logger.ts";
 import type { Persona } from "../identity/persona.ts";
 import type { TaskContext } from "../task/context.ts";

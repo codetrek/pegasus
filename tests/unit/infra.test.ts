@@ -22,7 +22,7 @@ import {
   MemoryError,
   ToolError,
 } from "@pegasus/infra/errors.ts";
-import { getLogger, rootLogger, resolveTransport } from "@pegasus/infra/logger.ts";
+import { getLogger, rootLogger, resolveTransports } from "@pegasus/infra/logger.ts";
 
 // ── Config ──────────────────────────────────────
 
@@ -249,22 +249,23 @@ describe("Logger", () => {
   });
 });
 
-describe("resolveTransport", () => {
-  test("returns pino-pretty transport for non-production", () => {
-    const transport = resolveTransport("development");
+describe("resolveTransports", () => {
+  test("returns file transport for production", () => {
+    const transport = resolveTransports("production", "test.log", false);
     expect(transport).toBeDefined();
-    expect(transport!.target).toBe("pino-pretty");
+    expect((transport as any).target).toBe("pino-roll");
   });
 
-  test("returns pino-pretty transport when NODE_ENV is undefined", () => {
-    const transport = resolveTransport(undefined);
+  test("returns multi-transport when console enabled", () => {
+    const transport = resolveTransports("development", "test.log", true);
     expect(transport).toBeDefined();
-    expect(transport!.target).toBe("pino-pretty");
+    expect((transport as any).targets).toBeDefined();
+    expect((transport as any).targets).toHaveLength(2);
   });
 
-  test("returns undefined for production", () => {
-    const transport = resolveTransport("production");
-    expect(transport).toBeUndefined();
+  test("always includes file transport", () => {
+    const transport = resolveTransports("production", "test.log", false);
+    expect(transport).toBeDefined();
   });
 });
 

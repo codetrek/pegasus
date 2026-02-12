@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { LanguageModel } from "ai";
+import type { LanguageModel } from "@pegasus/infra/llm-types.ts";
 import type { Persona } from "@pegasus/identity/persona.ts";
 import { createTaskContext } from "@pegasus/task/context.ts";
 import type { PlanStep, ActionResult } from "@pegasus/task/context.ts";
@@ -21,22 +21,16 @@ const testPersona: Persona = {
 
 function createMockModel(responseText: string): LanguageModel {
   return {
-    specificationVersion: "v2",
     provider: "test",
     modelId: "test-model",
-    defaultObjectGenerationMode: "json",
-    doGenerate: async () => ({
-      text: responseText,
-      content: [{ type: "text" as const, text: responseText }],
-      finishReason: "stop" as const,
-      usage: { inputTokens: 10, outputTokens: 10 },
-      rawCall: { rawPrompt: "", rawSettings: {} },
-      response: { id: "test", timestamp: new Date(), modelId: "test-model" },
-    }),
-    doStream: async () => {
-      throw new Error("Not implemented");
+    async generate() {
+      return {
+        text: responseText,
+        finishReason: "stop",
+        usage: { promptTokens: 10, completionTokens: 10 },
+      };
     },
-  } as unknown as LanguageModel;
+  };
 }
 
 function makeActionResult(overrides: Partial<ActionResult> = {}): ActionResult {

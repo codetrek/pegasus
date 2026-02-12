@@ -4,8 +4,8 @@
  * Calls the LLM to analyse the user's message and produce a structured
  * perception (task type, intent, urgency, key entities).
  */
-import type { LanguageModel } from "ai";
-import { generateText } from "ai";
+import type { LanguageModel } from "../infra/llm-types.ts";
+import { generateText } from "../infra/llm-utils.ts";
 import { getLogger } from "../infra/logger.ts";
 import type { Persona } from "../identity/persona.ts";
 import { buildSystemPrompt } from "../identity/prompt.ts";
@@ -27,7 +27,7 @@ export class Perceiver {
     const { text } = await generateText({
       model: this.model,
       system,
-      prompt: context.inputText,
+      messages: [{ role: "user", content: context.inputText }],
     });
 
     let perception: Record<string, unknown>;

@@ -20,15 +20,25 @@ docs/plans
 data/
 !data/personas/
 
+# Logs
+logs/
+*.log
+
 # Environment & Config
 .env
 .env.*
 !.env.example
 !.env.ollama
 config.json
+config.yaml
 config.local.json
+config.local.yaml
+config.local.yml
 .pegasus.json
+.pegasus.yaml
+.pegasus.yml
 !config.example.json
+!config.yml
 
 # OS
 .DS_Store

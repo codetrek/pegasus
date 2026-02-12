@@ -3,7 +3,7 @@
  * Works with OpenAI, LiteLLM, and other OpenAI-compatible services.
  */
 import OpenAI from "openai";
-import type { LanguageModel } from "ai";
+import type { LanguageModel } from "./llm-types.ts";
 
 export interface OpenAIClientConfig {
   apiKey: string;
@@ -13,7 +13,7 @@ export interface OpenAIClientConfig {
 }
 
 /**
- * Create an AI SDK compatible LanguageModel from OpenAI SDK client.
+ * Create a LanguageModel from OpenAI SDK client.
  */
 export function createOpenAICompatibleModel(config: OpenAIClientConfig): LanguageModel {
   const client = new OpenAI({
@@ -22,72 +22,48 @@ export function createOpenAICompatibleModel(config: OpenAIClientConfig): Languag
     defaultHeaders: config.headers,
   });
 
-  const model: LanguageModel = {
-    specificationVersion: "v2",
+  return {
     provider: "openai",
     modelId: config.model,
 
-    async doGenerate(options: any) {
-      try {
-        const response = await client.chat.completions.create({
-          model: config.model,
-          messages: options.prompt,
-          temperature: options.temperature,
-          max_tokens: options.maxTokens,
-          top_p: options.topP,
-          stream: false,
-        });
+    async generate(options) {
+      // Build messages array with system prompt if provided
+      const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
 
-        const choice = response.choices[0];
-        if (!choice) {
-          throw new Error("No response from model");
-        }
-        const message = choice.message;
-
-        return {
-          text: message.content || "",
-          content: [{ type: "text", text: message.content || "" }],
-          finishReason: choice.finish_reason as any,
-          usage: {
-            promptTokens: response.usage?.prompt_tokens || 0,
-            completionTokens: response.usage?.completion_tokens || 0,
-          },
-          rawResponse: {
-            headers: {},
-          },
-          warnings: [],
-          logprobs: undefined,
-          rawCall: {
-            rawPrompt: {
-              messages: options.prompt,
-            },
-            rawSettings: {},
-          },
-        };
-      } catch (error) {
-        throw error;
+      if (options.system) {
+        messages.push({ role: "system", content: options.system });
       }
-    },
 
-    async doStream(options: any) {
-      const stream = await client.chat.completions.create({
+      // Add conversation messages
+      for (const msg of options.messages) {
+        messages.push({
+          role: msg.role as "user" | "assistant",
+          content: msg.content,
+        });
+      }
+
+      const response = await client.chat.completions.create({
         model: config.model,
-        messages: options.prompt,
+        messages,
         temperature: options.temperature,
         max_tokens: options.maxTokens,
         top_p: options.topP,
-        stream: true,
+        stream: false,
       });
 
+      const choice = response.choices[0];
+      if (!choice) {
+        throw new Error("No response from OpenAI model");
+      }
+
       return {
-        stream: stream as any,
-        rawResponse: {
-          headers: {},
+        text: choice.message.content || "",
+        finishReason: choice.finish_reason,
+        usage: {
+          promptTokens: response.usage?.prompt_tokens || 0,
+          completionTokens: response.usage?.completion_tokens || 0,
         },
-        warnings: [],
       };
     },
-  } as any;
-
-  return model;
+  };
 }
