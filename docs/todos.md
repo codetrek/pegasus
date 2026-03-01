@@ -68,6 +68,7 @@ Tracked features, improvements, and ideas — what's done and what's next.
 ### Memory System
 - [x] Memory injection: load facts fully + episodes summary into session on start and after compact
 - [x] PostTaskReflector: async memory extraction after task completion (facts + episodes)
+- [x] MainAgent reflection: extract facts/episodes during session compact (fire-and-forget)
 
 ## Planned
 
@@ -84,10 +85,6 @@ Tracked features, improvements, and ideas — what's done and what's next.
 - [ ] Heartbeat system: periodic poll to check if anything needs attention
 - [ ] Cron/scheduled tasks: time-based task triggers (reminders, periodic checks)
 - [ ] Wake events: external triggers (file system changes, webhook callbacks)
-
-### MainAgent Reflection
-- [ ] Reflection during session compact: extract facts/episodes while summarizing
-- [ ] MainAgent sees user preferences, identity info — most valuable facts come from here
 
 ### Multi-User Identity & Permissions
 - [ ] Owner ID hashing: HMAC-SHA256 hashes instead of raw IDs in system prompt
