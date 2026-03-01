@@ -75,7 +75,7 @@ export class AITaskTypeRegistry {
    */
   getMetadataForPrompt(): string {
     const lines: string[] = [
-      "## Available Subagent Types",
+      "## Available AI Task Types",
       "",
       "When calling spawn_task(), choose the right type:",
       "",
