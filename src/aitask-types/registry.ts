@@ -1,20 +1,20 @@
 /**
- * SubagentRegistry — manage discovered subagent type definitions.
+ * AITaskTypeRegistry — manage discovered AI task type definitions.
  *
  * Handles priority resolution (user > builtin), metadata listing
  * for system prompt injection, and tool/prompt resolution.
  */
 import { getLogger } from "../infra/logger.ts";
-import type { SubagentDefinition } from "./types.ts";
+import type { AITaskTypeDefinition } from "./types.ts";
 import { allTaskTools } from "../tools/builtins/index.ts";
 
-const logger = getLogger("subagent_registry");
+const logger = getLogger("aitask_type_registry");
 
-export class SubagentRegistry {
-  private defs = new Map<string, SubagentDefinition>();
+export class AITaskTypeRegistry {
+  private defs = new Map<string, AITaskTypeDefinition>();
 
-  /** Register subagents with priority resolution. User overrides builtin. */
-  registerMany(defs: SubagentDefinition[]): void {
+  /** Register AI task types with priority resolution. User overrides builtin. */
+  registerMany(defs: AITaskTypeDefinition[]): void {
     for (const def of defs) {
       const existing = this.defs.get(def.name);
       if (existing && existing.source === "user" && def.source === "builtin") {
@@ -22,23 +22,23 @@ export class SubagentRegistry {
       }
       this.defs.set(def.name, def);
       if (existing) {
-        logger.info({ name: def.name, source: def.source }, "subagent_override");
+        logger.info({ name: def.name, source: def.source }, "aitask_type_override");
       }
     }
   }
 
-  /** Get subagent definition by name. Returns null if not found. */
-  get(name: string): SubagentDefinition | null {
+  /** Get AI task type definition by name. Returns null if not found. */
+  get(name: string): AITaskTypeDefinition | null {
     return this.defs.get(name) ?? null;
   }
 
-  /** Check if a subagent type exists. */
+  /** Check if an AI task type exists. */
   has(name: string): boolean {
     return this.defs.has(name);
   }
 
   /**
-   * Get resolved tool names for a subagent type.
+   * Get resolved tool names for an AI task type.
    * "*" expands to all task tool names.
    * Falls back to "*" (all tools) for unknown types.
    */
@@ -52,7 +52,7 @@ export class SubagentRegistry {
   }
 
   /**
-   * Get the system prompt body for a subagent type.
+   * Get the system prompt body for an AI task type.
    * Returns empty string for unknown types (base persona prompt only).
    */
   getPrompt(name: string): string {
@@ -60,8 +60,9 @@ export class SubagentRegistry {
   }
 
   /**
-   * Get the model field for a subagent type.
-   * Returns undefined if the subagent has no model declared or is unknown.
+  /**
+   * Get the model field for an AI task type.
+   * Returns undefined if the AI task type has no model declared or is unknown.
    * Value can be a tier name ("fast") or a model spec ("openai/gpt-4o").
    */
   getModel(name: string): string | undefined {
@@ -69,8 +70,8 @@ export class SubagentRegistry {
   }
 
   /**
-   * Generate subagent metadata for MainAgent system prompt.
-   * Lists available subagent types with their descriptions.
+   * Generate AI task type metadata for MainAgent system prompt.
+   * Lists available AI task types with their descriptions.
    */
   getMetadataForPrompt(): string {
     const lines: string[] = [
@@ -87,8 +88,8 @@ export class SubagentRegistry {
     return lines.join("\n");
   }
 
-  /** List all registered subagent definitions. */
-  listAll(): SubagentDefinition[] {
+  /** List all registered AI task type definitions. */
+  listAll(): AITaskTypeDefinition[] {
     return [...this.defs.values()];
   }
 }

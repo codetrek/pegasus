@@ -28,9 +28,9 @@ export type PromptMode = "main" | "task";
 export interface PromptOptions {
   mode?: PromptMode;
   persona: Persona;
-  /** Task mode: subagent-specific prompt from SUBAGENT.md body */
+  /** Task mode: AI task type-specific prompt from AITASK.md body */
   subagentPrompt?: string;
-  /** Main mode: subagent type metadata from SubagentRegistry */
+  /** Main mode: AI task type metadata from AITaskTypeRegistry */
   subagentMetadata?: string;
   /** Main mode: skill metadata from SkillRegistry */
   skillMetadata?: string;

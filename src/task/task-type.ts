@@ -1,5 +1,5 @@
 /**
- * TaskType — subagent specialization types.
+ * TaskType — AI task specialization types.
  *
  * Each type provides a different tool set and system prompt:
  * - general: full capabilities (default)

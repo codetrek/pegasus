@@ -29,7 +29,7 @@ import { getContextWindowSize } from "../session/context-windows.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import path from "node:path";
 import { SkillRegistry, loadAllSkills } from "../skills/index.ts";
-import { SubagentRegistry, loadAllSubagents } from "../subagents/index.ts";
+import { AITaskTypeRegistry, loadAITaskTypeDefinitions } from "../aitask-types/index.ts";
 import {
   refreshOpenAICodexToken,
   loginGitHubCopilot,
@@ -83,7 +83,7 @@ export class MainAgent {
   private lastPromptTokens = 0;
   private tokenCounter = new EstimateCounter();
   private skillRegistry: SkillRegistry;
-  private subagentRegistry: SubagentRegistry;
+  private aiTaskTypeRegistry: AITaskTypeRegistry;
   private projectManager: ProjectManager;
   private projectAdapter: ProjectAdapter;
   private systemPrompt: string = "";
@@ -118,7 +118,7 @@ export class MainAgent {
 
     // Skill system
     this.skillRegistry = new SkillRegistry();
-    this.subagentRegistry = new SubagentRegistry();
+    this.aiTaskTypeRegistry = new AITaskTypeRegistry();
 
     // Projects
     const projectsDir = path.join(this.settings.dataDir, "projects");
@@ -224,12 +224,12 @@ export class MainAgent {
     this.skillRegistry.registerMany(loadAllSkills(builtinSkillDir, userSkillDir));
     logger.info({ skillCount: this.skillRegistry.listAll().length }, "skills_loaded");
 
-    // Load subagent definitions from builtin and user directories
+    // Load AI task type definitions from builtin and user directories
     const builtinSubagentDir = path.join(process.cwd(), "subagents");
     const userSubagentDir = path.join(this.settings.dataDir, "subagents");
-    this.subagentRegistry.registerMany(loadAllSubagents(builtinSubagentDir, userSubagentDir));
-    this.agent.setSubagentRegistry(this.subagentRegistry);
-    logger.info({ subagentCount: this.subagentRegistry.listAll().length }, "subagents_loaded");
+    this.aiTaskTypeRegistry.registerMany(loadAITaskTypeDefinitions(builtinSubagentDir, userSubagentDir));
+    this.agent.setAITaskTypeRegistry(this.aiTaskTypeRegistry);
+    logger.info({ aiTaskTypeCount: this.aiTaskTypeRegistry.listAll().length }, "aitask_types_loaded");
 
     // Load projects
     this.projectManager.loadAll();
@@ -1126,8 +1126,8 @@ export class MainAgent {
   // ── System prompt ──
 
   private _buildSystemPrompt(): string {
-    // Get subagent metadata for prompt
-    const subagentMetadata = this.subagentRegistry.getMetadataForPrompt();
+    // Get AI task type metadata for prompt
+    const subagentMetadata = this.aiTaskTypeRegistry.getMetadataForPrompt();
 
     // Build project metadata for prompt
     const projectMetadata = this._buildProjectMetadata();

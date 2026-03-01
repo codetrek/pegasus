@@ -79,7 +79,7 @@ export interface TaskContext {
   inputMetadata: Record<string, unknown>;
   source: string;
 
-  // Task type (subagent specialization)
+  // Task type (AI task specialization)
   taskType: string;
 
   // Cognitive stage outputs
