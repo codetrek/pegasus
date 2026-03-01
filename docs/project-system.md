@@ -10,17 +10,17 @@ The key mental model: **one person, many projects**. MainAgent is the single bra
 
 | Concept | What It Is | Lifecycle | Context |
 |---------|-----------|-----------|---------|
-| **subagent** | One-off task executor | Created → done → discarded | Inherits from MainAgent |
+| **AITask** | One-off task executor | Created → done → discarded | Inherits from MainAgent |
 | **Project** | Persistent task space | active ⇄ suspended → completed → archived | Own session, memory, skills |
 | **MainAgent** | The brain | Always running | Global persona + memory |
 
-### Why Not Just Subagents?
+### Why Not Just AITasks?
 
-Subagents are fire-and-forget: MainAgent describes a task, a subagent executes it, returns a result, and disappears. This works for atomic tasks ("search for X", "write function Y") but falls apart for ongoing work that spans days or weeks:
+AITasks are fire-and-forget: MainAgent describes a task, an AITask executes it, returns a result, and disappears. This works for atomic tasks ("search for X", "write function Y") but falls apart for ongoing work that spans days or weeks:
 
-- **No continuity**: each subagent starts from scratch. Previous context is lost.
-- **No accumulation**: a subagent cannot learn and remember across multiple interactions.
-- **No initiative**: a subagent cannot proactively report status or ask for help.
+- **No continuity**: each AITask starts from scratch. Previous context is lost.
+- **No accumulation**: an AITask cannot learn and remember across multiple interactions.
+- **No initiative**: an AITask cannot proactively report status or ask for help.
 
 Projects solve all three problems.
 
@@ -43,11 +43,11 @@ MainAgent (brain, main thread)
 │   │       ├── Local ToolRegistry + ToolExecutor
 │   │       ├── Local EventBus + TaskFSM
 │   │       ├── Local SessionStore + Memory
-│   │       └── spawn_subagent (can delegate sub-tasks)
+│   │       └── spawn_task (can delegate sub-tasks)
 │   ├── Worker "social-media"
 │   │   └── ProjectAgent instance
 │   └── ... (one Worker per active Project)
-└── spawn_subagent (one-off, existing mechanism unchanged)
+└── spawn_task (one-off, existing mechanism unchanged)
 ```
 
 ### Key Design Decisions
@@ -63,7 +63,7 @@ MainAgent (brain, main thread)
 | 7 | Communication | **Channel Adapter pattern** | Single ProjectAdapter manages all Workers, routes by channelId |
 | 8 | Initial context | **PROJECT.md definition file** | MainAgent generates it at creation time; injected as system prompt |
 | 9 | LLM model | **Per-Project configurable** | In PROJECT.md frontmatter; Worker reads and overrides global config |
-| 10 | Tools | **Base tools + project-specific skills + spawn_subagent** | Projects can delegate sub-tasks just like MainAgent |
+| 10 | Tools | **Base tools + project-specific skills + spawn_task** | Projects can delegate sub-tasks just like MainAgent |
 | 11 | Runtime isolation | **Bun Worker thread per active Project** | Crash isolation, parallel execution, memory separation |
 | 12 | LLM calls | **Main thread only** | Worker uses proxy LanguageModel; unified credentials, concurrency, cost tracking |
 | 13 | Tool execution | **Worker-local** | File I/O, HTTP, etc. run in Worker thread; parallel, isolated |
@@ -106,7 +106,7 @@ data/projects/
 
 ## PROJECT.md Format
 
-Follows the same frontmatter + markdown body pattern as SUBAGENT.md and SKILL.md.
+Follows the same frontmatter + markdown body pattern as AITASK.md and SKILL.md.
 
 ```yaml
 ---
@@ -370,7 +370,7 @@ Main Thread (MainAgent)
 │   └── Worker Thread 2 (Project "social-media")
 │       └── ... (same structure)
 │
-└── Main thread Agent (for MainAgent's own subagents, unchanged)
+└── Main thread Agent (for MainAgent's own tasks, unchanged)
 ```
 
 ### Worker Bootstrap
@@ -468,11 +468,11 @@ Note: MainAgent communicates with active Projects via the existing `reply()` too
 
 ## Project Agent Tools
 
-A Project Agent has a similar tool set to a `general` subagent, plus:
+A Project Agent has a similar tool set to a `general` AITask, plus:
 
 | Tool | Description |
 |------|-------------|
-| `spawn_subagent` | Delegate one-off sub-tasks (same as MainAgent) |
+| `spawn_task` | Delegate one-off sub-tasks (same as MainAgent) |
 | `notify` | Send messages to MainAgent (via Worker postMessage) |
 | `memory_*` | Read/write its own memory (scoped to project directory) |
 | `read_file`, `write_file`, etc. | File operations (scoped to workdir if specified) |
@@ -480,7 +480,7 @@ A Project Agent has a similar tool set to a `general` subagent, plus:
 
 **Not available**:
 - `reply()` — Project Agent doesn't talk to users directly; it communicates through MainAgent
-- `create_project` — Projects don't create sub-projects (use subagents instead)
+- `create_project` — Projects don't create sub-projects (use tasks instead)
 
 ## Project Discovery and Startup
 
@@ -493,7 +493,7 @@ On MainAgent startup:
 
 **Crash recovery**: if Pegasus process crashes and restarts, Projects with `status: active` in their PROJECT.md are automatically resumed. The Worker is re-spawned, and SessionStore applies the same JSONL repair logic as MainAgent (inject cancellation results for incomplete tool calls). TaskPersister marks any interrupted pending tasks as FAILED.
 
-This mirrors how subagents and skills are discovered — file scanning, no index file.
+This mirrors how tasks and skills are discovered — file scanning, no index file.
 
 ## Session Management Within Projects
 
@@ -527,9 +527,9 @@ data/projects/frontend-redesign/      ← Project memory (scoped)
 
 ## Relationship to Existing Systems
 
-### Subagents (unchanged)
+### AITasks (unchanged)
 
-The existing subagent system (`spawn_subagent`, TaskFSM, etc.) is unchanged. Both MainAgent and Project Agents can spawn subagents for one-off tasks.
+The existing AITask system (`spawn_task`, TaskFSM, etc.) is unchanged. Both MainAgent and Project Agents can spawn tasks for one-off work.
 
 ### Skills
 

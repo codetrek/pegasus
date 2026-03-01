@@ -77,7 +77,7 @@ pegasus/
 │   ├── projects/        # Project system (Worker threads)
 │   ├── session/         # Session persistence + compaction
 │   ├── skills/          # Skill loader + registry
-│   ├── subagents/       # Task type specialization (SUBAGENT.md)
+│   ├── aitask-types/   # Task type specialization (AITASK.md)
 │   ├── task/            # TaskFSM + TaskContext + TaskPersister
 │   ├── tools/           # Tool registry, executor, builtins
 │   └── cli.ts           # CLI entry point
@@ -102,7 +102,7 @@ pegasus/
 - [Event System](./events.md) — EventType, EventBus, priority queue
 - [Task FSM](./task-fsm.md) — states, transitions, suspend/resume
 - [Task Persistence](./task-persistence.md) — JSONL event logs, replay
-- [Task Types](./task-types.md) — subagent specialization (SUBAGENT.md)
+- [AITask Types](./aitask-types.md) — task type specialization (AITASK.md)
 
 ### LLM & Model
 - [Multi-Model](./multi-model.md) — per-role model config, ModelRegistry

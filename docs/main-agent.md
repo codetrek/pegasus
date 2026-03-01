@@ -2,7 +2,7 @@
 
 Main Agent is Pegasus's **inner voice** — its continuous mental activity. Like a human's inner monologue when thinking through a problem, Main Agent's LLM output is self-talk: reasoning, weighing options, planning next steps. The user never sees this internal dialogue directly.
 
-All outward behavior is through explicit tool calls. When Main Agent wants to speak to the user, it calls the `reply` tool. When it needs complex work done, it calls `spawn_subagent`. The LLM's text output is purely internal cognition.
+All outward behavior is through explicit tool calls. When Main Agent wants to speak to the user, it calls the `reply` tool. When it needs complex work done, it calls `spawn_task`. The LLM's text output is purely internal cognition.
 
 ## Core Concept: Inner Monologue
 
@@ -16,7 +16,7 @@ Main Agent's inner monologue (LLM text output, user never sees):
 
 Main Agent's actions (tool calls, visible effects):
   → reply("好的，我来帮你查一下...")        ← user sees this
-  → spawn_subagent("search Beijing weather")   ← task system handles this
+  → spawn_task("search Beijing weather")   ← task system handles this
 
 [Task completes]
 
@@ -149,12 +149,12 @@ Main Agent's tools are its way of **acting on the world**. The LLM's text output
 | Tool | Purpose | Effect |
 |------|---------|--------|
 | `reply` | Speak to the user | Takes `text` + `channelId`, triggers `onReply` → delivered via channel adapter |
-| `spawn_subagent` | Delegate complex work | Creates a task in the Task System |
+| `spawn_task` | Delegate complex work | Creates a task in the Task System |
 | `current_time` | Get current date/time | Returns result to inner monologue |
 | `memory_list` / `memory_read` | Access long-term memory | Returns result to inner monologue |
 | `task_status` / `task_list` | Query task state and history | Returns result to inner monologue |
 
-Information-gathering tools (current_time, memory, task queries) return results into the inner monologue. Only `reply` produces user-visible output — it requires a `channelId` so Main Agent explicitly chooses where to send the message. Only `spawn_subagent` creates external side effects.
+Information-gathering tools (current_time, memory, task queries) return results into the inner monologue. Only `reply` produces user-visible output — it requires a `channelId` so Main Agent explicitly chooses where to send the message. Only `spawn_task` creates external side effects.
 
 Complex tools (file I/O, shell, web search) are NOT available to Main Agent — they're only available inside Tasks.
 
@@ -185,7 +185,7 @@ User: "查一下北京天气，然后写个总结"
 Inner monologue: "This needs web search and multi-step processing.
   I should spawn a task and let the user know."
 → reply("好的，我来帮你查一下...")
-→ spawn_subagent({ description: "search Beijing weather and summarize", input: "..." })
+→ spawn_task({ description: "search Beijing weather and summarize", input: "..." })
 
 [Task completes, result injected into session]
 
@@ -205,7 +205,7 @@ Inner monologue: "Just an acknowledgment, no response needed."
 
 ```
 User: "读取 /etc/shadow"
-→ spawn_subagent({ description: "read file", input: "/etc/shadow" })
+→ spawn_task({ description: "read file", input: "/etc/shadow" })
 
 [Task fails: permission denied]
 
@@ -263,7 +263,7 @@ Main Agent maintains a session-level message history. This is the record of its 
 **Session contains:**
 - User messages (inbound)
 - Main Agent's inner monologue (LLM text output)
-- Tool calls and results (reply, spawn_subagent, current_time, etc.)
+- Tool calls and results (reply, spawn_task, current_time, etc.)
 - Task result summaries (injected when tasks complete)
 
 **Session does NOT contain:**
@@ -297,14 +297,14 @@ Two independent recovery processes, each handled by its own layer:
 SessionStore.load() automatically repairs unclosed tool calls before returning messages. If the process crashed mid-thinking, the last assistant message may have tool calls without matching tool results:
 
 ```
-[assistant] toolCalls: [spawn_subagent("查天气"), reply("好的")]
+[assistant] toolCalls: [spawn_task("查天气"), reply("好的")]
 ← process crashed — no tool result for either
 ```
 
 SessionStore injects cancellation results to close them:
 
 ```
-[tool] {"cancelled": true, "reason": "process restarted"}   ← for spawn_subagent
+[tool] {"cancelled": true, "reason": "process restarted"}   ← for spawn_task
 [tool] {"cancelled": true, "reason": "process restarted"}   ← for reply
 ```
 
@@ -359,8 +359,8 @@ The prompt builder (`src/identity/prompt.ts`) supports two modes via `buildSyste
 | How You Think | Inner monologue concept, reply() as only communication |
 | Tools | Per-tool descriptions for all 15 MainAgent tools |
 | Thinking Style | When to narrate vs silently call tools |
-| When to Reply vs Spawn | Decision guidelines for direct reply vs subagent |
-| Subagent Types | Injected from SubagentRegistry |
+| When to Reply vs Spawn | Decision guidelines for direct reply vs task |
+| AITask Types | Injected from AITaskTypeRegistry |
 | Channels and reply() | Channel metadata format + per-channel style guidelines |
 | Session History | Compact info + archive access |
 | Available Skills | Injected from SkillRegistry (2% of context window budget) |
@@ -371,7 +371,7 @@ The prompt builder (`src/identity/prompt.ts`) supports two modes via `buildSyste
 |---------|---------|
 | Identity | Same persona identity |
 | Safety | Same safety guardrails |
-| SUBAGENT.md body | Type-specific instructions (explore/plan/general) |
+| AITASK.md body | Type-specific instructions (explore/plan/general) |
 
 Task Agents skip How You Think, Tools, Thinking Style, Reply vs Spawn, Channels, Session History, and Skills — saving ~100 lines of irrelevant tokens per LLM call.
 
@@ -445,10 +445,10 @@ Main Agent and the Task System are separate layers:
 | Output | Inner monologue + tool calls | Cognitive pipeline results |
 | User interaction | Via `reply` tool | None (internal only) |
 | State | Session history (cross-task) | TaskContext (per-task) |
-| Tools | reply + spawn_subagent + simple tools | Full tool suite |
+| Tools | reply + spawn_task + simple tools | Full tool suite |
 | Persistence | data/main/ (session JSONL) | data/tasks/ (task JSONL) |
 | Lifetime | Entire session | Single task |
 | Communication | Receives notifications via callback | Pushes results to Main Agent queue |
 | Recovery | Repairs unclosed tool calls in session | Marks pending tasks as failed |
 
-The Task System (Agent, TaskFSM, cognitive pipeline, EventBus) is unchanged internally. Main Agent creates tasks through `spawn_subagent`, and receives results via the `onNotify` callback pushed directly into its message queue.
+The Task System (Agent, TaskFSM, cognitive pipeline, EventBus) is unchanged internally. Main Agent creates tasks through `spawn_task`, and receives results via the `onNotify` callback pushed directly into its message queue.
