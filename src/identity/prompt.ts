@@ -3,7 +3,7 @@
  *
  * Supports two modes:
  * - "main": Full prompt for MainAgent (inner monologue, tools, channels, skills, etc.)
- * - "task": Minimal prompt for Task Agent (identity + safety + subagent instructions)
+ * - "task": Minimal prompt for Task Agent (identity + safety + AI task type instructions)
  *
  * Default mode is "task" for backward compatibility with Thinker callers.
  */
@@ -29,9 +29,9 @@ export interface PromptOptions {
   mode?: PromptMode;
   persona: Persona;
   /** Task mode: AI task type-specific prompt from AITASK.md body */
-  subagentPrompt?: string;
+  aiTaskPrompt?: string;
   /** Main mode: AI task type metadata from AITaskTypeRegistry */
-  subagentMetadata?: string;
+  aiTaskMetadata?: string;
   /** Main mode: skill metadata from SkillRegistry */
   skillMetadata?: string;
   /** Main mode: active/suspended project metadata */
@@ -143,7 +143,7 @@ export function buildReplyVsSpawnSection(): string[] {
     "- You can answer from session context or memory",
     "- A quick tool call is enough (time, memory lookup)",
     "",
-    "Spawn a subagent when:",
+    "Spawn a task when:",
     "- You need file I/O, shell commands, or web requests",
     "- The work requires multiple steps",
     "- You're unsure — err on the side of spawning",
@@ -220,8 +220,8 @@ export function buildSystemPrompt(options: PromptOptions): string {
     lines.push("", ...buildThinkingStyleSection());
     lines.push("", ...buildReplyVsSpawnSection());
 
-    if (options.subagentMetadata) {
-      lines.push("", options.subagentMetadata);
+    if (options.aiTaskMetadata) {
+      lines.push("", options.aiTaskMetadata);
     }
 
     if (options.projectMetadata) {
@@ -235,9 +235,9 @@ export function buildSystemPrompt(options: PromptOptions): string {
       lines.push("", options.skillMetadata);
     }
   } else {
-    // Task Agent: append subagent-specific prompt
-    if (options.subagentPrompt) {
-      lines.push("", options.subagentPrompt);
+    // Task Agent: append AI task type-specific prompt
+    if (options.aiTaskPrompt) {
+      lines.push("", options.aiTaskPrompt);
     }
   }
 

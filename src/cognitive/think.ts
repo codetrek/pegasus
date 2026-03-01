@@ -29,20 +29,20 @@ export class Thinker {
    * @param context - The task context with conversation history
    * @param memoryIndex - Optional memory index (injected on first iteration)
    * @param overrideToolRegistry - Optional per-task-type tool registry (overrides instance default)
-   * @param subagentPrompt - Optional AI task type-specific prompt to append to system prompt
+   * @param aiTaskPrompt - Optional AI task type-specific prompt to append to system prompt
    * @param overrideModel - Optional per-task-type model (overrides instance default)
    */
   async run(
     context: TaskContext,
     memoryIndex?: MemoryIndexEntry[],
     overrideToolRegistry?: ToolRegistry,
-    subagentPrompt?: string,
+    aiTaskPrompt?: string,
     overrideModel?: LanguageModel,
   ): Promise<Record<string, unknown>> {
     logger.info({ iteration: context.iteration, taskType: context.taskType }, "think_start");
 
     // Build system prompt: base persona + optional AI task type-specific prompt
-    const system = buildSystemPrompt({ persona: this.persona, subagentPrompt });
+    const system = buildSystemPrompt({ persona: this.persona, aiTaskPrompt });
 
     // Build conversation history for multi-turn support
     const messages: Message[] = context.messages.map((m) => ({

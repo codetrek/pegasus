@@ -1127,7 +1127,7 @@ export class MainAgent {
 
   private _buildSystemPrompt(): string {
     // Get AI task type metadata for prompt
-    const subagentMetadata = this.aiTaskTypeRegistry.getMetadataForPrompt();
+    const aiTaskMetadata = this.aiTaskTypeRegistry.getMetadataForPrompt();
 
     // Build project metadata for prompt
     const projectMetadata = this._buildProjectMetadata();
@@ -1143,7 +1143,7 @@ export class MainAgent {
     return buildSystemPrompt({
       mode: "main",
       persona: this.persona,
-      subagentMetadata: subagentMetadata || undefined,
+      aiTaskMetadata: aiTaskMetadata || undefined,
       skillMetadata: skillMetadata || undefined,
       projectMetadata: projectMetadata || undefined,
     });
