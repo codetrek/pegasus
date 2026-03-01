@@ -208,7 +208,7 @@ describe("AITaskTypeLoader", () => {
   });
 
   test("loads builtin AI task type files from project", () => {
-    const defs = scanAITaskTypeDir(join(process.cwd(), "subagents"), "builtin");
+    const defs = scanAITaskTypeDir(join(process.cwd(), "aitask-types"), "builtin");
     expect(defs.length).toBeGreaterThanOrEqual(3);
     const names = defs.map((d) => d.name).sort();
     expect(names).toContain("general");

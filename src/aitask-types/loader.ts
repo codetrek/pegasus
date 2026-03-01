@@ -2,8 +2,8 @@
  * AITaskTypeLoader — scan directories and parse AITASK.md files.
  *
  * Discovers AI task types from:
- *   subagents/       (builtin, git tracked)
- *   data/subagents/  (user-created, runtime)
+ *   aitask-types/       (builtin, git tracked)
+ *   data/aitask-types/  (user-created, runtime)
  *
  * Each AI task type is a directory containing AITASK.md with YAML frontmatter + markdown body.
  */

@@ -225,9 +225,9 @@ export class MainAgent {
     logger.info({ skillCount: this.skillRegistry.listAll().length }, "skills_loaded");
 
     // Load AI task type definitions from builtin and user directories
-    const builtinSubagentDir = path.join(process.cwd(), "subagents");
-    const userSubagentDir = path.join(this.settings.dataDir, "subagents");
-    this.aiTaskTypeRegistry.registerMany(loadAITaskTypeDefinitions(builtinSubagentDir, userSubagentDir));
+    const builtinAITaskTypeDir = path.join(process.cwd(), "aitask-types");
+    const userAITaskTypeDir = path.join(this.settings.dataDir, "aitask-types");
+    this.aiTaskTypeRegistry.registerMany(loadAITaskTypeDefinitions(builtinAITaskTypeDir, userAITaskTypeDir));
     this.agent.setAITaskTypeRegistry(this.aiTaskTypeRegistry);
     logger.info({ aiTaskTypeCount: this.aiTaskTypeRegistry.listAll().length }, "aitask_types_loaded");
 
