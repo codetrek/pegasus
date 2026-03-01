@@ -1,7 +1,7 @@
 # Execution Model: MainAgent, SubAgent, AITask, Project
 
 > **Status**: Design — not yet implemented
-> **Supersedes**: Parts of [Task Types](./task-types.md) (renames "subagent" → "AITask") and extends [Project System](./project-system.md)
+> **Supersedes**: Parts of [AITask Types](./aitask-types.md) (renames "subagent" → "AITask") and extends [Project System](./project-system.md)
 
 ## Problem Statement
 
@@ -744,7 +744,7 @@ data/subagents/       ← runtime SubAgent sessions (created at runtime)
 |----------|-------------|
 | [Architecture](./architecture.md) | Updated to show four execution tiers |
 | [Main Agent](./main-agent.md) | Updated tool set (spawn_task + spawn_subagent) |
-| [Task Types](./task-types.md) | Renamed to "AITask Types"; content mostly unchanged |
+| [AITask Types](./aitask-types.md) | Renamed to "AITask Types"; content mostly unchanged |
 | [Project System](./project-system.md) | Worker threading model shared; ProjectAdapter → WorkerAdapter |
 | [Agent Core](./agent.md) | Unchanged — Agent class used by MainAgent, SubAgent, and Project |
 | [Cognitive Processors](./cognitive.md) | Unchanged — same pipeline for all tiers |
