@@ -213,7 +213,7 @@ Can you answer from context/memory?
 
 #### SubAgent System Prompt
 
-The SubAgent itself receives a dedicated system prompt section (injected via `buildSubagentProma`):
+The SubAgent itself receives a dedicated system prompt section (injected via `buildSubagentPrompt`):
 
 ```
 ## Your Role
