@@ -62,11 +62,11 @@ const task_replay = taskToolsModule.task_replay;
 
 export { task_list, task_replay };
 
-// Spawn subagent tool (for Main Agent)
-import * as spawnSubagentModule from "./spawn-subagent-tool.ts";
-const spawn_subagent = spawnSubagentModule.spawn_subagent;
+// Spawn task tool (for Main Agent)
+import * as spawnTaskModule from "./spawn-task-tool.ts";
+const spawn_task = spawnTaskModule.spawn_task;
 
-export { spawn_subagent };
+export { spawn_task };
 
 // Resume task tool (for Main Agent)
 import * as resumeTaskModule from "./resume-task-tool.ts";
@@ -174,7 +174,7 @@ export const backgroundTools: Tool[] = [
   bg_stop,
 ];
 
-/** All tools for Task System (does NOT include spawn_subagent or reply — those are Main Agent only). */
+/** All tools for Task System (does NOT include spawn_task or reply — those are Main Agent only). */
 export const allTaskTools: Tool[] = [
   ...systemTools,
   ...fileTools,
@@ -186,7 +186,7 @@ export const allTaskTools: Tool[] = [
   notify,
 ];
 
-/** Tools for Main Agent (curated simple tools + spawn_subagent + resume_task + reply + project tools). */
+/** Tools for Main Agent (curated simple tools + spawn_task + resume_task + reply + project tools). */
 export const mainAgentTools: Tool[] = [
   current_time,
   memory_list,
@@ -197,7 +197,7 @@ export const mainAgentTools: Tool[] = [
   task_list,
   task_replay,
   session_archive_read,
-  spawn_subagent,
+  spawn_task,
   resume_task,
   reply,
   use_skill,

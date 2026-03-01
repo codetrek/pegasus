@@ -4,7 +4,7 @@
  * Sits between channel adapters and the Task System. Receives messages via
  * send(), processes them through an internal queue with LLM calls, and
  * replies via onReply() callback. Has curated simple tools and delegates
- * complex work to the existing Task System via spawn_subagent.
+ * complex work to the existing Task System via spawn_task.
  */
 
 import type { Message } from "../infra/llm-types.ts";
@@ -470,8 +470,8 @@ export class MainAgent {
               channel: { type: channelType ?? channel.type, channelId, replyTo },
             });
           }
-        } else if (tc.name === "spawn_subagent") {
-          await this._handleSpawnSubagent(tc);
+        } else if (tc.name === "spawn_task") {
+          await this._handleSpawnTask(tc);
         } else if (tc.name === "resume_task") {
           const resumeNeedsFollowUp = await this._handleResumeTask(tc);
           if (resumeNeedsFollowUp) needsFollowUp = true;
@@ -566,7 +566,7 @@ export class MainAgent {
       }
 
       // Only queue another think if there are tool results the LLM needs to process.
-      // reply() and spawn_subagent() are terminal actions — their results don't need follow-up.
+      // reply() and spawn_task() are terminal actions — their results don't need follow-up.
       if (needsFollowUp) {
         this.queue.push({ kind: "think", channel });
       }
@@ -583,7 +583,7 @@ export class MainAgent {
 
   // ── Task spawning ──
 
-  private async _handleSpawnSubagent(tc: ToolCall): Promise<void> {
+  private async _handleSpawnTask(tc: ToolCall): Promise<void> {
     const { description, input, type } = tc.arguments as { description: string; input: string; type?: string };
     const taskType = type ?? "general";
     const taskId = await this.agent.submit(input, "main-agent", taskType, description);
@@ -597,7 +597,7 @@ export class MainAgent {
     await this.sessionStore.append(toolMsg);
 
     // No per-task callback — Agent calls onNotify automatically
-    logger.info({ taskId, input, taskType }, "subagent_spawned");
+    logger.info({ taskId, input, taskType }, "task_spawned");
   }
 
   // ── Task resuming ──

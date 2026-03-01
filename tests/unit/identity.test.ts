@@ -202,7 +202,7 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("memory_write");
     expect(prompt).toContain("memory_patch");
     expect(prompt).toContain("memory_append");
-    expect(prompt).toContain("spawn_subagent");
+    expect(prompt).toContain("spawn_task");
     expect(prompt).toContain("current_time");
     expect(prompt).toContain("session_archive_read");
   });

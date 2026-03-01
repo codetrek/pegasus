@@ -77,7 +77,7 @@ export class AITaskTypeRegistry {
     const lines: string[] = [
       "## Available Subagent Types",
       "",
-      "When calling spawn_subagent(), choose the right type:",
+      "When calling spawn_task(), choose the right type:",
       "",
     ];
 
