@@ -66,7 +66,10 @@ export class Thinker {
     // Add the current input only when starting fresh (no conversation history yet).
     // In resume scenarios, inputText is already in context.messages (pushed by prepareContextForResume).
     if (context.messages.length === 0) {
-      messages.push({ role: "user" as const, content: context.inputText });
+      const userMsg = { role: "user" as const, content: context.inputText };
+      messages.push(userMsg);
+      // Persist to context.messages so subsequent iterations see the original input
+      context.messages.push(userMsg);
     }
 
     // Use override registry if provided, otherwise fall back to instance default
