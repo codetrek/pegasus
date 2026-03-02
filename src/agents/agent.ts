@@ -583,6 +583,59 @@ export class Agent {
           { taskId: task.context.id, memoryDir: path.join(this.settings.dataDir, "memory"), extractModel: this.extractModel ?? undefined, backgroundManager: this.backgroundTaskManager },
         );
 
+        // Intercept spawn_task: create real task, wait for completion, return result
+        if (toolName === "spawn_task" && toolResult.success) {
+          const { input, type, description } = toolResult.result as {
+            input: string;
+            type?: string;
+            description?: string;
+          };
+          try {
+            const childTaskId = await this.submit(
+              input,
+              `task:${task.taskId}`,
+              type ?? "general",
+              description ?? "",
+            );
+            logger.info(
+              { parentTaskId: task.taskId, childTaskId, type: type ?? "general" },
+              "spawn_task_intercepted",
+            );
+
+            // Wait for child task to complete
+            const childTask = await this._waitForChildTask(childTaskId);
+            const childResult = childTask.context.finalResult;
+            const childStatus = childTask.state === TaskState.COMPLETED ? "completed" : "failed";
+
+            // Override signal tool result with real task outcome
+            toolResult.result = {
+              taskId: childTaskId,
+              status: childStatus,
+              description,
+              result: childStatus === "completed"
+                ? childResult
+                : (childTask.context.error ?? "unknown error"),
+            };
+            toolResult.completedAt = Date.now();
+            toolResult.durationMs = (toolResult.completedAt ?? 0) - (toolResult.startedAt ?? 0);
+
+            if (childStatus === "failed") {
+              toolResult.success = false;
+              toolResult.error = childTask.context.error ?? "child task failed";
+            }
+          } catch (err) {
+            logger.error(
+              { parentTaskId: task.taskId, error: errorToString(err) },
+              "spawn_task_child_failed",
+            );
+            toolResult.success = false;
+            toolResult.error = `Failed to spawn/wait for child task: ${errorToString(err)}`;
+            toolResult.result = { status: "error", error: toolResult.error };
+            toolResult.completedAt = Date.now();
+            toolResult.durationMs = (toolResult.completedAt ?? 0) - (toolResult.startedAt ?? 0);
+          }
+        }
+
         // Push tool result message to context
         context_pushToolResult(task.context, toolCallId, toolResult);
 
@@ -916,5 +969,58 @@ export class Agent {
       await Bun.sleep(50);
     }
     throw new Error(`Task ${taskId} did not complete within ${effectiveTimeout}ms`);
+  }
+
+  /**
+   * Wait for a child task to reach terminal state (COMPLETED or FAILED).
+   * Uses EventBus subscription for efficiency — no polling.
+   * Used by spawn_task interception to block until the child task finishes.
+   */
+  private _waitForChildTask(childTaskId: string): Promise<TaskFSM> {
+    const timeout = this.settings.agent.taskTimeout * 1000;
+
+    return new Promise<TaskFSM>((resolve, reject) => {
+      // Check if already done (task may complete before we subscribe)
+      const existing = this.taskRegistry.getOrNull(childTaskId);
+      if (existing?.isDone) {
+        resolve(existing);
+        return;
+      }
+
+      let timer: ReturnType<typeof setTimeout> | null = null;
+
+      const cleanup = () => {
+        if (timer) clearTimeout(timer);
+        this.eventBus.unsubscribe(EventType.TASK_COMPLETED, onDone);
+        this.eventBus.unsubscribe(EventType.TASK_FAILED, onDone);
+      };
+
+      const onDone = async (event: Event) => {
+        if (event.taskId !== childTaskId) return;
+        cleanup();
+        const task = this.taskRegistry.getOrNull(childTaskId);
+        if (task) {
+          resolve(task);
+        } else {
+          reject(new Error(`Child task ${childTaskId} not found after completion event`));
+        }
+      };
+
+      this.eventBus.subscribe(EventType.TASK_COMPLETED, onDone);
+      this.eventBus.subscribe(EventType.TASK_FAILED, onDone);
+
+      // Timeout guard
+      timer = setTimeout(() => {
+        cleanup();
+        reject(new Error(`Child task ${childTaskId} did not complete within ${timeout}ms`));
+      }, timeout);
+
+      // Double-check after subscription (race condition: task may have completed between first check and subscribe)
+      const recheck = this.taskRegistry.getOrNull(childTaskId);
+      if (recheck?.isDone) {
+        cleanup();
+        resolve(recheck);
+      }
+    });
   }
 }
