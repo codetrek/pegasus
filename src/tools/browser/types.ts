@@ -10,22 +10,7 @@ export interface BrowserConfig {
   cdpUrl?: string;
 }
 
-/** Playwright accessibility snapshot node (simplified) */
-export interface AriaNode {
-  role: string;
-  name?: string;
-  value?: string;
-  description?: string;
-  level?: number;
-  checked?: boolean | "mixed";
-  pressed?: boolean | "mixed";
-  expanded?: boolean;
-  selected?: boolean;
-  disabled?: boolean;
-  children?: AriaNode[];
-}
-
-/** Result of formatting an ARIA tree */
+/** Result of processing an ARIA snapshot */
 export interface AriaSnapshotResult {
   /** Human/LLM-readable snapshot text */
   snapshot: string;
