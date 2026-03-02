@@ -152,6 +152,16 @@ const CONTEXT_WINDOWS: Record<string, number> = {
 };
 
 /**
+ * Check if a model ID resolves to a known entry in the registry.
+ * Handles date-suffix stripping (e.g. "claude-sonnet-4-20250514" -> "claude-sonnet-4").
+ */
+export function isModelKnown(modelId: string): boolean {
+  if (CONTEXT_WINDOWS[modelId]) return true;
+  const stripped = modelId.replace(/-(\d{4}-\d{2}-\d{2}|\d{4,8})$/, "");
+  return stripped !== modelId && !!CONTEXT_WINDOWS[stripped];
+}
+
+/**
  * Get context window size for a model. Falls back to 128k for unknown models.
  *
  * Lookup order:
