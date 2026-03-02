@@ -48,7 +48,7 @@ describe("task tools", () => {
           '{"ts":3,"event":"TASK_COMPLETED","taskId":"t2","data":{"finalResult":{},"iterations":1}}\n',
       );
 
-      const context = { taskId: "test", memoryDir: `${testDir}/tasks` };
+      const context = { taskId: "test", tasksDir: `${testDir}/tasks` };
       const result = await task_list.execute(
         { date: "2026-02-25" },
         context,
@@ -73,7 +73,7 @@ describe("task tools", () => {
     }, 5000);
 
     it("should return empty list when no tasks exist for date", async () => {
-      const context = { taskId: "test" };
+      const context = { taskId: "test", tasksDir: `${testDir}/tasks` };
       const result = await task_list.execute(
         { date: "2026-02-26" },
         context,
@@ -85,7 +85,7 @@ describe("task tools", () => {
 
     it("should return empty list when no index exists", async () => {
       // testDir/tasks exists but no index.jsonl
-      const context = { taskId: "test" };
+      const context = { taskId: "test", tasksDir: `${testDir}/tasks` };
       const result = await task_list.execute(
         { date: "2026-02-25" },
         context,
@@ -100,7 +100,7 @@ describe("task tools", () => {
       // errors and returns an empty map, so task_list returns success with [].
       await appendFile(`${testDir}/tasks/index.jsonl`, "not valid json\n");
 
-      const context = { taskId: "test" };
+      const context = { taskId: "test", tasksDir: `${testDir}/tasks` };
       const result = await task_list.execute(
         { date: "2026-02-25" },
         context,
@@ -117,7 +117,7 @@ describe("task tools", () => {
         throw new Error("disk read failure");
       };
       try {
-        const context = { taskId: "test" };
+        const context = { taskId: "test", tasksDir: `${testDir}/tasks` };
         const result = await task_list.execute(
           { date: "2026-02-25" },
           context,
@@ -128,6 +128,17 @@ describe("task tools", () => {
       } finally {
         TaskPersister.loadIndex = original;
       }
+    }, 5000);
+
+    it("should return error when tasksDir is missing from context", async () => {
+      const context = { taskId: "test" };
+      const result = await task_list.execute(
+        { date: "2026-02-25" },
+        context,
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("tasksDir is required but missing");
     }, 5000);
   });
 
@@ -150,7 +161,7 @@ describe("task tools", () => {
         ].join("\n") + "\n";
       await appendFile(`${testDir}/tasks/2026-02-25/r1.jsonl`, lines);
 
-      const context = { taskId: "test" };
+      const context = { taskId: "test", tasksDir: `${testDir}/tasks` };
       const result = await task_replay.execute(
         { taskId: "r1" },
         context,
@@ -169,7 +180,7 @@ describe("task tools", () => {
     }, 5000);
 
     it("should fail for unknown taskId", async () => {
-      const context = { taskId: "test" };
+      const context = { taskId: "test", tasksDir: `${testDir}/tasks` };
       const result = await task_replay.execute(
         { taskId: "nonexistent" },
         context,
@@ -183,7 +194,7 @@ describe("task tools", () => {
       await appendFile(`${testDir}/tasks/index.jsonl`, '{"taskId":"bad","date":"2026-02-25"}\n');
       await appendFile(`${testDir}/tasks/2026-02-25/bad.jsonl`, "not valid json\n");
 
-      const context = { taskId: "test" };
+      const context = { taskId: "test", tasksDir: `${testDir}/tasks` };
       const result = await task_replay.execute(
         { taskId: "bad" },
         context,
@@ -209,7 +220,7 @@ describe("task tools", () => {
         ].join("\n") + "\n";
       await appendFile(`${testDir}/tasks/2026-02-25/r2.jsonl`, lines);
 
-      const context = { taskId: "test" };
+      const context = { taskId: "test", tasksDir: `${testDir}/tasks` };
       const result = await task_replay.execute(
         { taskId: "r2" },
         context,
@@ -226,6 +237,17 @@ describe("task tools", () => {
       expect(messages[1]!.content).toBe("done");
       // Verify result is just the messages array, not the full context
       expect(Array.isArray(result.result)).toBe(true);
+    }, 5000);
+
+    it("should return error when tasksDir is missing from context", async () => {
+      const context = { taskId: "test" };
+      const result = await task_replay.execute(
+        { taskId: "r1" },
+        context,
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("tasksDir is required but missing");
     }, 5000);
   });
 });
