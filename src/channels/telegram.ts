@@ -15,17 +15,25 @@ import type {
 
 const logger = getLogger("telegram");
 
+/** Telegram command definition for the / menu. */
+export interface TelegramCommand {
+  command: string;      // 1-32 chars, lowercase + digits + underscore only
+  description: string;  // 1-256 chars
+}
+
 export class TelegramAdapter implements ChannelAdapter {
   readonly type = "telegram";
   private bot: Bot;
   private token: string;
   private storeImage?: StoreImageFn;
+  private commands: TelegramCommand[];
   private send!: (msg: InboundMessage) => void;
 
-  constructor(token: string, storeImage?: StoreImageFn) {
+  constructor(token: string, storeImage?: StoreImageFn, commands?: TelegramCommand[]) {
     this.bot = new Bot(token);
     this.token = token;
     this.storeImage = storeImage;
+    this.commands = commands ?? [];
   }
 
   async start(agent: { send(msg: InboundMessage): void }): Promise<void> {
@@ -90,6 +98,16 @@ export class TelegramAdapter implements ChannelAdapter {
           logger.warn({ error: String(err) }, "telegram_photo_error");
         }
       });
+    }
+
+    // Register command menu for / suggestions in Telegram UI
+    if (this.commands.length > 0) {
+      try {
+        await this.bot.api.setMyCommands(this.commands);
+        logger.info({ count: this.commands.length }, "telegram_commands_registered");
+      } catch (err) {
+        logger.warn({ error: String(err) }, "telegram_commands_register_failed");
+      }
     }
 
     // Non-blocking start — Grammy polling runs in background
