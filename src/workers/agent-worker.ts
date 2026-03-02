@@ -16,7 +16,7 @@ declare var self: Worker;
 import path from "node:path";
 import { existsSync } from "node:fs";
 import { Agent } from "../agents/agent.ts";
-import type { TaskNotification } from "../agents/agent.ts";
+import type { AgentDeps, TaskNotification } from "../agents/agent.ts";
 import { getSettings, setSettings } from "../infra/config.ts";
 import type { Settings } from "../infra/config.ts";
 import type { GenerateTextResult } from "../infra/llm-types.ts";
@@ -206,7 +206,7 @@ export async function initProject(config: ProjectConfig): Promise<void> {
   const defaultRole = settings.llm.default;
   const defaultModelSpec = typeof defaultRole === "string" ? defaultRole : defaultRole.model;
   const modelId = projectDef.model ?? defaultModelSpec;
-  proxyModel = new ProxyLanguageModel(
+  proxyModel = _createProxyModel(
     "proxy",
     modelId,
     (msg: unknown) => postToParent(msg),
@@ -235,7 +235,7 @@ export async function initProject(config: ProjectConfig): Promise<void> {
   workerChannelId = projectDef.name;
 
   // 7. Create Agent
-  agent = new Agent({
+  agent = _createAgent({
     model: proxyModel,
     persona,
     settings: projectSettings,
@@ -264,7 +264,7 @@ export async function initSubAgent(config: SubAgentConfig): Promise<void> {
   // 2. Create ProxyLanguageModel
   const defaultRole = settings.llm.default;
   const defaultModelSpec = typeof defaultRole === "string" ? defaultRole : defaultRole.model;
-  proxyModel = new ProxyLanguageModel(
+  proxyModel = _createProxyModel(
     "proxy",
     defaultModelSpec,
     (msg: unknown) => postToParent(msg),
@@ -294,7 +294,7 @@ export async function initSubAgent(config: SubAgentConfig): Promise<void> {
   workerChannelId = channelId;
 
   // 6. Create Agent (with spawn_task so SubAgent can orchestrate AITasks)
-  agent = new Agent({
+  agent = _createAgent({
     model: proxyModel,
     persona,
     settings: subAgentSettings,
@@ -532,4 +532,36 @@ function _exitProcess(code: number): void {
 export function _setExitProcessForTest(fn: (code: number) => void): () => void {
   _exitOverride = fn;
   return () => { _exitOverride = null; };
+}
+
+// ── Factory overrides for testing ────────────────────
+// These allow unit tests to inject mock Agent/ProxyLanguageModel constructors
+// WITHOUT using mock.module (which pollutes other test files globally in Bun).
+
+type AgentFactory = (opts: AgentDeps) => Agent;
+type ProxyModelFactory = (provider: string, modelId: string, send: (msg: unknown) => void) => ProxyLanguageModel;
+
+let _agentFactory: AgentFactory | null = null;
+let _proxyModelFactory: ProxyModelFactory | null = null;
+
+/** Override Agent constructor for testing. Returns cleanup function. */
+export function _setAgentFactoryForTest(fn: AgentFactory): () => void {
+  _agentFactory = fn;
+  return () => { _agentFactory = null; };
+}
+
+/** Override ProxyLanguageModel constructor for testing. Returns cleanup function. */
+export function _setProxyModelFactoryForTest(fn: ProxyModelFactory): () => void {
+  _proxyModelFactory = fn;
+  return () => { _proxyModelFactory = null; };
+}
+
+function _createAgent(opts: AgentDeps): Agent {
+  if (_agentFactory) return _agentFactory(opts);
+  return new Agent(opts);
+}
+
+function _createProxyModel(provider: string, modelId: string, send: (msg: unknown) => void): ProxyLanguageModel {
+  if (_proxyModelFactory) return _proxyModelFactory(provider, modelId, send);
+  return new ProxyLanguageModel(provider, modelId, send);
 }
