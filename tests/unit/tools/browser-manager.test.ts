@@ -25,17 +25,14 @@ function defaultConfig(overrides?: Partial<BrowserConfig>): BrowserConfig {
 }
 
 /**
- * A simple ARIA tree that produces known refs.
+ * A simple ARIA snapshot text that produces known refs.
  * button "OK" → e1, link "Help" → e2
  */
-const SIMPLE_TREE = {
-  role: "WebArea",
-  children: [
-    { role: "heading", name: "Title" },
-    { role: "button", name: "OK" },
-    { role: "link", name: "Help" },
-  ],
-};
+const SIMPLE_SNAPSHOT = [
+  '- heading "Title"',
+  '- button "OK"',
+  '- link "Help"',
+].join("\n");
 
 /**
  * Build mock page, context, browser, and launcher.
@@ -45,19 +42,30 @@ const SIMPLE_TREE = {
  *   browser.newContext() → context
  *   context.pages() → [page] (or empty, falling through to context.newPage())
  *   context.newPage() → page
+ *
+ * page.locator() dispatches based on selector:
+ *   - "body" → returns { ariaSnapshot: mock() }
+ *   - any other selector → returns { click, fill, press }
  */
 function createMocks() {
+  const mockAriaSnapshot = mock(() => Promise.resolve(SIMPLE_SNAPSHOT));
+
   const mockPage = {
     goto: mock(() => Promise.resolve()),
-    accessibility: {
-      snapshot: mock(() => Promise.resolve(SIMPLE_TREE)),
-    },
     url: mock(() => "https://example.com"),
-    locator: mock((_selector: string) => ({
-      click: mock(() => Promise.resolve()),
-      fill: mock((_text: string) => Promise.resolve()),
-      press: mock((_key: string) => Promise.resolve()),
-    })),
+    locator: mock((selector: string) => {
+      if (selector === "body") {
+        return {
+          ariaSnapshot: mockAriaSnapshot,
+        };
+      }
+      // For role-based selectors (click/type operations)
+      return {
+        click: mock(() => Promise.resolve()),
+        fill: mock((_text: string) => Promise.resolve()),
+        press: mock((_key: string) => Promise.resolve()),
+      };
+    }),
     waitForTimeout: mock(() => Promise.resolve()),
     mouse: {
       wheel: mock(() => Promise.resolve()),
@@ -83,7 +91,7 @@ function createMocks() {
     connectOverCDP: mock(() => Promise.resolve(mockBrowser)),
   };
 
-  return { mockPage, mockContext, mockBrowser, mockLauncher };
+  return { mockPage, mockAriaSnapshot, mockContext, mockBrowser, mockLauncher };
 }
 
 // ── Tests ────────────────────────────────────────────────────────────
@@ -137,20 +145,20 @@ describe("BrowserManager", () => {
 
     expect(mocks.mockPage.goto).toHaveBeenCalledTimes(1);
     expect(result.snapshot).toContain("[page]");
-    expect(result.snapshot).toContain('[button] "OK" [ref=e1]');
+    expect(result.snapshot).toContain("button \"OK\" [ref=e1]");
     expect(result.truncated).toBe(false);
   });
 
   // ── 5. takeSnapshot ────────────────────────────────────────────────
 
-  it("should call accessibility.snapshot and return formatted ARIA tree", async () => {
+  it("should call ariaSnapshot and return formatted ARIA snapshot", async () => {
     await manager.getSession(TEST_TASK);
     const result = await manager.takeSnapshot(TEST_TASK);
 
-    expect(mocks.mockPage.accessibility.snapshot).toHaveBeenCalledTimes(1);
+    expect(mocks.mockAriaSnapshot).toHaveBeenCalledTimes(1);
     expect(result.snapshot).toContain("[page] url: https://example.com");
-    expect(result.snapshot).toContain('[button] "OK" [ref=e1]');
-    expect(result.snapshot).toContain('[link] "Help" [ref=e2]');
+    expect(result.snapshot).toContain('button "OK" [ref=e1]');
+    expect(result.snapshot).toContain('link "Help" [ref=e2]');
     expect(result.truncated).toBe(false);
   });
 
@@ -196,9 +204,9 @@ describe("BrowserManager", () => {
   it("should show helpful message when no refs are available", async () => {
     await manager.getSession(TEST_TASK);
 
-    // Override accessibility.snapshot to return tree with no interactive elements
-    mocks.mockPage.accessibility.snapshot = mock(() =>
-      Promise.resolve({ role: "WebArea", children: [{ role: "heading", name: "Empty" }] }),
+    // Override ariaSnapshot to return snapshot with no interactive elements
+    mocks.mockAriaSnapshot.mockImplementation(() =>
+      Promise.resolve('- heading "Empty"'),
     );
     await manager.takeSnapshot(TEST_TASK);
 
@@ -235,7 +243,12 @@ describe("BrowserManager", () => {
       press: mock(() => Promise.resolve()),
       click: mock(() => Promise.resolve()),
     };
-    mocks.mockPage.locator = mock(() => locatorObj);
+    mocks.mockPage.locator = mock((selector: string) => {
+      if (selector === "body") {
+        return { ariaSnapshot: mocks.mockAriaSnapshot };
+      }
+      return locatorObj;
+    });
 
     await manager.type(TEST_TASK, "e1", "search query", true);
 
@@ -255,7 +268,12 @@ describe("BrowserManager", () => {
       press: mock(() => Promise.resolve()),
       click: mock(() => Promise.resolve()),
     };
-    mocks.mockPage.locator = mock(() => locatorObj);
+    mocks.mockPage.locator = mock((selector: string) => {
+      if (selector === "body") {
+        return { ariaSnapshot: mocks.mockAriaSnapshot };
+      }
+      return locatorObj;
+    });
 
     // Reset waitForTimeout call count after navigate
     mocks.mockPage.waitForTimeout.mockClear();

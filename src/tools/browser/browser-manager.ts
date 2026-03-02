@@ -9,7 +9,7 @@
  */
 
 import type { BrowserConfig } from "./types.ts";
-import { formatAriaTree } from "./aria-snapshot.ts";
+import { addRefsToSnapshot } from "./aria-snapshot.ts";
 import { getLogger } from "../../infra/logger.ts";
 
 const logger = getLogger("browser_manager");
@@ -193,8 +193,8 @@ export class BrowserManager {
   async takeSnapshot(taskId: string): Promise<{ snapshot: string; truncated: boolean }> {
     const session = await this.getSession(taskId);
     const url = session.page.url();
-    const tree = await session.page.accessibility.snapshot();
-    const result = formatAriaTree(tree, url);
+    const rawSnapshot = await session.page.locator('body').ariaSnapshot();
+    const result = addRefsToSnapshot(rawSnapshot, url);
 
     session.refMap = result.refMap;
     return { snapshot: result.snapshot, truncated: result.truncated };
