@@ -9,6 +9,7 @@ import type { LanguageModel } from "@pegasus/infra/llm-types.ts";
 import type { Persona } from "@pegasus/identity/persona.ts";
 import type { ToolResult } from "@pegasus/tools/types.ts";
 import { rm } from "node:fs/promises";
+import { buildMainAgentPaths } from "@pegasus/storage/paths.ts";
 
 const testDataDir = "/tmp/pegasus-test-agent-api";
 
@@ -46,6 +47,7 @@ function testAgentDeps(): AgentDeps {
       dataDir: testDataDir,
       authDir: "/tmp/pegasus-test-auth",
     }),
+    storePaths: buildMainAgentPaths(testDataDir),
   };
 }
 

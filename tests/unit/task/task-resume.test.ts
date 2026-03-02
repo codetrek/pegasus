@@ -23,6 +23,7 @@ import { EventBus } from "@pegasus/events/bus.ts";
 import { resume_task } from "@pegasus/tools/builtins/resume-task-tool.ts";
 import { rm, readFile } from "node:fs/promises";
 import path from "node:path";
+import { buildMainAgentPaths } from "@pegasus/storage/paths.ts";
 
 // ── Helpers ────────────────────────────────────────
 
@@ -72,6 +73,7 @@ function testAgentDeps(): AgentDeps {
       dataDir: testDataDir,
       authDir: "/tmp/pegasus-test-auth",
     }),
+    storePaths: buildMainAgentPaths(testDataDir),
   };
 }
 
@@ -546,6 +548,7 @@ describe("Task Resume — E2E", () => {
         dataDir: e2eDataDir + "/history",
         authDir: "/tmp/pegasus-test-auth",
       }),
+      storePaths: buildMainAgentPaths(e2eDataDir + "/history"),
     });
 
     await agent.start();
@@ -668,6 +671,7 @@ describe("Task Resume — E2E", () => {
         dataDir: e2eDataDir + "/tool-resume",
         authDir: "/tmp/pegasus-test-auth",
       }),
+      storePaths: buildMainAgentPaths(e2eDataDir + "/tool-resume"),
     });
 
     await agent.start();
@@ -754,6 +758,7 @@ describe("Task Resume — E2E", () => {
         dataDir,
         authDir: "/tmp/pegasus-test-auth",
       }),
+      storePaths: buildMainAgentPaths(dataDir),
     });
 
     await agent.start();
@@ -769,7 +774,7 @@ describe("Task Resume — E2E", () => {
       await Bun.sleep(200);
 
       // Verify JSONL file exists before removal
-      const tasksDir = path.join(dataDir, "tasks");
+      const tasksDir = buildMainAgentPaths(dataDir).tasks;
       const jsonlPath = await TaskPersister.resolveTaskPath(tasksDir, taskId);
       expect(jsonlPath).not.toBeNull();
 
@@ -831,6 +836,7 @@ describe("Task Resume — E2E", () => {
         dataDir: e2eDataDir + "/notify",
         authDir: "/tmp/pegasus-test-auth",
       }),
+      storePaths: buildMainAgentPaths(e2eDataDir + "/notify"),
     });
 
     agent.onNotify(n => notifications.push(n));
@@ -898,6 +904,7 @@ describe("Task Resume — E2E", () => {
         dataDir: e2eDataDir + "/multi-resume",
         authDir: "/tmp/pegasus-test-auth",
       }),
+      storePaths: buildMainAgentPaths(e2eDataDir + "/multi-resume"),
     });
 
     await agent.start();
@@ -963,6 +970,7 @@ describe("Task Resume — E2E", () => {
         dataDir,
         authDir: "/tmp/pegasus-test-auth",
       }),
+      storePaths: buildMainAgentPaths(dataDir),
     });
 
     await agent.start();
@@ -978,7 +986,7 @@ describe("Task Resume — E2E", () => {
       await Bun.sleep(200);
 
       // Read and parse JSONL
-      const tasksDir = path.join(dataDir, "tasks");
+      const tasksDir = buildMainAgentPaths(dataDir).tasks;
       const jsonlPath = await TaskPersister.resolveTaskPath(tasksDir, taskId);
       expect(jsonlPath).not.toBeNull();
 

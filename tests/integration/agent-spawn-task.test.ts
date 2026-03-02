@@ -16,6 +16,7 @@ import { SettingsSchema } from "@pegasus/infra/config.ts";
 import { TaskState } from "@pegasus/task/states.ts";
 import { spawn_task } from "@pegasus/tools/builtins/index.ts";
 import { rm } from "node:fs/promises";
+import { buildMainAgentPaths } from "@pegasus/storage/paths.ts";
 
 const testDataDir = "/tmp/pegasus-test-agent-spawn-task";
 
@@ -106,6 +107,7 @@ describe("Agent spawn_task interception", () => {
       persona: testPersona,
       settings: createTestSettings(),
       additionalTools: [spawn_task],
+      storePaths: buildMainAgentPaths(testDataDir),
     });
 
     await agent.start();
@@ -210,6 +212,7 @@ describe("Agent spawn_task interception", () => {
       persona: testPersona,
       settings: createTestSettings(),
       additionalTools: [spawn_task],
+      storePaths: buildMainAgentPaths(testDataDir),
     });
 
     await agent.start();
@@ -293,6 +296,7 @@ describe("Agent spawn_task interception", () => {
       persona: testPersona,
       settings: createTestSettings(),
       additionalTools: [spawn_task],
+      storePaths: buildMainAgentPaths(testDataDir),
     });
 
     agent.onNotify((n) => notifications.push(n));

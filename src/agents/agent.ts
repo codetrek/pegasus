@@ -37,7 +37,7 @@ import { getContextWindowSize } from "../session/context-windows.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import type { MCPManager, MCPServerConfig } from "../mcp/index.ts";
 import { wrapMCPTools } from "../mcp/index.ts";
-import path from "node:path";
+import type { AgentStorePaths } from "../storage/paths.ts";
 import { formatToolTimestamp } from "../infra/time.ts";
 
 const logger = getLogger("agent");
@@ -132,6 +132,10 @@ export interface AgentDeps {
   aiTaskTypeRegistry?: AITaskTypeRegistry;
   /** Extra tools to register in both global and per-type registries (e.g. spawn_task for SubAgent). */
   additionalTools?: import("../tools/types.ts").Tool[];
+  /** Explicit storage paths for this Agent instance. */
+  storePaths: AgentStorePaths;
+  /** Whether to run PostTaskReflector after task completion. Default: true. */
+  enableReflection?: boolean;
 }
 
 export class Agent {
@@ -142,7 +146,7 @@ export class Agent {
   private thinker: Thinker;
   private planner: Planner;
   private actor: Actor;
-  private postReflector: PostTaskReflector;
+  private postReflector: PostTaskReflector | null;
 
   // Tool infrastructure
   private toolExecutor: ToolExecutor;
@@ -157,6 +161,8 @@ export class Agent {
   private _running = false;
   private backgroundTasks = new Set<Promise<void>>();
   private settings: Settings;
+  private storePaths: AgentStorePaths;
+  private enableReflection: boolean;
   private notifyCallback: ((notification: TaskNotification) => void) | null = null;
   private aiTaskTypeRegistry: AITaskTypeRegistry | null = null;
   private additionalTools: import("../tools/types.ts").Tool[] = [];
@@ -226,6 +232,9 @@ export class Agent {
     this.toolExecutor = toolExecutor;
     this.backgroundTaskManager = new BackgroundTaskManager(toolExecutor);
 
+    this.storePaths = deps.storePaths;
+    this.enableReflection = deps.enableReflection ?? true;
+
     // Browser manager (optional — only created when browser config exists)
     const browserConfig = this.settings.tools?.browser;
     if (browserConfig) {
@@ -233,7 +242,7 @@ export class Agent {
     }
 
     // Task persistence (side-effect: subscribes to EventBus)
-    new TaskPersister(this.eventBus, this.taskRegistry, path.join(this.settings.dataDir, "tasks"));
+    new TaskPersister(this.eventBus, this.taskRegistry, this.storePaths.tasks);
 
     // Initialize cognitive processors with model + persona
     this.thinker = new Thinker(deps.model, deps.persona, this.toolRegistry);
@@ -245,17 +254,21 @@ export class Agent {
 
     // Resolve reflection model: prefer "fast" tier from registry, fallback to default model
     const reflectionModel = deps.modelRegistry?.getForTier("fast") ?? deps.model;
-    this.postReflector = new PostTaskReflector({
-      model: reflectionModel,
-      persona: deps.persona,
-      toolRegistry: reflectionToolRegistry,
-      toolExecutor,
-      memoryDir: path.join(this.settings.dataDir, "memory"),
-      contextWindowSize: getContextWindowSize(
-        reflectionModel.modelId,
-        deps.modelRegistry?.getContextWindowForTier("fast") ?? this.settings.llm.contextWindow,
-      ),
-    });
+    if (this.enableReflection && this.storePaths.memory) {
+      this.postReflector = new PostTaskReflector({
+        model: reflectionModel,
+        persona: deps.persona,
+        toolRegistry: reflectionToolRegistry,
+        toolExecutor,
+        memoryDir: this.storePaths.memory,
+        contextWindowSize: getContextWindowSize(
+          reflectionModel.modelId,
+          deps.modelRegistry?.getContextWindowForTier("fast") ?? this.settings.llm.contextWindow,
+        ),
+      });
+    } else {
+      this.postReflector = null;
+    }
   }
 
   // ═══════════════════════════════════════════════════
@@ -273,8 +286,7 @@ export class Agent {
     );
 
     // Recover pending tasks from previous run
-    const tasksDir = path.join(this.settings.dataDir, "tasks");
-    const recovered = await TaskPersister.recoverPending(tasksDir);
+    const recovered = await TaskPersister.recoverPending(this.storePaths.tasks);
     if (recovered.length > 0) {
       logger.info({ count: recovered.length, taskIds: recovered }, "recovered_pending_tasks");
       for (const taskId of recovered) {
@@ -430,7 +442,7 @@ export class Agent {
           });
         }
         // Async post-task reflection (fire-and-forget)
-        if (shouldReflect(task.context)) {
+        if (this.postReflector && shouldReflect(task.context)) {
           this._spawn(this._runPostReflection(task));
         }
         break;
@@ -483,12 +495,12 @@ export class Agent {
     }
     // Fetch memory index ONLY on first injection (not re-injected on resume)
     let memoryIndex: MemoryIndexEntry[] | undefined;
-    if (!task.context.memoryIndexInjected) {
+    if (!task.context.memoryIndexInjected && this.storePaths.memory) {
       try {
         const memResult = await this.toolExecutor.execute(
           "memory_list",
           {},
-          { taskId: task.context.id, memoryDir: path.join(this.settings.dataDir, "memory"), extractModel: this.extractModel ?? undefined, browserManager: this.browserManager ?? undefined },
+          { taskId: task.context.id, memoryDir: this.storePaths.memory, extractModel: this.extractModel ?? undefined, browserManager: this.browserManager ?? undefined },
         );
         if (memResult.success && Array.isArray(memResult.result)) {
           memoryIndex = memResult.result as MemoryIndexEntry[];
@@ -600,7 +612,7 @@ export class Agent {
         const toolResult = await this.toolExecutor.execute(
           toolName,
           toolParams,
-          { taskId: task.context.id, memoryDir: path.join(this.settings.dataDir, "memory"), mediaDir: path.join(this.settings.dataDir, "media"), extractModel: this.extractModel ?? undefined, backgroundManager: this.backgroundTaskManager, browserManager: this.browserManager ?? undefined },
+          { taskId: task.context.id, tasksDir: this.storePaths.tasks, ...(this.storePaths.memory && { memoryDir: this.storePaths.memory }), mediaDir: `${this.settings.dataDir}/media`, extractModel: this.extractModel ?? undefined, backgroundManager: this.backgroundTaskManager, browserManager: this.browserManager ?? undefined },
         );
 
         // Intercept spawn_task: create real task, wait for completion, return result
@@ -728,7 +740,7 @@ export class Agent {
   private async _runPostReflection(task: TaskFSM): Promise<void> {
     try {
       // Pre-load existing facts (full content) and episode index
-      const memoryDir = path.join(this.settings.dataDir, "memory");
+      const memoryDir = this.storePaths.memory!; // safe: postReflector is only non-null when memory exists
       const existingFacts: Array<{ path: string; content: string }> = [];
       const episodeIndex: Array<{ path: string; summary: string }> = [];
 
@@ -769,7 +781,7 @@ export class Agent {
       }
 
       const reflection = await this.llmSemaphore.use(() =>
-        this.postReflector.run(task.context, existingFacts, episodeIndex),
+        this.postReflector!.run(task.context, existingFacts, episodeIndex),
       );
       task.context.postReflection = reflection;
 
@@ -1026,8 +1038,7 @@ export class Agent {
       }
     } else {
       // 2. Not in registry — try to hydrate from JSONL
-      const tasksDir = path.join(this.settings.dataDir, "tasks");
-      const filePath = await TaskPersister.resolveTaskPath(tasksDir, taskId);
+      const filePath = await TaskPersister.resolveTaskPath(this.storePaths.tasks, taskId);
       if (!filePath) {
         throw new TaskNotFoundError(`Task ${taskId} not found`);
       }

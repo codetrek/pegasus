@@ -18,6 +18,7 @@ import type { LanguageModel } from "../../../src/infra/llm-types.ts";
 import type { Persona } from "../../../src/identity/persona.ts";
 import { rm } from "node:fs/promises";
 import { z } from "zod";
+import { buildMainAgentPaths } from "@pegasus/storage/paths.ts";
 
 // Mock MCPManager for integration tests
 function createMockManager(
@@ -572,6 +573,7 @@ describe("MCP Integration", () => {
           logLevel: "silent",
           authDir: "/tmp/pegasus-test-auth",
         }),
+        storePaths: buildMainAgentPaths(testDataDir),
       });
 
       const mockManager = {
@@ -601,6 +603,7 @@ describe("MCP Integration", () => {
           logLevel: "silent",
           authDir: "/tmp/pegasus-test-auth",
         }),
+        storePaths: buildMainAgentPaths(testDataDir),
       });
 
       const mockManager = {
@@ -625,6 +628,7 @@ describe("MCP Integration", () => {
           logLevel: "silent",
           authDir: "/tmp/pegasus-test-auth",
         }),
+        storePaths: buildMainAgentPaths(testDataDir),
       });
 
       const mockManager = {

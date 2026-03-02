@@ -26,6 +26,7 @@ import { parseProjectFile } from "../projects/loader.ts";
 import { ProxyLanguageModel } from "../projects/proxy-language-model.ts";
 import { spawn_task } from "../tools/builtins/index.ts";
 import { TaskPersister } from "../task/persister.ts";
+import { buildProjectAgentPaths, buildSubAgentPaths } from "../storage/paths.ts";
 
 // ── Types ────────────────────────────────────────────
 
@@ -239,6 +240,7 @@ export async function initProject(config: ProjectConfig): Promise<void> {
     model: proxyModel,
     persona,
     settings: projectSettings,
+    storePaths: buildProjectAgentPaths(projectPath),
   });
 
   // 8. Register notify callback → forward to main thread as InboundMessage
@@ -299,6 +301,8 @@ export async function initSubAgent(config: SubAgentConfig): Promise<void> {
     persona,
     settings: subAgentSettings,
     additionalTools: [spawn_task],
+    storePaths: buildSubAgentPaths(sessionPath),
+    enableReflection: false,
   });
 
   // 7. Register notify callback → forward to main thread as InboundMessage

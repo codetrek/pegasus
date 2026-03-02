@@ -53,6 +53,7 @@ import { MCPManager, wrapMCPTools } from "../mcp/index.ts";
 import type { MCPServerConfig } from "../mcp/index.ts";
 import { TokenRefreshMonitor } from "../mcp/auth/refresh-monitor.ts";
 import type { DeviceCodeAuthConfig } from "../mcp/auth/types.ts";
+import { buildMainAgentPaths } from "../storage/paths.ts";
 
 const logger = getLogger("main_agent");
 
@@ -168,6 +169,7 @@ export class MainAgent {
         modelRegistry: this.models,
         persona: this.persona,
         settings: this.settings,
+        storePaths: buildMainAgentPaths(this.settings.dataDir),
       });
     } catch (err) {
       // If codex auth failed and default model is codex, this will throw.
