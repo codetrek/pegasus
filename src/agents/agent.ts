@@ -33,7 +33,7 @@ import { reflectionTools, allTaskTools } from "../tools/builtins/index.ts";
 import type { AITaskTypeRegistry } from "../aitask-types/index.ts";
 import { type MemoryIndexEntry, TASK_COMPACT_PROMPT } from "../prompts/index.ts";
 import { TaskPersister } from "../task/persister.ts";
-import { computeTokenBudget, estimateTokensFromChars } from "../context/index.ts";
+import { computeTokenBudget, estimateTokensFromChars, calculateMaxToolResultChars, truncateToolResult } from "../context/index.ts";
 import { TASK_COMPACT_THRESHOLD } from "../context/constants.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import type { MCPManager, MCPServerConfig } from "../mcp/index.ts";
@@ -48,25 +48,21 @@ export type TaskNotification =
   | { type: "failed"; taskId: string; error: string }
   | { type: "notify"; taskId: string; message: string };
 
-/** Max characters for a single tool result before truncation. ~12k tokens. */
-const MAX_TOOL_RESULT_CHARS = 50_000;
-
 /** Push a tool result message into context.messages. */
 export function context_pushToolResult(
   context: TaskContext,
   toolCallId: string,
   toolResult: ToolResult,
+  contextWindowTokens: number,
 ): void {
   let rawContent = toolResult.success
     ? JSON.stringify(toolResult.result)
     : `Error: ${toolResult.error}`;
 
   // Safety net: truncate oversized tool results to protect context window
-  if (rawContent.length > MAX_TOOL_RESULT_CHARS) {
-    rawContent = rawContent.slice(0, MAX_TOOL_RESULT_CHARS)
-      + "\n\n[RESULT TRUNCATED — output exceeded "
-      + MAX_TOOL_RESULT_CHARS.toLocaleString()
-      + " chars. Use more specific queries or smaller ranges.]";
+  const maxChars = calculateMaxToolResultChars(contextWindowTokens);
+  if (rawContent.length > maxChars) {
+    rawContent = truncateToolResult(rawContent, maxChars);
   }
 
   const tsPrefix = formatToolTimestamp(
@@ -596,7 +592,9 @@ export class Agent {
             completedAt: Date.now(),
             durationMs: 0,
           };
-          context_pushToolResult(task.context, toolCallId, blockedResult);
+          const taskModelId = this._resolveTypeModel(task.context.taskType)?.modelId ?? this.thinker.model.modelId;
+          const toolBudget = computeTokenBudget({ modelId: taskModelId });
+          context_pushToolResult(task.context, toolCallId, blockedResult, toolBudget.contextWindow);
           const finalResult = {
             ...actorResult,
             result: undefined,
@@ -675,7 +673,9 @@ export class Agent {
         }
 
         // Push tool result message to context
-        context_pushToolResult(task.context, toolCallId, toolResult);
+        const taskModelId2 = this._resolveTypeModel(task.context.taskType)?.modelId ?? this.thinker.model.modelId;
+        const toolBudget2 = computeTokenBudget({ modelId: taskModelId2 });
+        context_pushToolResult(task.context, toolCallId, toolResult, toolBudget2.contextWindow);
 
         // Build final ActionResult from actorResult + toolResult
         const finalResult = {

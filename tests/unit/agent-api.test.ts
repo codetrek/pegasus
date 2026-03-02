@@ -253,7 +253,7 @@ describe("context_pushToolResult", () => {
       durationMs: 2300,
     };
 
-    context_pushToolResult(context, "call_1", toolResult);
+    context_pushToolResult(context, "call_1", toolResult, 128_000);
 
     expect(context.messages).toHaveLength(1);
     const msg = context.messages[0]!;
@@ -276,7 +276,7 @@ describe("context_pushToolResult", () => {
       durationMs: 500,
     };
 
-    context_pushToolResult(context, "call_2", toolResult);
+    context_pushToolResult(context, "call_2", toolResult, 128_000);
 
     const msg = context.messages[0]!;
     expect(msg.content).toMatch(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \| took 0\.5s\]/);
@@ -294,7 +294,7 @@ describe("context_pushToolResult", () => {
       // durationMs intentionally omitted
     };
 
-    context_pushToolResult(context, "call_3", toolResult);
+    context_pushToolResult(context, "call_3", toolResult, 128_000);
 
     const msg = context.messages[0]!;
     // Should have timestamp without duration
@@ -302,11 +302,12 @@ describe("context_pushToolResult", () => {
     expect(msg.content).toContain('"ok"');
   });
 
-  test("truncates oversized tool results at 50k chars", () => {
+  test("truncates oversized tool results based on context window", () => {
     const context = createTaskContext({ id: "test-trunc" });
 
-    // Create a result that exceeds 50k chars when JSON-stringified
-    const hugeContent = "x".repeat(60_000);
+    // With 128k context window, max chars = 128_000 * 0.25 * 3.5 = 112_000
+    // Create a result that exceeds this limit
+    const hugeContent = "x".repeat(120_000);
     const toolResult: ToolResult = {
       success: true,
       result: { content: hugeContent },
@@ -315,13 +316,12 @@ describe("context_pushToolResult", () => {
       durationMs: 10,
     };
 
-    context_pushToolResult(context, "call_huge", toolResult);
+    context_pushToolResult(context, "call_huge", toolResult, 128_000);
 
     const msg = context.messages[0]!;
-    // Should be truncated — total content must be under raw 50k + timestamp overhead
-    expect(msg.content.length).toBeLessThan(52_000);
+    // Should be truncated — max is 112k chars for 128k context window
+    expect(msg.content.length).toBeLessThan(120_000);
     expect(msg.content).toContain("[RESULT TRUNCATED");
-    expect(msg.content).toContain("50,000 chars");
     expect(msg.content).toContain("more specific queries");
   });
 
@@ -337,7 +337,7 @@ describe("context_pushToolResult", () => {
       durationMs: 5,
     };
 
-    context_pushToolResult(context, "call_small", toolResult);
+    context_pushToolResult(context, "call_small", toolResult, 128_000);
 
     const msg = context.messages[0]!;
     expect(msg.content).not.toContain("[RESULT TRUNCATED");

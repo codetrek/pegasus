@@ -15,7 +15,7 @@ describe("context_pushToolResult with images", () => {
       durationMs: 10,
     };
 
-    context_pushToolResult(context, "call_1", toolResult);
+    context_pushToolResult(context, "call_1", toolResult, 128_000);
 
     const lastMsg = context.messages[context.messages.length - 1]!;
     expect(lastMsg.role).toBe("tool");
@@ -33,7 +33,7 @@ describe("context_pushToolResult with images", () => {
       startedAt: Date.now(),
     };
 
-    context_pushToolResult(context, "call_2", toolResult);
+    context_pushToolResult(context, "call_2", toolResult, 128_000);
 
     const lastMsg = context.messages[context.messages.length - 1]!;
     expect(lastMsg.role).toBe("tool");
@@ -49,7 +49,7 @@ describe("context_pushToolResult with images", () => {
       startedAt: Date.now(),
     };
 
-    context_pushToolResult(context, "call_3", toolResult);
+    context_pushToolResult(context, "call_3", toolResult, 128_000);
 
     const lastMsg = context.messages[context.messages.length - 1]!;
     expect(lastMsg.images).toBeUndefined();
@@ -66,7 +66,7 @@ describe("context_pushToolResult with images", () => {
       durationMs: 5,
     };
 
-    context_pushToolResult(context, "call_4", toolResult);
+    context_pushToolResult(context, "call_4", toolResult, 128_000);
 
     const lastMsg = context.messages[context.messages.length - 1]!;
     expect(lastMsg.content).toContain("Image processed");

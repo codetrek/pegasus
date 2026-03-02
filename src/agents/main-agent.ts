@@ -27,7 +27,7 @@ import { Agent } from "./agent.ts";
 import type { TaskNotification } from "./agent.ts";
 import type { ToolCall } from "../models/tool.ts";
 import { EstimateCounter } from "../infra/token-counter.ts";
-import { computeTokenBudget } from "../context/index.ts";
+import { computeTokenBudget, calculateMaxToolResultChars, truncateToolResult } from "../context/index.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import path from "node:path";
 import { SkillRegistry, loadAllSkills } from "../skills/index.ts";
@@ -661,13 +661,21 @@ export class MainAgent {
           const rawContent = toolResult.success
             ? JSON.stringify(toolResult.result)
             : `Error: ${toolResult.error}`;
+          const toolBudget = computeTokenBudget({
+            modelId: this.models.getDefaultModelId(),
+            configContextWindow: this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
+          });
+          const maxToolChars = calculateMaxToolResultChars(toolBudget.contextWindow);
+          const safeContent = rawContent.length > maxToolChars
+            ? truncateToolResult(rawContent, maxToolChars)
+            : rawContent;
           const tsPrefix = formatToolTimestamp(
             toolResult.completedAt ?? Date.now(),
             toolResult.durationMs,
           );
           const toolMsg: Message = {
             role: "tool",
-            content: `${tsPrefix}\n${rawContent}`,
+            content: `${tsPrefix}\n${safeContent}`,
             toolCallId: tc.id,
           };
           // Propagate images from tool result (e.g., image_read returns images)
