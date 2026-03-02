@@ -27,7 +27,7 @@ import { Agent } from "./agent.ts";
 import type { TaskNotification } from "./agent.ts";
 import type { ToolCall } from "../models/tool.ts";
 import { EstimateCounter } from "../infra/token-counter.ts";
-import { getContextWindowSize } from "../context/context-windows.ts";
+import { computeTokenBudget } from "../context/index.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import path from "node:path";
 import { SkillRegistry, loadAllSkills } from "../skills/index.ts";
@@ -990,12 +990,12 @@ export class MainAgent {
    * Returns true if compact was performed.
    */
   private async _checkAndCompact(): Promise<boolean> {
-    const contextWindow = getContextWindowSize(
-      this.models.getDefaultModelId(),
-      this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
-    );
-    const threshold = this.settings.session?.compactThreshold ?? 0.8;
-    const maxTokens = contextWindow * threshold;
+    const budget = computeTokenBudget({
+      modelId: this.models.getDefaultModelId(),
+      configContextWindow: this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
+      outputReserveTokens: this.settings.context?.outputReserveTokens,
+      compactThreshold: this.settings.session?.compactThreshold,
+    });
 
     // Estimate current token usage
     const keepLastNTurns = this.settings.vision?.keepLastNTurns ?? 5;
@@ -1019,11 +1019,11 @@ export class MainAgent {
       );
     }
 
-    if (estimatedTokens < maxTokens) return false;
+    if (estimatedTokens < budget.compactTrigger) return false;
 
     // Trigger compact
     logger.info(
-      { estimatedTokens, maxTokens, threshold },
+      { estimatedTokens, compactTrigger: budget.compactTrigger, contextWindow: budget.contextWindow },
       "compact_triggered",
     );
 
@@ -1148,10 +1148,10 @@ export class MainAgent {
       toolRegistry: reflectionToolRegistry,
       toolExecutor: this.toolExecutor,
       memoryDir,
-      contextWindowSize: getContextWindowSize(
-        reflectionModel.modelId,
-        this.models.getContextWindowForTier("fast") ?? this.settings.llm.contextWindow,
-      ),
+      contextWindowSize: computeTokenBudget({
+        modelId: reflectionModel.modelId,
+        configContextWindow: this.models.getContextWindowForTier("fast") ?? this.settings.llm.contextWindow,
+      }).contextWindow,
     });
 
     // 6. Run reflection
@@ -1492,10 +1492,10 @@ export class MainAgent {
     const projectMetadata = this._buildProjectMetadata();
 
     // Get skill metadata with budget
-    const contextWindow = getContextWindowSize(
-      this.models.getDefaultModelId(),
-      this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
-    );
+    const contextWindow = computeTokenBudget({
+      modelId: this.models.getDefaultModelId(),
+      configContextWindow: this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
+    }).contextWindow;
     const skillBudget = Math.max(Math.floor(contextWindow * 0.02 * 4), 16_000);
     const skillMetadata = this.skillRegistry.getMetadataForPrompt(skillBudget);
 
