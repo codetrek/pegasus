@@ -10,7 +10,7 @@ import type { Tool, ToolResult, ToolContext, ToolCategory } from "../types.ts";
 
 export const http_get: Tool = {
   name: "http_get",
-  description: "Make an HTTP GET request",
+  description: "Make an HTTP GET request. Returns status, headers, and raw body. For web pages, prefer web_fetch (converts HTML to markdown).",
   category: "network" as ToolCategory,
   parameters: z.object({
     url: z.string().url().describe("URL to request"),
@@ -62,7 +62,7 @@ export const http_get: Tool = {
 
 export const http_post: Tool = {
   name: "http_post",
-  description: "Make an HTTP POST request",
+  description: "Make an HTTP POST request (default Content-Type: application/json). Returns status, headers, and raw body.",
   category: "network" as ToolCategory,
   parameters: z.object({
     url: z.string().url().describe("URL to request"),
@@ -123,7 +123,7 @@ export const http_post: Tool = {
 
 export const http_request: Tool = {
   name: "http_request",
-  description: "Make a generic HTTP request with any method",
+  description: "Make an HTTP request with any method (PUT, DELETE, PATCH, etc.). Use http_get/http_post for common methods.",
   category: "network" as ToolCategory,
   parameters: z.object({
     method: z.enum(["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]).describe("HTTP method"),
@@ -189,8 +189,7 @@ const MAX_RESULT_CONTENT_LENGTH = 1000;
 
 export const web_search: Tool = {
   name: "web_search",
-  description: "Search the web using Tavily. Returns structured results with title, URL, and content snippet. "
-    + "Requires WEB_SEARCH_API_KEY in config.",
+  description: "Search the web. Returns results with title, URL, and content snippet.",
   category: "network" as ToolCategory,
   parameters: z.object({
     query: z.string().min(1).describe("Search query"),

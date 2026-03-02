@@ -8,7 +8,6 @@
  * Default mode is "task" for backward compatibility with Thinker callers.
  */
 import type { Persona } from "./persona.ts";
-import { hostname } from "node:os";
 
 /** Entry in the memory index injected into user messages (not system prompt). */
 export interface MemoryIndexEntry {
@@ -56,13 +55,11 @@ export function buildIdentitySection(persona: Persona): string[] {
 
 export function buildRuntimeSection(): string[] {
   const os = process.platform;
-  const arch = process.arch;
-  const host = hostname();
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const now = new Date().toISOString().slice(0, 10);
   const cwd = process.cwd();
   return [
-    `Runtime: ${os}/${arch} | host: ${host} | tz: ${tz} | date: ${now} | cwd: ${cwd}`,
+    `Runtime: ${os} | tz: ${tz} | date: ${now} | cwd: ${cwd}`,
   ];
 }
 
@@ -88,12 +85,13 @@ export function buildHowYouThinkSection(): string[] {
     "## How You Think",
     "",
     "Your text output is your INNER MONOLOGUE — private thinking that",
-    "the user NEVER sees. No matter what you write in text, the user",
-    "cannot read it. It is only visible to you.",
+    "the user NEVER sees. The ONLY way to communicate with the user",
+    "is by calling reply().",
     "",
-    "The ONLY way to communicate with the user is by calling the reply() tool.",
-    "If you have information to share, analysis results, answers, or anything",
-    "the user should see — you MUST call reply(). Otherwise it is lost.",
+    "Be token-efficient:",
+    "- For routine tool calls (time, memory lookup): just call the tool. No narration needed.",
+    "- Narrate only for complex reasoning: multi-step plans, weighing alternatives.",
+    "- After a task result: decide what to tell the user, then call reply(). Don't restate everything.",
   ];
 }
 
@@ -120,6 +118,7 @@ export function buildToolsSection(): string[] {
     "  Create a persistent project workspace for long-running efforts (days/weeks).",
     "- suspend_project(name) / resume_project(name): Pause/restart a project.",
     "- complete_project(name) / archive_project(name): Finish and archive.",
+    "- list_projects(status?): List projects, optionally filtered by status.",
     "",
     "### Skills",
     "- use_skill(skill, args?): Invoke a registered skill by name.",
@@ -138,114 +137,32 @@ export function buildToolsSection(): string[] {
     "- session_archive_read(file): Read the previous archived session.",
     "- resume_task(taskId, input): Resume a suspended task with additional information.",
     "",
-    "### Browser (web page interaction)",
-    "- browser_navigate(url): Open a URL and return the page's accessibility snapshot",
-    "  with ref numbers (e1, e2...). Use refs to interact with elements.",
-    "- browser_click(ref): Click an element by its ref number.",
-    "- browser_type(ref, text, submit?): Type text into an input. Set submit=true to press Enter.",
-    "- browser_scroll(direction, amount?): Scroll the page up or down.",
-    "- browser_snapshot(): Refresh the page snapshot with fresh ref numbers.",
-    "- browser_screenshot(fullPage?): Save a screenshot to disk.",
-    "- browser_close(): Close the browser when done.",
-    "",
-    "Browser workflow: navigate → read snapshot → use refs to click/type → repeat.",
-    "Each action returns a fresh snapshot — previous refs are invalidated.",
+    "Browser automation is available via spawn_task(type='general') — the task",
+    "has browser_navigate, browser_click, browser_type, and other browser tools.",
   ];
 }
 
-export function buildThinkingStyleSection(): string[] {
+export function buildDelegationSection(): string[] {
   return [
-    "## Thinking Style",
+    "## Delegation",
     "",
-    "Your inner monologue is private but still costs tokens. Be efficient:",
-    "- For routine tool calls (checking time, reading memory): just call the tool. No narration needed.",
-    "- Narrate only when it helps YOUR reasoning: multi-step plans, complex decisions, weighing alternatives.",
-    "- After receiving a task result: decide what to tell the user, then call reply(). Don't restate the entire result in your monologue.",
-    "- Keep inner monologue brief and decision-focused.",
-  ];
-}
-
-export function buildReplyVsSpawnSection(): string[] {
-  return [
-    "## How to Delegate Work",
+    "| Scenario | Tool |",
+    "|----------|------|",
+    "| Answer from context/memory | reply() |",
+    "| Single step needing external tools | spawn_task(type, description, input) |",
+    "| Complex multi-step work | spawn_subagent(description, input) |",
+    "| Long-lived effort (days/weeks) | create_project(name, goal, ...) |",
     "",
-    "You have three delegation mechanisms, each for a different scale of work:",
+    "spawn_task types: explore (read-only), plan (read + memory), general (full access).",
     "",
-    "### reply() — Handle It Yourself",
-    "When you can answer directly from your own knowledge, session context, or a",
-    "quick tool call (time, memory lookup):",
-    "- Simple conversation, greetings, follow-ups",
-    "- Questions you already know the answer to",
-    "- Quick memory reads",
+    "You can spawn multiple tasks simultaneously. Results arrive automatically —",
+    "do NOT poll with task_replay. After receiving a result, always reply() to the user.",
     "",
-    "### spawn_task() — Single Atomic Task (AITask)",
-    "When the work is a single, self-contained step that needs tools you don't have",
-    "(file I/O, web search, shell commands):",
-    '- "Search the web for X" → spawn_task(type="explore", ...)',
-    '- "Read this file and summarize" → spawn_task(type="explore", ...)',
-    '- "Write this function" → spawn_task(type="general", ...)',
-    '- "Analyze this code and suggest improvements" → spawn_task(type="plan", ...)',
-    '- "Open this webpage and fill out the form" → spawn_task(type="general", ...)',
-    "  (Task will use browser_navigate, browser_type, browser_click)",
+    "SubAgent is autonomous — it can spawn its own tasks, runs in an isolated Worker.",
+    'Use spawn_task for "do this one thing"; use spawn_subagent for "figure this out and execute."',
     "",
-    "The task runs in your own Agent instance. You receive the result automatically",
-    "when it completes. Do NOT poll with task_replay — just wait.",
-    "",
-    "AITask types:",
-    "- explore: Read-only research. Cannot modify files. Use for search, analysis, reading.",
-    "- plan: Read + write to memory. Use for producing structured plans.",
-    "- general: Full capabilities. Use for file I/O, code changes, multi-step execution.",
-    "",
-    "### spawn_subagent() — Complex Multi-Step Work (SubAgent)",
-    "When the work requires breaking down into sub-tasks, parallel execution,",
-    "or coordinating multiple steps:",
-    '- "Research the top 5 frameworks and write a comparison" → spawn_subagent(...)',
-    "  (SubAgent will: spawn 5 explore tasks in parallel → synthesize → write report)",
-    '- "Refactor this module: analyze dependencies, update imports, run tests" → spawn_subagent(...)',
-    "  (SubAgent will: analyze → plan → execute changes → verify)",
-    '- "Investigate this bug across multiple files and fix it" → spawn_subagent(...)',
-    "  (SubAgent will: explore → identify root cause → implement fix → test)",
-    "",
-    "SubAgent is an autonomous orchestrator — it has its own Agent instance, can",
-    "spawn AITasks, and decides independently how to break down and coordinate work.",
-    "You receive progress updates via notify and the final result on completion.",
-    "",
-    "Key differences from spawn_task:",
-    "- SubAgent CAN spawn its own tasks and coordinate them",
-    "- SubAgent runs in an isolated Worker thread (crash-safe)",
-    "- SubAgent has its own session (you don't see internal reasoning)",
-    '- Use spawn_task for "do this one thing"; use spawn_subagent for "figure out',
-    '  how to do this and execute"',
-    "",
-    "### create_project() — Long-Lived Effort (Project)",
-    "When the work spans days or weeks and needs persistent context:",
-    '- "Manage the frontend migration over the next two weeks" → create_project(...)',
-    '- "Monitor and manage our social media presence" → create_project(...)',
-    '- "Oversee the API redesign" → create_project(...)',
-    "",
-    "Projects have persistent memory, their own session history, and survive",
-    "restarts. They accumulate knowledge over time. Communicate with active",
+    "Projects persist across restarts and accumulate context. Communicate with active",
     'projects via reply(channelType="project", channelId="<name>").',
-    "",
-    "### Decision Flowchart",
-    "",
-    "Can you answer from context/memory?",
-    "  → YES: reply() directly",
-    "  → NO: Do you need external tools?",
-    "      → YES: Is it a single self-contained step?",
-    "          → YES: spawn_task()",
-    "          → NO: Will the work take days/weeks?",
-    "              → YES: create_project()",
-    "              → NO: spawn_subagent()",
-    "",
-    "### After Delegation",
-    "- spawn_task: Result arrives in your session automatically. Think about it,",
-    "  then ALWAYS call reply() to inform the user.",
-    "- spawn_subagent: You may receive progress notifications. The final result",
-    "  arrives when the SubAgent completes. Then call reply().",
-    "- create_project: The project runs independently. It will notify you of",
-    "  milestones. You can check on it or send instructions via",
-    '  reply(channelType="project").',
   ];
 }
 
@@ -307,8 +224,7 @@ export function buildSystemPrompt(options: PromptOptions): string {
     // Main Agent sections
     lines.push("", ...buildHowYouThinkSection());
     lines.push("", ...buildToolsSection());
-    lines.push("", ...buildThinkingStyleSection());
-    lines.push("", ...buildReplyVsSpawnSection());
+    lines.push("", ...buildDelegationSection());
 
     if (options.aiTaskMetadata) {
       lines.push("", options.aiTaskMetadata);

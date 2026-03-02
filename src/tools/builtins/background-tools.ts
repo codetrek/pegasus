@@ -15,8 +15,7 @@ import type { Tool, ToolResult, ToolContext, ToolCategory } from "../types.ts";
 export const bg_run: Tool = {
   name: "bg_run",
   description:
-    "Start a tool execution in the background. Returns immediately with a task ID. " +
-    "Use bg_output to get the result later, or bg_stop to terminate the task.",
+    "Run a tool in the background. Returns immediately with a bgTaskId. Use for long-running operations (>30s). Retrieve results with bg_output, or cancel with bg_stop.",
   category: "system" as ToolCategory,
   parameters: z.object({
     tool: z.string().describe("Name of the tool to execute in the background"),

@@ -1,82 +1,9 @@
 /**
- * Data tools - JSON parsing, Base64 encoding/decoding.
+ * Data tools - Base64 encoding/decoding.
  */
 
 import { z } from "zod";
 import type { Tool, ToolResult, ToolContext, ToolCategory } from "../types.ts";
-
-// ── json_parse ─────────────────────────────────
-
-export const json_parse: Tool = {
-  name: "json_parse",
-  description: "Parse JSON string into object",
-  category: "data" as ToolCategory,
-  parameters: z.object({
-    text: z.string().describe("JSON string to parse"),
-  }),
-  async execute(params: unknown, _context: ToolContext): Promise<ToolResult> {
-    const startedAt = Date.now();
-    const { text } = params as { text: string };
-
-    try {
-      const data = JSON.parse(text);
-
-      return {
-        success: true,
-        result: { data },
-        startedAt,
-        completedAt: Date.now(),
-        durationMs: Date.now() - startedAt,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-        startedAt,
-        completedAt: Date.now(),
-        durationMs: Date.now() - startedAt,
-      };
-    }
-  },
-};
-
-// ── json_stringify ────────────────────────────
-
-export const json_stringify: Tool = {
-  name: "json_stringify",
-  description: "Serialize object to JSON string",
-  category: "data" as ToolCategory,
-  parameters: z.object({
-    data: z.unknown().describe("Data to serialize"),
-    pretty: z.boolean().optional().default(false).describe("Format with indentation"),
-  }),
-  async execute(params: unknown, _context: ToolContext): Promise<ToolResult> {
-    const startedAt = Date.now();
-    const { data, pretty } = params as { data: unknown; pretty?: boolean };
-
-    try {
-      const text = pretty
-        ? JSON.stringify(data, null, 2)
-        : JSON.stringify(data);
-
-      return {
-        success: true,
-        result: { text },
-        startedAt,
-        completedAt: Date.now(),
-        durationMs: Date.now() - startedAt,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-        startedAt,
-        completedAt: Date.now(),
-        durationMs: Date.now() - startedAt,
-      };
-    }
-  },
-};
 
 // ── base64_encode ─────────────────────────────
 

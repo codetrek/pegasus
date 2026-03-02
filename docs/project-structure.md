@@ -66,7 +66,7 @@ pegasus/
 │   │       ├── system-tools.ts     # current_time, sleep, get_env, set_env
 │   │       ├── file-tools.ts       # read_file, write_file, edit_file, grep_files, list_files, etc.
 │   │       ├── network-tools.ts    # http_get, http_post, http_request, web_search
-│   │       ├── data-tools.ts       # json_parse, json_stringify, base64_encode/decode
+│   │       ├── data-tools.ts       # base64_encode/decode
 │   │       ├── memory-tools.ts     # memory_list, memory_read, memory_write, memory_patch, memory_append
 │   │       ├── task-tools.ts       # task_list, task_replay
 │   │       ├── reply-tool.ts       # reply (Main Agent only)

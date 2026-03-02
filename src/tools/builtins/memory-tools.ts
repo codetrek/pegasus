@@ -51,7 +51,7 @@ function getMemoryDir(context: ToolContext): string {
 
 export const memory_list: Tool = {
   name: "memory_list",
-  description: "List available memory files with their summaries",
+  description: "List all memory files with path, summary, and size. Call this first to discover available memories.",
   category: "memory" as ToolCategory,
   parameters: z.object({}),
   async execute(_params: unknown, context: ToolContext): Promise<ToolResult> {
@@ -120,7 +120,7 @@ export const memory_list: Tool = {
 
 export const memory_read: Tool = {
   name: "memory_read",
-  description: "Read a memory file",
+  description: "Read a memory file by relative path (e.g. 'facts/user.md'). Returns raw markdown content.",
   category: "memory" as ToolCategory,
   parameters: z.object({
     path: z.string().describe("Relative path within memory directory, e.g. 'facts/user.md'"),
@@ -157,7 +157,7 @@ export const memory_read: Tool = {
 
 export const memory_write: Tool = {
   name: "memory_write",
-  description: "Write or overwrite a memory file",
+  description: "Create or overwrite a memory file. Fact files (facts/*.md) are subject to allowlist and 15KB budget.",
   category: "memory" as ToolCategory,
   parameters: z.object({
     path: z.string().describe("Relative path, e.g. 'facts/user.md'"),

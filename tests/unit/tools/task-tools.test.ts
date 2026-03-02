@@ -9,12 +9,21 @@ import { rm, mkdir, appendFile } from "node:fs/promises";
 const testDir = "/tmp/pegasus-test-task-tools";
 
 describe("task tools", () => {
+  let origDataDir: string | undefined;
+
   beforeEach(async () => {
+    origDataDir = process.env.PEGASUS_DATA_DIR;
+    process.env.PEGASUS_DATA_DIR = testDir;
     await rm(testDir, { recursive: true, force: true }).catch(() => {});
     await mkdir(`${testDir}/tasks/2026-02-25`, { recursive: true });
   });
 
   afterEach(async () => {
+    if (origDataDir === undefined) {
+      delete process.env.PEGASUS_DATA_DIR;
+    } else {
+      process.env.PEGASUS_DATA_DIR = origDataDir;
+    }
     await rm(testDir, { recursive: true, force: true }).catch(() => {});
   });
 
@@ -41,7 +50,7 @@ describe("task tools", () => {
 
       const context = { taskId: "test", memoryDir: `${testDir}/tasks` };
       const result = await task_list.execute(
-        { date: "2026-02-25", dataDir: testDir },
+        { date: "2026-02-25" },
         context,
       );
 
@@ -66,7 +75,7 @@ describe("task tools", () => {
     it("should return empty list when no tasks exist for date", async () => {
       const context = { taskId: "test" };
       const result = await task_list.execute(
-        { date: "2026-02-26", dataDir: testDir },
+        { date: "2026-02-26" },
         context,
       );
 
@@ -78,7 +87,7 @@ describe("task tools", () => {
       // testDir/tasks exists but no index.jsonl
       const context = { taskId: "test" };
       const result = await task_list.execute(
-        { date: "2026-02-25", dataDir: testDir },
+        { date: "2026-02-25" },
         context,
       );
 
@@ -93,7 +102,7 @@ describe("task tools", () => {
 
       const context = { taskId: "test" };
       const result = await task_list.execute(
-        { date: "2026-02-25", dataDir: testDir },
+        { date: "2026-02-25" },
         context,
       );
 
@@ -110,7 +119,7 @@ describe("task tools", () => {
       try {
         const context = { taskId: "test" };
         const result = await task_list.execute(
-          { date: "2026-02-25", dataDir: testDir },
+          { date: "2026-02-25" },
           context,
         );
 
@@ -143,7 +152,7 @@ describe("task tools", () => {
 
       const context = { taskId: "test" };
       const result = await task_replay.execute(
-        { taskId: "r1", dataDir: testDir },
+        { taskId: "r1" },
         context,
       );
 
@@ -162,7 +171,7 @@ describe("task tools", () => {
     it("should fail for unknown taskId", async () => {
       const context = { taskId: "test" };
       const result = await task_replay.execute(
-        { taskId: "nonexistent", dataDir: testDir },
+        { taskId: "nonexistent" },
         context,
       );
 
@@ -176,7 +185,7 @@ describe("task tools", () => {
 
       const context = { taskId: "test" };
       const result = await task_replay.execute(
-        { taskId: "bad", dataDir: testDir },
+        { taskId: "bad" },
         context,
       );
 
@@ -202,7 +211,7 @@ describe("task tools", () => {
 
       const context = { taskId: "test" };
       const result = await task_replay.execute(
-        { taskId: "r2", dataDir: testDir },
+        { taskId: "r2" },
         context,
       );
 

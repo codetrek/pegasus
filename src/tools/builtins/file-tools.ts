@@ -44,8 +44,7 @@ const READ_FILE_MAX_LINE_LENGTH = 2000;
 
 export const read_file: Tool = {
   name: "read_file",
-  description: "Read content of a file. Returns line-numbered output (up to 2000 lines by default). "
-    + "Use offset and limit to paginate through large files.",
+  description: "Read a file with line numbers (up to 2000 lines). Use offset/limit for large files. For locating content, prefer grep_files.",
   category: "file" as ToolCategory,
   parameters: z.object({
     path: z.string().describe("File path to read"),
@@ -138,7 +137,7 @@ export const read_file: Tool = {
 
 export const write_file: Tool = {
   name: "write_file",
-  description: "Write content to a file",
+  description: "Create or overwrite a file. Creates parent directories automatically. Replaces all existing content — use edit_file for partial changes.",
   category: "file" as ToolCategory,
   parameters: z.object({
     path: z.string().describe("File path to write"),
@@ -203,7 +202,7 @@ export const write_file: Tool = {
 
 export const list_files: Tool = {
   name: "list_files",
-  description: "List files and directories",
+  description: "List files in a directory. For pattern-based search across directories, prefer glob_files.",
   category: "file" as ToolCategory,
   parameters: z.object({
     path: z.string().default(".").describe("Directory path to list"),
