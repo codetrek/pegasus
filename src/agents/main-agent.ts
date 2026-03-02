@@ -10,7 +10,7 @@
 import type { Message } from "../infra/llm-types.ts";
 import { generateText } from "../infra/llm-utils.ts";
 import type { Persona } from "../identity/persona.ts";
-import { buildSystemPrompt, formatSize } from "../identity/prompt.ts";
+import { buildSystemPrompt, formatSize, COMPACT_SYSTEM_PROMPT } from "../prompts/index.ts";
 import type { Settings } from "../infra/config.ts";
 import { sanitizeForPrompt } from "../infra/sanitize.ts";
 import { formatTimestamp, formatToolTimestamp } from "../infra/time.ts";
@@ -1055,28 +1055,9 @@ export class MainAgent {
    * This is NOT part of Main Agent's inner monologue — it's a system operation.
    */
   private async _generateSummary(): Promise<string> {
-    const systemPrompt = [
-      "You are a conversation summarizer. Summarize the following conversation.",
-      "",
-      "Your summary MUST include:",
-      "- The user's most recent intent and what needs to happen next",
-      "- Key decisions and conclusions reached",
-      "- Ongoing tasks and their current status",
-      "- Important user preferences or context",
-      "",
-      "Your summary MUST NOT include:",
-      "- Greetings or small talk",
-      "- Internal reasoning or thinking process",
-      "- Redundant tool call details",
-      "- Intermediate results that led to final conclusions",
-      "",
-      "Write the summary as a concise, structured document.",
-      "Use bullet points for clarity.",
-    ].join("\n");
-
     const result = await generateText({
       model: this.models.getForTier("fast"),
-      system: systemPrompt,
+      system: COMPACT_SYSTEM_PROMPT,
       messages: this.sessionMessages,
     });
 

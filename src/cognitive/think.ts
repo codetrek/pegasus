@@ -9,8 +9,8 @@ import type { LanguageModel, Message } from "../infra/llm-types.ts";
 import { generateText } from "../infra/llm-utils.ts";
 import { getLogger } from "../infra/logger.ts";
 import type { Persona } from "../identity/persona.ts";
-import { buildSystemPrompt, formatSize } from "../identity/prompt.ts";
-import type { MemoryIndexEntry } from "../identity/prompt.ts";
+import { buildSystemPrompt, formatSize } from "../prompts/index.ts";
+import type { MemoryIndexEntry } from "../prompts/index.ts";
 import type { TaskContext } from "../task/context.ts";
 import type { ToolRegistry } from "../tools/registry.ts";
 

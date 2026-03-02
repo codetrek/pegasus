@@ -9,6 +9,7 @@ import type { LanguageModel, Message } from "../infra/llm-types.ts";
 import { generateText } from "../infra/llm-utils.ts";
 import { getLogger } from "../infra/logger.ts";
 import type { Persona } from "../identity/persona.ts";
+import { buildReflectionPrompt } from "../prompts/index.ts";
 import type { TaskContext, PostTaskReflection } from "../task/context.ts";
 import type { ToolRegistry } from "../tools/registry.ts";
 import type { ToolExecutor } from "../tools/executor.ts";
@@ -55,7 +56,7 @@ export class PostTaskReflector {
   ): Promise<PostTaskReflection> {
     logger.info({ taskId: context.id, iteration: context.iteration }, "post_task_reflect_start");
 
-    const system = this._buildSystemPrompt(existingFacts, episodeIndex);
+    const system = buildReflectionPrompt(this.deps.persona, existingFacts, episodeIndex);
     const messages = this._buildMessages(context);
 
     // Truncate messages to fit within 60% of context window
@@ -104,92 +105,6 @@ export class PostTaskReflector {
 
     logger.warn({ taskId: context.id }, "post_task_reflect_max_rounds");
     return { assessment: "Max reflection rounds reached", toolCallsCount: totalToolCalls };
-  }
-
-  private _buildSystemPrompt(
-    existingFacts: Array<{ path: string; content: string }>,
-    episodeIndex: Array<{ path: string; summary: string }>,
-  ): string {
-    const { persona } = this.deps;
-    const sections: string[] = [
-      // Persona identity — aligns reflector judgment with agent character
-      `You are ${persona.name}, ${persona.role}.`,
-      `Personality: ${persona.personality.join(", ")}.`,
-      `Values: ${persona.values.join(", ")}.`,
-      "",
-      "You are reviewing a completed task to decide what to remember long-term.",
-      "You have memory tools: memory_read, memory_write, memory_patch, memory_append.",
-      "",
-      "## Goal",
-      "",
-      "Decide what is worth remembering. If nothing, just respond with a brief",
-      "assessment — do NOT force writes.",
-      "",
-      "## Fact Files (facts/) — only two allowed files",
-      "",
-      "You may ONLY write to these two fact files:",
-      "- facts/user.md — About the user: identity, preferences, social relationships,",
-      "  important dates (birthdays, anniversaries), recurring habits (weekly meetings)",
-      "- facts/memory.md — About experience: insights learned from interactions,",
-      "  patterns discovered, non-obvious knowledge accumulated over time",
-      "",
-      "Do NOT create any other fact files. Only user.md and memory.md are allowed.",
-      "",
-      "Use memory_write to create or update fact files.",
-      "Fact files are REPLACED entirely on write. To update an existing file:",
-      "read it first with memory_read, merge your additions, write back COMPLETE content.",
-      "Use memory_patch for small changes to existing files.",
-      "",
-      "Total facts budget: 15KB across all fact files. Be concise.",
-      "",
-      "Fact file format:",
-      "  # <Title>",
-      "  - Key: value",
-      "  - Updated: YYYY-MM-DD",
-      "",
-      "## Episodes (episodes/YYYY-MM.md) — experience summaries",
-      "",
-      "Use memory_append to add entries. Pass updated summary parameter to keep",
-      "the file-level > Summary: line current.",
-      "",
-      "Entry format:",
-      "  ## <Title>",
-      "  - Summary: <under 10 words>",
-      "  - Date: YYYY-MM-DD",
-      "  - Details: <2-3 sentences>",
-      "  - Lesson: <what was learned>",
-      "",
-      "## Worth Recording",
-      "- User-stated personal information (name, preferences, work patterns)",
-      "- User's social relationships (colleagues, family, teams)",
-      "- Important dates and recurring events (birthdays, meetings, deadlines)",
-      "- Lessons learned from completing tasks (what worked, what didn't)",
-      "- User-specific preferences discovered through interaction",
-      "- Non-obvious patterns (e.g., user always asks for options before deciding)",
-      "",
-      "## NOT Worth Recording",
-      "- Information that can be re-retrieved (web results, API responses)",
-      "- Generic knowledge the LLM already has",
-      "- Routine operations with no new insight",
-      "- Trivial Q&A with no lasting value",
-      "- Duplicates of information already in existing facts",
-    ];
-
-    if (existingFacts.length > 0) {
-      sections.push("", "## Existing Facts (full content)");
-      for (const fact of existingFacts) {
-        sections.push("", `### ${fact.path}`, fact.content);
-      }
-    }
-
-    if (episodeIndex.length > 0) {
-      sections.push("", "## Recent Episodes (summaries only)");
-      for (const ep of episodeIndex) {
-        sections.push(`- ${ep.path}: ${ep.summary}`);
-      }
-    }
-
-    return sections.join("\n");
   }
 
   private _buildMessages(context: TaskContext): Message[] {

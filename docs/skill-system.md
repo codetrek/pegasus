@@ -264,7 +264,7 @@ const use_skill: Tool = {
 | `src/tools/builtins/index.ts` | Add `use_skill` to `mainAgentTools` |
 | `src/agents/main-agent.ts` | Inject skill metadata into system prompt; handle `/` commands in `send()` |
 | `src/agents/agent.ts` | Minor: accept skill-spawned tasks (no change needed — spawn_task already works) |
-| `src/identity/prompt.ts` | Add skill metadata section to `buildSystemPrompt` |
+| `src/prompts/main-agent.ts` | Add skill metadata section to `buildSystemPrompt` |
 
 ### What Does NOT Change
 

@@ -350,7 +350,7 @@ The system prompt is built **once** at startup and cached for all LLM calls. Thi
 
 ### Prompt Modes
 
-The prompt builder (`src/identity/prompt.ts`) supports two modes via `buildSystemPrompt(options)`:
+The prompt builder (`src/prompts/main-agent.ts`) supports two modes via `buildSystemPrompt(options)`:
 
 **Main Agent (mode: "main")** — full prompt with all sections:
 
@@ -377,7 +377,7 @@ The prompt builder (`src/identity/prompt.ts`) supports two modes via `buildSyste
 
 Task Agents skip How You Think, Tools, Thinking Style, Reply vs Spawn, Channels, Session History, and Skills — saving ~100 lines of irrelevant tokens per LLM call.
 
-> **Source of truth:** The actual prompt text lives in `src/identity/prompt.ts` section builder functions.
+> **Source of truth:** The actual prompt text lives in `src/prompts/` — see `main-agent.ts` (MainAgent sections), `shared.ts` (identity/runtime/safety), `subagent.ts` (SubAgent prompt), and `internal.ts` (reflection/compact/extract).
 
 ### Input Sanitization
 

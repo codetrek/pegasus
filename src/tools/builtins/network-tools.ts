@@ -5,6 +5,7 @@
 import { z } from "zod";
 import TurndownService from "turndown";
 import type { Tool, ToolResult, ToolContext, ToolCategory } from "../types.ts";
+import { WEB_EXTRACT_SYSTEM_PROMPT } from "../../prompts/index.ts";
 
 // ── http_get ────────────────────────────────────
 
@@ -449,7 +450,7 @@ async function processResponse(
 
   if (extractModel) {
     const result = await extractModel.generate({
-      system: "Extract information from the following web page content. Be concise. Return only the requested information.",
+      system: WEB_EXTRACT_SYSTEM_PROMPT,
       messages: [{ role: "user", content: prompt + "\n\n---PAGE CONTENT---\n\n" + markdown }],
     });
     content = result.text;

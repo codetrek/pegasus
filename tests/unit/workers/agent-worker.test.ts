@@ -34,8 +34,8 @@ import {
   _setExitProcessForTest,
   _setAgentFactoryForTest,
   _setProxyModelFactoryForTest,
-  SUBAGENT_SYSTEM_PROMPT,
 } from "@pegasus/workers/agent-worker.ts";
+import { SUBAGENT_SYSTEM_PROMPT } from "@pegasus/prompts/index.ts";
 import type { TaskNotification } from "@pegasus/agents/agent.ts";
 import { setSettings, resetSettings } from "@pegasus/infra/config.ts";
 import type { Settings } from "@pegasus/infra/config.ts";
