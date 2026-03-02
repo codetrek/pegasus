@@ -31,6 +31,16 @@ import type sharpType from "sharp";
 type SharpFn = typeof sharpType;
 let _sharpFn: SharpFn | null | "unavailable" = null;
 
+/** @internal — exposed for testing only */
+export function _resetSharpForTest(): void {
+  _sharpFn = null;
+}
+
+/** @internal — exposed for testing only */
+export function _setSharpUnavailableForTest(): void {
+  _sharpFn = "unavailable";
+}
+
 /** Check if sharp is available at runtime. */
 export function isSharpAvailable(): boolean {
   if (_sharpFn === "unavailable") return false;
@@ -52,7 +62,7 @@ function getSharp(): SharpFn {
   return _sharpFn;
 }
 
-function buildSizeGrid(maxSide: number): number[] {
+export function buildSizeGrid(maxSide: number): number[] {
   return [maxSide, 1000, 800]
     .map((v) => Math.min(maxSide, v))
     .filter((v, i, arr) => v > 0 && arr.indexOf(v) === i)
