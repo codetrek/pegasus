@@ -140,6 +140,20 @@ const bg_stop = backgroundToolsModule.bg_stop;
 
 export { bg_run, bg_output, bg_stop };
 
+// Browser tools (Playwright-based browser automation)
+import {
+  browser_navigate,
+  browser_snapshot,
+  browser_screenshot,
+  browser_click,
+  browser_type,
+  browser_scroll,
+  browser_close,
+  browserTools as _browserTools,
+} from "../browser/browser-tools.ts";
+
+export { browser_navigate, browser_snapshot, browser_screenshot, browser_click, browser_type, browser_scroll, browser_close };
+
 // Re-export all tools as arrays
 
 /** System tools available to Task System. */
@@ -193,6 +207,8 @@ export const backgroundTools: Tool[] = [
   bg_stop,
 ];
 
+export { _browserTools as browserTools };
+
 /** All tools for Task System (does NOT include spawn_task or reply — those are Main Agent only). */
 export const allTaskTools: Tool[] = [
   ...systemTools,
@@ -202,6 +218,7 @@ export const allTaskTools: Tool[] = [
   ...memoryTools,
   ...taskTools,
   ...backgroundTools,
+  ..._browserTools,
   notify,
 ];
 

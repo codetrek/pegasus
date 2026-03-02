@@ -27,6 +27,7 @@ import type { TaskContext } from "../task/context.ts";
 import { ToolRegistry } from "../tools/registry.ts";
 import { ToolExecutor } from "../tools/executor.ts";
 import { BackgroundTaskManager } from "../tools/background.ts";
+import { BrowserManager } from "../tools/browser/index.ts";
 import type { ToolResult } from "../tools/types.ts";
 import { reflectionTools, allTaskTools } from "../tools/builtins/index.ts";
 import type { AITaskTypeRegistry } from "../aitask-types/index.ts";
@@ -158,6 +159,7 @@ export class Agent {
   private extractModel: LanguageModel | null = null;
   private modelRegistry: ModelRegistry | null = null;
   private backgroundTaskManager: BackgroundTaskManager;
+  private browserManager: BrowserManager | null = null;
 
   constructor(deps: AgentDeps) {
     this.settings = deps.settings ?? getSettings();
@@ -219,6 +221,12 @@ export class Agent {
     );
     this.toolExecutor = toolExecutor;
     this.backgroundTaskManager = new BackgroundTaskManager(toolExecutor);
+
+    // Browser manager (optional — only created when browser config exists)
+    const browserConfig = this.settings.tools?.browser;
+    if (browserConfig) {
+      this.browserManager = new BrowserManager(browserConfig);
+    }
 
     // Task persistence (side-effect: subscribes to EventBus)
     new TaskPersister(this.eventBus, this.taskRegistry, this.settings.dataDir);
@@ -283,11 +291,16 @@ export class Agent {
     logger.info("agent_stopping");
     this._running = false;
 
-    // Wait for all background tasks
+    // Wait for all background tasks FIRST (they may still use the browser)
     if (this.backgroundTasks.size > 0) {
       await Promise.allSettled([...this.backgroundTasks]);
     }
     this.backgroundTasks.clear();
+
+    // Close browser AFTER background tasks are done
+    if (this.browserManager) {
+      await this.browserManager.close();
+    }
 
     await this.eventBus.stop();
     logger.info("agent_stopped");
@@ -471,7 +484,7 @@ export class Agent {
         const memResult = await this.toolExecutor.execute(
           "memory_list",
           {},
-          { taskId: task.context.id, memoryDir: path.join(this.settings.dataDir, "memory"), extractModel: this.extractModel ?? undefined },
+          { taskId: task.context.id, memoryDir: path.join(this.settings.dataDir, "memory"), extractModel: this.extractModel ?? undefined, browserManager: this.browserManager ?? undefined },
         );
         if (memResult.success && Array.isArray(memResult.result)) {
           memoryIndex = memResult.result as MemoryIndexEntry[];
@@ -580,7 +593,7 @@ export class Agent {
         const toolResult = await this.toolExecutor.execute(
           toolName,
           toolParams,
-          { taskId: task.context.id, memoryDir: path.join(this.settings.dataDir, "memory"), extractModel: this.extractModel ?? undefined, backgroundManager: this.backgroundTaskManager },
+          { taskId: task.context.id, memoryDir: path.join(this.settings.dataDir, "memory"), extractModel: this.extractModel ?? undefined, backgroundManager: this.backgroundTaskManager, browserManager: this.browserManager ?? undefined },
         );
 
         // Intercept spawn_task: create real task, wait for completion, return result

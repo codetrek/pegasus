@@ -99,6 +99,16 @@ function coerceStringArray(val: unknown): unknown {
   return val;
 }
 
+export const BrowserConfigSchema = z.object({
+  headless: booleanFromString.default(true),
+  viewport: z.object({
+    width: z.coerce.number().int().positive().default(1280),
+    height: z.coerce.number().int().positive().default(720),
+  }).default({}),
+  timeout: z.coerce.number().int().positive().default(30000),
+  cdpUrl: z.string().optional(),
+}).optional();
+
 export const ToolsConfigSchema = z.object({
   timeout: z.coerce.number().int().positive().default(30), // seconds, tool execution timeout
   allowedPaths: z.preprocess(coerceStringArray, z.array(z.string()).default([])),
@@ -112,6 +122,7 @@ export const ToolsConfigSchema = z.object({
       maxResults: z.coerce.number().int().positive().default(5),
     })
     .optional(),
+  browser: BrowserConfigSchema,
   mcpServers: z.preprocess(
     coerceStringArray,
     z.array(
@@ -200,5 +211,6 @@ export type TiersConfig = z.infer<typeof TiersConfigSchema>;
 export type MemoryConfig = z.infer<typeof MemoryConfigSchema>;
 export type AgentConfig = z.infer<typeof AgentConfigSchema>;
 export type IdentityConfig = z.infer<typeof IdentityConfigSchema>;
+export type BrowserConfig = z.infer<typeof BrowserConfigSchema>;
 export type ToolsConfig = z.infer<typeof ToolsConfigSchema>;
 export type Settings = z.infer<typeof SettingsSchema>;
