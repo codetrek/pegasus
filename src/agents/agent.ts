@@ -33,7 +33,8 @@ import { reflectionTools, allTaskTools } from "../tools/builtins/index.ts";
 import type { AITaskTypeRegistry } from "../aitask-types/index.ts";
 import { type MemoryIndexEntry, TASK_COMPACT_PROMPT } from "../prompts/index.ts";
 import { TaskPersister } from "../task/persister.ts";
-import { getContextWindowSize } from "../context/context-windows.ts";
+import { computeTokenBudget, estimateTokensFromChars } from "../context/index.ts";
+import { TASK_COMPACT_THRESHOLD } from "../context/constants.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import type { MCPManager, MCPServerConfig } from "../mcp/index.ts";
 import { wrapMCPTools } from "../mcp/index.ts";
@@ -261,10 +262,10 @@ export class Agent {
         toolRegistry: reflectionToolRegistry,
         toolExecutor,
         memoryDir: this.storePaths.memory,
-        contextWindowSize: getContextWindowSize(
-          reflectionModel.modelId,
-          deps.modelRegistry?.getContextWindowForTier("fast") ?? this.settings.llm.contextWindow,
-        ),
+        contextWindowSize: computeTokenBudget({
+          modelId: reflectionModel.modelId,
+          configContextWindow: deps.modelRegistry?.getContextWindowForTier("fast") ?? this.settings.llm.contextWindow,
+        }).contextWindow,
       });
     } else {
       this.postReflector = null;
@@ -842,20 +843,19 @@ export class Agent {
     // Need at least 8 messages to be worth compacting
     if (messages.length < 8) return;
 
-    // Estimate token count (simple heuristic: chars / 3.5)
+    // Estimate token count using shared estimator
     const totalChars = messages.reduce((sum, m) => sum + m.content.length, 0);
-    const estimatedTokens = Math.ceil(totalChars / 3.5);
+    const estimatedTokens = estimateTokensFromChars(totalChars);
 
     // Get context window for the task's model
     const typeModel = this._resolveTypeModel(task.context.taskType);
     const modelId = typeModel?.modelId ?? this.thinker.model.modelId;
-    const contextWindow = getContextWindowSize(modelId);
-    const threshold = contextWindow * 0.7; // 70% — more aggressive than MainAgent's 80%
+    const budget = computeTokenBudget({ modelId, compactThreshold: TASK_COMPACT_THRESHOLD });
 
-    if (estimatedTokens < threshold) return;
+    if (estimatedTokens < budget.compactTrigger) return;
 
     logger.info(
-      { taskId: task.taskId, messageCount: messages.length, estimatedTokens, threshold },
+      { taskId: task.taskId, messageCount: messages.length, estimatedTokens, compactTrigger: budget.compactTrigger },
       "task_compact_triggered",
     );
 
