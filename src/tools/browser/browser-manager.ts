@@ -21,6 +21,7 @@ export class BrowserManager {
   private browser: any | null = null;
   private context: any | null = null;
   private page: any | null = null;
+  private launchPromise: Promise<any> | null = null;
   private refMap = new Map<string, string>();
   private config: BrowserConfig;
   private launcher?: BrowserLauncher;
@@ -36,6 +37,23 @@ export class BrowserManager {
       return this.page;
     }
 
+    // Serialize concurrent launch attempts — second caller awaits the first's promise
+    if (this.launchPromise) {
+      return this.launchPromise;
+    }
+
+    this.launchPromise = this._launch();
+    try {
+      return await this.launchPromise;
+    } catch (err) {
+      // Reset so next call can retry
+      this.launchPromise = null;
+      throw err;
+    }
+  }
+
+  /** Internal: perform the actual browser launch. */
+  private async _launch(): Promise<any> {
     const pw =
       this.launcher ?? (await import("playwright-core")).chromium;
 
@@ -57,8 +75,21 @@ export class BrowserManager {
     return this.page;
   }
 
-  /** Navigate to URL and return ARIA snapshot. */
+  /** Navigate to URL and return ARIA snapshot. Only http/https URLs allowed. */
   async navigate(url: string): Promise<{ snapshot: string }> {
+    // SSRF protection: restrict to http/https schemes
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new Error(`Invalid URL: "${url}"`);
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error(
+        `Blocked URL scheme "${parsed.protocol}" — only http: and https: are allowed.`,
+      );
+    }
+
     const page = await this.ensurePage();
     await page.goto(url, {
       timeout: this.config.timeout,
@@ -105,13 +136,17 @@ export class BrowserManager {
     return this.takeSnapshot();
   }
 
-  /** Scroll the page. Returns new snapshot. */
+  /** Scroll the page by viewport-height multiples. Returns new snapshot. */
   async scroll(
     direction: "up" | "down",
     amount: number = 3,
   ): Promise<{ snapshot: string }> {
     const page = await this.ensurePage();
-    const delta = direction === "down" ? amount * 300 : -(amount * 300);
+    const viewportHeight = this.config.viewport.height;
+    const delta =
+      direction === "down"
+        ? amount * viewportHeight
+        : -(amount * viewportHeight);
     await page.mouse.wheel(0, delta);
     await page.waitForTimeout(300);
     return this.takeSnapshot();
@@ -137,6 +172,7 @@ export class BrowserManager {
     this.browser = null;
     this.context = null;
     this.page = null;
+    this.launchPromise = null;
     this.refMap.clear();
   }
 

@@ -260,7 +260,7 @@ describe("BrowserManager", () => {
 
     await manager.scroll("down");
 
-    expect(mocks.mockPage.mouse.wheel).toHaveBeenCalledWith(0, 900); // 3 * 300
+    expect(mocks.mockPage.mouse.wheel).toHaveBeenCalledWith(0, 2160); // 3 * 720 (viewport height)
     expect(mocks.mockPage.waitForTimeout).toHaveBeenCalledWith(300);
   });
 
@@ -271,7 +271,7 @@ describe("BrowserManager", () => {
 
     await manager.scroll("up", 5);
 
-    expect(mocks.mockPage.mouse.wheel).toHaveBeenCalledWith(0, -1500); // -(5 * 300)
+    expect(mocks.mockPage.mouse.wheel).toHaveBeenCalledWith(0, -3600); // -(5 * 720)
   });
 
   // ── 11. screenshot — default ──────────────────────────────────────
@@ -420,7 +420,7 @@ describe("BrowserManager", () => {
     const result = await manager.scroll("down", 2);
 
     expect(result.snapshot).toContain("[page]");
-    expect(mocks.mockPage.mouse.wheel).toHaveBeenCalledWith(0, 600); // 2 * 300
+    expect(mocks.mockPage.mouse.wheel).toHaveBeenCalledWith(0, 1440); // 2 * 720
   });
 
   it("should clear refMap on close", async () => {
@@ -471,5 +471,94 @@ describe("BrowserManager", () => {
     await manager.ensurePage();
 
     expect(mocks.mockContext.newPage).toHaveBeenCalledTimes(1);
+  });
+
+  // ── Concurrent launch guard ─────────────────────────────────────
+
+  it("should not launch twice when ensurePage is called concurrently", async () => {
+    // Slow launcher to expose race window
+    let resolveFirst!: (val: any) => void;
+    const slowLauncher: BrowserLauncher = {
+      launch: mock(() => new Promise((r) => { resolveFirst = r; })),
+      connectOverCDP: mock(() => Promise.resolve(mocks.mockBrowser)),
+    };
+    const m = new BrowserManager(defaultConfig(), slowLauncher);
+
+    // Two concurrent ensurePage calls
+    const p1 = m.ensurePage();
+    const p2 = m.ensurePage();
+
+    // Resolve the single launch
+    resolveFirst(mocks.mockBrowser);
+
+    const [page1, page2] = await Promise.all([p1, p2]);
+    expect(page1).toBe(page2);
+    expect(slowLauncher.launch).toHaveBeenCalledTimes(1);
+  });
+
+  it("should reset launchPromise on launch failure so retry works", async () => {
+    let callCount = 0;
+    const failThenSucceedLauncher: BrowserLauncher = {
+      launch: mock(() => {
+        callCount++;
+        if (callCount === 1) return Promise.reject(new Error("launch failed"));
+        return Promise.resolve(mocks.mockBrowser);
+      }),
+      connectOverCDP: mock(() => Promise.resolve(mocks.mockBrowser)),
+    };
+    const m = new BrowserManager(defaultConfig(), failThenSucceedLauncher);
+
+    // First call fails
+    await expect(m.ensurePage()).rejects.toThrow("launch failed");
+
+    // Second call should retry (not stuck on failed promise)
+    const page = await m.ensurePage();
+    expect(page).toBeDefined();
+    expect(failThenSucceedLauncher.launch).toHaveBeenCalledTimes(2);
+  });
+
+  // ── URL validation (SSRF protection) ────────────────────────────
+
+  it("should reject file:// URLs", async () => {
+    await manager.ensurePage();
+    await expect(manager.navigate("file:///etc/passwd")).rejects.toThrow(
+      'Blocked URL scheme "file:"',
+    );
+  });
+
+  it("should reject javascript: URLs", async () => {
+    await manager.ensurePage();
+    await expect(manager.navigate("javascript:alert(1)")).rejects.toThrow(
+      'Blocked URL scheme "javascript:"',
+    );
+  });
+
+  it("should reject invalid URLs", async () => {
+    await manager.ensurePage();
+    await expect(manager.navigate("not a url")).rejects.toThrow("Invalid URL");
+  });
+
+  it("should allow https:// URLs", async () => {
+    await manager.ensurePage();
+    const result = await manager.navigate("https://example.com");
+    expect(result.snapshot).toBeDefined();
+  });
+
+  it("should allow http:// URLs", async () => {
+    await manager.ensurePage();
+    const result = await manager.navigate("http://example.com");
+    expect(result.snapshot).toBeDefined();
+  });
+
+  // ── Scroll uses viewport height ─────────────────────────────────
+
+  it("should scroll by viewport height, not fixed pixels", async () => {
+    const config = defaultConfig({ viewport: { width: 1024, height: 600 } });
+    const m = new BrowserManager(config, mocks.mockLauncher);
+    await m.ensurePage();
+    await m.takeSnapshot(); // populate refMap
+
+    await m.scroll("down", 2);
+    expect(mocks.mockPage.mouse.wheel).toHaveBeenCalledWith(0, 1200); // 2 * 600
   });
 });
