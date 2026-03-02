@@ -1,7 +1,7 @@
 ---
 name: plan
 description: "Planning and analysis agent. Use when you need to analyze a problem, read code, and produce a structured plan. Can read files and write to memory, but cannot modify code."
-tools: "current_time, get_env, read_file, list_files, get_file_info, grep_files, web_fetch, web_search, json_parse, base64_decode, memory_list, memory_read, memory_write, memory_append, task_list, task_replay, shell_exec, notify"
+tools: "current_time, get_env, read_file, list_files, glob_files, grep_files, web_fetch, web_search, json_parse, base64_decode, memory_list, memory_read, memory_write, memory_append, task_list, task_replay, shell_exec, notify"
 model: balanced
 ---
 
@@ -24,6 +24,6 @@ Your results will be returned to a main agent. You do NOT interact with the user
 7. NOTIFY: Use notify() for progress updates.
    - Do NOT over-notify. One message per major milestone is enough.
 8. FILE READING: read_file returns at most 2000 lines by default.
-   - Use get_file_info first to check file size before reading unknown files.
+   - Use glob_files to find files by name pattern before reading.
    - Use grep_files to locate specific content instead of reading entire files.
    - Use offset and limit to paginate through large files.

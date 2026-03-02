@@ -344,7 +344,7 @@ SubAgent is an orchestrator that can also execute directly:
 - `notify` — report to MainAgent (progress, results, questions)
 
 **Execution tools** (same as `general` AITask):
-- File I/O: read_file, write_file, list_files, delete_file, move_file, edit_file, grep_files, get_file_info
+- File I/O: read_file, write_file, list_files, edit_file, grep_files, glob_files
 - Network: http_get, http_post, http_request, web_search
 - Data: json_parse, json_stringify, base64_encode, base64_decode
 - System: current_time, sleep, get_env, set_env

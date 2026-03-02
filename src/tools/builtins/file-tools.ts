@@ -1,5 +1,5 @@
 /**
- * File tools - read, write, list, delete, move files with path security.
+ * File tools - read, write, list, edit, grep, glob files with path security.
  */
 
 import { z } from "zod";
@@ -7,7 +7,32 @@ import { normalizePath, isPathAllowed } from "../types.ts";
 import type { Tool, ToolResult, ToolContext, ToolCategory } from "../types.ts";
 import { ToolPermissionError } from "../errors.ts";
 import path from "node:path";
-import { rm, readdir, access, stat as fsStat } from "node:fs/promises";
+import { readdir, access, stat as fsStat } from "node:fs/promises";
+import ignore from "ignore";
+
+// ── rg availability check (cached at module load) ──
+
+let _rgAvailable: boolean | null = null;
+
+/** Check if ripgrep (rg) is available. Cached after first call. */
+export function isRgAvailable(): boolean {
+  if (_rgAvailable !== null) return _rgAvailable;
+  try {
+    const result = Bun.spawnSync(["rg", "--version"], { stdout: "pipe", stderr: "pipe" });
+    _rgAvailable = result.exitCode === 0;
+  } catch {
+    _rgAvailable = false;
+  }
+  return _rgAvailable;
+}
+
+// Eagerly probe on module load (non-blocking since spawnSync is sync)
+isRgAvailable();
+
+/** Reset rg availability cache (for testing). */
+export function _resetRgCache(value?: boolean | null): void {
+  _rgAvailable = value ?? null;
+}
 
 // ── read_file ──────────────────────────────────
 
@@ -62,7 +87,7 @@ export const read_file: Tool = {
       const formatted = sliced.map((line, i) => {
         const lineNum = startLine + i + 1; // 1-based
         const truncatedLine = line.length > READ_FILE_MAX_LINE_LENGTH
-          ? line.slice(0, READ_FILE_MAX_LINE_LENGTH) + "…"
+          ? line.slice(0, READ_FILE_MAX_LINE_LENGTH) + "\u2026"
           : line;
         return `${lineNum}\t${truncatedLine}`;
       });
@@ -315,168 +340,6 @@ export const list_files: Tool = {
   },
 };
 
-// ── delete_file ───────────────────────────────
-
-export const delete_file: Tool = {
-  name: "delete_file",
-  description: "Delete a file or directory",
-  category: "file" as ToolCategory,
-  parameters: z.object({
-    path: z.string().describe("Path to delete"),
-  }),
-  async execute(params: unknown, context: ToolContext): Promise<ToolResult> {
-    const startedAt = Date.now();
-    const { path: originalPath } = params as { path: string };
-
-    try {
-      // Check path permissions
-      const allowedPaths = context.allowedPaths;
-      if (allowedPaths && allowedPaths.length > 0) {
-        if (!isPathAllowed(originalPath, allowedPaths)) {
-          throw new ToolPermissionError("delete_file", `Path "${originalPath}" is not in allowed paths`);
-        }
-      }
-
-      // Delete file
-      const filePath = normalizePath(originalPath);
-      await rm(filePath, { recursive: true, force: true });
-
-      return {
-        success: true,
-        result: {
-          path: filePath,
-          deleted: true,
-        },
-        startedAt,
-        completedAt: Date.now(),
-        durationMs: Date.now() - startedAt,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-        startedAt,
-        completedAt: Date.now(),
-        durationMs: Date.now() - startedAt,
-      };
-    }
-  },
-};
-
-// ── move_file ─────────────────────────────────
-
-export const move_file: Tool = {
-  name: "move_file",
-  description: "Move or rename a file or directory",
-  category: "file" as ToolCategory,
-  parameters: z.object({
-    from: z.string().describe("Source path"),
-    to: z.string().describe("Destination path"),
-  }),
-  async execute(params: unknown, context: ToolContext): Promise<ToolResult> {
-    const startedAt = Date.now();
-    const { from: fromPath, to: toPath } = params as {
-      from: string;
-      to: string;
-    };
-
-    try {
-      // Check path permissions
-      const allowedPaths = context.allowedPaths;
-      if (allowedPaths && allowedPaths.length > 0) {
-        if (!isPathAllowed(fromPath, allowedPaths)) {
-          throw new ToolPermissionError("move_file", `Source path "${fromPath}" is not in allowed paths`);
-        }
-        if (!isPathAllowed(toPath, allowedPaths)) {
-          throw new ToolPermissionError("move_file", `Destination path "${toPath}" is not in allowed paths`);
-        }
-      }
-
-      // Move file
-      const normalizedFrom = normalizePath(fromPath);
-      const normalizedTo = normalizePath(toPath);
-
-      await Bun.write(normalizedTo, await Bun.file(normalizedFrom).text());
-      await rm(normalizedFrom, { recursive: true, force: true });
-
-      return {
-        success: true,
-        result: {
-          from: normalizedFrom,
-          to: normalizedTo,
-          moved: true,
-        },
-        startedAt,
-        completedAt: Date.now(),
-        durationMs: Date.now() - startedAt,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-        startedAt,
-        completedAt: Date.now(),
-        durationMs: Date.now() - startedAt,
-      };
-    }
-  },
-};
-
-// ── get_file_info ─────────────────────────────
-
-export const get_file_info: Tool = {
-  name: "get_file_info",
-  description: "Get information about a file or directory",
-  category: "file" as ToolCategory,
-  parameters: z.object({
-    path: z.string().describe("Path to get info for"),
-  }),
-  async execute(params: unknown, context: ToolContext): Promise<ToolResult> {
-    const startedAt = Date.now();
-    const { path: originalPath } = params as { path: string };
-
-    try {
-      // Check path permissions (read-only check for info)
-      const allowedPaths = context.allowedPaths;
-      if (allowedPaths && allowedPaths.length > 0) {
-        if (!isPathAllowed(originalPath, allowedPaths)) {
-          throw new ToolPermissionError("get_file_info", `Path "${originalPath}" is not in allowed paths`);
-        }
-      }
-
-      // Get file stats
-      const filePath = normalizePath(originalPath);
-      const stat = await Bun.file(filePath).stat();
-
-      return {
-        success: true,
-        result: {
-          path: filePath,
-          exists: true,
-          size: stat.size,
-          isDirectory: stat.isDirectory(),
-          isFile: stat.isFile(),
-          modified: stat.mtime?.getTime() || 0,
-        },
-        startedAt,
-        completedAt: Date.now(),
-        durationMs: Date.now() - startedAt,
-      };
-    } catch (error) {
-      // File doesn't exist or other error
-      const exists = false;
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-        result: { exists },
-        startedAt,
-        completedAt: Date.now(),
-        durationMs: Date.now() - startedAt,
-      };
-    }
-  },
-};
-
 // ── edit_file ──────────────────────────────────
 
 export const edit_file: Tool = {
@@ -591,24 +454,292 @@ function globToRegex(glob: string): RegExp {
   return new RegExp(`${pattern}$`);
 }
 
+/** Context line entry for grep results with context_lines enabled. */
+interface ContextLine {
+  lineNumber: number;
+  line: string;
+  isMatch?: boolean;
+}
+
+// ── JS fallback constants ──
+
+const SKIP_DIRS = new Set([
+  ".git", "node_modules", ".worktrees", "dist", "build",
+  ".next", "__pycache__", ".venv", "vendor", "coverage", ".nyc_output",
+]);
+
+const MAX_FILE_SIZE = 1_048_576; // 1MB
+
+/** Check if a buffer looks like binary (contains null bytes in first 8KB). Same heuristic as git/grep/rg. */
+function isBinaryBuffer(buffer: Uint8Array): boolean {
+  const checkLen = Math.min(buffer.length, 8192);
+  for (let i = 0; i < checkLen; i++) {
+    if (buffer[i] === 0) return true;
+  }
+  return false;
+}
+
+// ── rg helpers ──
+
+interface GrepParams {
+  pattern: string;
+  path: string;
+  include?: string;
+  max_results: number;
+  case_insensitive: boolean;
+  context_lines?: number;
+  output_mode: "content" | "files_with_matches" | "count";
+  multiline: boolean;
+}
+
+/** Build rg command arguments from grep params. */
+function buildRgArgs(params: GrepParams): string[] {
+  // --with-filename ensures rg always prints the filename header,
+  // even when searching a single file (by default rg omits it).
+  const args = ["--heading", "--line-number", "--no-column", "--color", "never", "--with-filename"];
+
+  if (params.case_insensitive) args.push("-i");
+  if (params.multiline) args.push("-U", "--multiline-dotall");
+  if (params.include) args.push("--glob", params.include);
+
+  if (params.output_mode === "files_with_matches") {
+    args.push("-l");
+  } else if (params.output_mode === "count") {
+    args.push("-c");
+  } else {
+    // content mode
+    if (params.context_lines !== undefined && params.context_lines > 0) {
+      args.push("-C", String(params.context_lines));
+    }
+  }
+
+  args.push("--", params.pattern, params.path);
+  return args;
+}
+
+/**
+ * Parse rg --heading output into our grouped format.
+ *
+ * rg --heading outputs:
+ *   filename          (bare line = file header)
+ *   42:match content  (match line)
+ *   41-context line   (context line)
+ *   --                (separator between non-contiguous blocks)
+ *
+ * We convert to our format:
+ *   === filename ===
+ *   42:match content   (no-context mode)
+ * or:
+ *   === filename ===
+ *   :42:match content  (context mode — leading colon)
+ *   -41-context line
+ *   --
+ */
+/**
+ * Parse rg --heading output into our grouped format (single forward pass, O(n)).
+ *
+ * rg --heading outputs groups separated by blank lines:
+ *   filename          (first non-empty line of a group = file header)
+ *   42:match content  (match line)
+ *   41-context line   (context line)
+ *   --                (separator between non-contiguous blocks within same file)
+ *                     (blank line = separator between file groups)
+ *
+ * We convert to:
+ *   === filename ===
+ *   42:match content   (no-context mode)
+ *   :42:match content  (context mode — leading colon)
+ *   -41-context line
+ */
+function parseRgContentOutput(raw: string, maxResults: number, hasContext: boolean): { lines: string[]; totalMatches: number; truncated: boolean } {
+  if (!raw.trim()) return { lines: [], totalMatches: 0, truncated: false };
+
+  const outputLines: string[] = [];
+  let totalMatches = 0;
+  let matchesSoFar = 0;
+  let currentFile: string | null = null;
+  let hitLimit = false;
+  // Track whether the next non-empty, non-separator line is a file header
+  let expectFileHeader = true;
+
+  for (const line of raw.split("\n")) {
+    // Empty line = file group separator → next non-empty line is a file header
+    if (line === "") {
+      expectFileHeader = true;
+      continue;
+    }
+
+    // Block separator within a file
+    if (line === "--") {
+      if (!hitLimit) outputLines.push("--");
+      continue;
+    }
+
+    // Match line: digits followed by colon
+    const matchLine = line.match(/^(\d+):(.*)$/);
+    if (matchLine && !expectFileHeader) {
+      totalMatches++;
+      matchesSoFar++;
+      if (matchesSoFar > maxResults) {
+        hitLimit = true;
+        continue;
+      }
+      if (hasContext) {
+        outputLines.push(`:${matchLine[1]}:${matchLine[2]}`);
+      } else {
+        outputLines.push(`${matchLine[1]}:${matchLine[2]}`);
+      }
+      continue;
+    }
+
+    // Context line: digits followed by hyphen
+    const contextLine = line.match(/^(\d+)-(.*)$/);
+    if (contextLine && !expectFileHeader) {
+      if (!hitLimit) {
+        outputLines.push(`-${contextLine[1]}-${contextLine[2]}`);
+      }
+      continue;
+    }
+
+    // File header (bare filename — not a match/context line, or expectFileHeader is true)
+    if (line !== currentFile) {
+      if (currentFile !== null) outputLines.push(""); // blank line between files
+      outputLines.push(`=== ${line} ===`);
+      currentFile = line;
+    }
+    expectFileHeader = false;
+  }
+
+  return { lines: outputLines, totalMatches, truncated: hitLimit };
+}
+
+/** Parse rg -c output (count mode): file:count per line → our format. */
+function parseRgCountOutput(raw: string, maxResults: number): string[] {
+  if (!raw.trim()) return [];
+  return raw.trim().split("\n").filter(l => l !== "").slice(0, maxResults);
+}
+
+/** Parse rg -l output (files_with_matches): one path per line → our format. */
+function parseRgFilesOutput(raw: string, maxResults: number): string[] {
+  if (!raw.trim()) return [];
+  return raw.trim().split("\n").filter(l => l !== "").slice(0, maxResults);
+}
+
+/** Execute grep via ripgrep. Returns formatted output string, or null if rg not suitable. */
+function executeWithRg(params: GrepParams): { output: string; truncated: boolean } | null {
+  const args = buildRgArgs(params);
+
+  const result = Bun.spawnSync(["rg", ...args], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+
+  const stdout = result.stdout.toString();
+  const stderr = result.stderr.toString();
+
+  // Exit code 1 = no matches, exit code 2 = error
+  if (result.exitCode === 2) {
+    // Check for regex error from rg
+    if (stderr.includes("regex")) {
+      throw new Error(`Invalid regex pattern: ${stderr.trim()}`);
+    }
+    // Other rg errors — fall back to JS
+    return null;
+  }
+
+  if (params.output_mode === "files_with_matches") {
+    const files = parseRgFilesOutput(stdout, params.max_results);
+    return { output: files.join("\n"), truncated: false };
+  }
+
+  if (params.output_mode === "count") {
+    const counts = parseRgCountOutput(stdout, params.max_results);
+    return { output: counts.join("\n"), truncated: false };
+  }
+
+  // content mode
+  const hasContext = params.context_lines !== undefined && params.context_lines > 0;
+  const { lines, totalMatches, truncated } = parseRgContentOutput(stdout, params.max_results, hasContext);
+  let output = lines.join("\n");
+  if (truncated) {
+    output += `\n\n[${totalMatches} total matches, showing first ${params.max_results}]`;
+  }
+  return { output, truncated };
+}
+
+// ── JS fallback helpers ──
+
+/** Load .gitignore patterns from the search root up to repo root (.git). */
+async function loadGitignore(searchRoot: string): Promise<ReturnType<typeof ignore> | null> {
+  const ig = ignore();
+  let loaded = false;
+
+  // Walk up from searchRoot to find .gitignore files, stop at repo root (.git)
+  let dir = searchRoot;
+  const visited = new Set<string>();
+  while (dir && !visited.has(dir)) {
+    visited.add(dir);
+    try {
+      const gitignorePath = path.join(dir, ".gitignore");
+      const content = await Bun.file(gitignorePath).text();
+      ig.add(content);
+      loaded = true;
+    } catch {
+      // No .gitignore at this level
+    }
+    // Stop if we reached a git repo root
+    try {
+      await access(path.join(dir, ".git"));
+      break; // found .git — this is the repo root, stop walking up
+    } catch {
+      // Not a repo root, keep going
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+
+  return loaded ? ig : null;
+}
+
 export const grep_files: Tool = {
   name: "grep_files",
-  description: "Search file contents using a regular expression pattern. "
-    + "Returns matching lines with file paths and line numbers.",
+  description: "Search file contents using regex. Output grouped by file: "
+    + "'=== file ===' header, then 'lineNum:content' per match, '--' between context blocks. "
+    + "Use output_mode='files_with_matches' to get just file paths. "
+    + "Prefer grep_files over shell_exec grep/rg for structured, token-efficient search.",
   category: "file" as ToolCategory,
   parameters: z.object({
-    pattern: z.string().min(1).describe("Regex pattern to search for"),
+    pattern: z.string().min(1).describe("Regex pattern to search for (e.g. 'function\\s+\\w+', 'TODO')"),
     path: z.string().default(".").describe("Directory or file to search in"),
-    include: z.string().optional().describe("File name pattern to include (e.g. '*.ts')"),
-    max_results: z.coerce.number().int().positive().optional().default(50).describe("Maximum matches to return"),
+    include: z.string().optional().describe("File name glob filter (e.g. '*.ts', '*.{ts,js}')"),
+    max_results: z.coerce.number().int().positive().optional().default(50).describe("Maximum matches to return (default 50)"),
+    case_insensitive: z.boolean().optional().default(false).describe("Case-insensitive matching"),
+    context_lines: z.coerce.number().int().min(0).max(10).optional().describe("Lines of context before and after each match (like grep -C)"),
+    output_mode: z.enum(["content", "files_with_matches", "count"]).optional().default("content")
+      .describe("content: matching lines (default); files_with_matches: file paths only; count: match counts per file"),
+    multiline: z.boolean().optional().default(false).describe("Enable multiline matching where . matches newlines (like grep -z)"),
   }),
   async execute(params: unknown, context: ToolContext): Promise<ToolResult> {
     const startedAt = Date.now();
-    const { pattern, path: originalPath = ".", include, max_results = 50 } = params as {
+    const {
+      pattern,
+      path: originalPath = ".",
+      include,
+      max_results = 50,
+      case_insensitive = false,
+      context_lines,
+      output_mode = "content",
+      multiline = false,
+    } = params as {
       pattern: string;
       path?: string;
       include?: string;
       max_results?: number;
+      case_insensitive?: boolean;
+      context_lines?: number;
+      output_mode?: "content" | "files_with_matches" | "count";
+      multiline?: boolean;
     };
 
     try {
@@ -621,47 +752,17 @@ export const grep_files: Tool = {
         }
       }
 
-      // Compile regex
-      let regex: RegExp;
+      // Validate the regex pattern early (before attempting rg or JS fallback)
       try {
-        regex = new RegExp(pattern);
+        let flags = "";
+        if (case_insensitive) flags += "i";
+        if (multiline) flags += "s";
+        new RegExp(pattern, flags);
       } catch (e) {
         throw new Error(`Invalid regex pattern: ${(e as Error).message}`);
       }
 
-      // Compile include filter
-      const includeRegex = include ? globToRegex(include) : null;
-
-      const matches: Array<{ file: string; line: string; lineNumber: number; match: string }> = [];
-      let totalMatches = 0;
-
-      // Search a single file
-      const searchFile = async (filePath: string): Promise<boolean> => {
-        try {
-          const content = await Bun.file(filePath).text();
-          const lines = content.split("\n");
-          for (let i = 0; i < lines.length; i++) {
-            const lineContent = lines[i]!;
-            const m = lineContent.match(regex);
-            if (m) {
-              totalMatches++;
-              if (matches.length < max_results) {
-                matches.push({
-                  file: filePath,
-                  line: lineContent,
-                  lineNumber: i + 1,
-                  match: m[0],
-                });
-              }
-            }
-          }
-        } catch {
-          // Skip files that can't be read (binary, permission, etc.)
-        }
-        return matches.length >= max_results;
-      };
-
-      // Check if path is a file or directory
+      // Check that the path exists
       let isDir = false;
       try {
         const stats = await fsStat(searchPath);
@@ -670,11 +771,236 @@ export const grep_files: Tool = {
         throw new Error(`Path not found: ${searchPath}`);
       }
 
+      const grepParams: GrepParams = {
+        pattern,
+        path: searchPath,
+        include,
+        max_results,
+        case_insensitive,
+        context_lines,
+        output_mode,
+        multiline,
+      };
+
+      // ── Tier 1: Try ripgrep ──
+      if (isRgAvailable()) {
+        try {
+          const rgResult = executeWithRg(grepParams);
+          if (rgResult !== null) {
+            return {
+              success: true,
+              result: rgResult.output,
+              startedAt,
+              completedAt: Date.now(),
+              durationMs: Date.now() - startedAt,
+            };
+          }
+        } catch (e) {
+          // If rg threw an error we recognize (e.g., invalid regex), rethrow
+          if (e instanceof Error && e.message.startsWith("Invalid regex")) {
+            throw e;
+          }
+          // Otherwise fall through to JS fallback
+        }
+      }
+
+      // ── Tier 2: JS fallback ──
+
+      // Compile regex with appropriate flags
+      let regex: RegExp;
+      {
+        let flags = "g";
+        if (case_insensitive) flags += "i";
+        if (multiline) flags += "s";
+        regex = new RegExp(pattern, flags);
+      }
+
+      // Compile include filter
+      const includeRegex = include ? globToRegex(include) : null;
+
+      // Load .gitignore for directory searches
+      const ig = isDir ? await loadGitignore(searchPath) : null;
+
+      // Result accumulators based on output mode
+      const contentMatches: Array<{
+        file: string;
+        line?: string;
+        lineNumber?: number;
+        match?: string;
+        context?: ContextLine[];
+      }> = [];
+      const filesWithMatches: string[] = [];
+      const countPerFile: Array<{ file: string; count: number }> = [];
+      let totalMatches = 0;
+
+      // Pre-compile non-global regex for line-by-line matching (reused across files)
+      const lineRegex = new RegExp(pattern, case_insensitive ? "i" : "");
+
+      // Helper: merge overlapping context ranges
+      const buildContextRanges = (matchLineIndices: number[], totalLines: number, ctxLines: number): Array<[number, number]> => {
+        if (matchLineIndices.length === 0) return [];
+        const ranges: Array<[number, number]> = [];
+        for (const idx of matchLineIndices) {
+          const start = Math.max(0, idx - ctxLines);
+          const end = Math.min(totalLines - 1, idx + ctxLines);
+          if (ranges.length > 0 && start <= ranges[ranges.length - 1]![1] + 1) {
+            ranges[ranges.length - 1]![1] = end;
+          } else {
+            ranges.push([start, end]);
+          }
+        }
+        return ranges;
+      };
+
+      // Search a single file (line-by-line mode)
+      const searchFileLineByLine = async (filePath: string): Promise<boolean> => {
+        try {
+          // Skip large files
+          const st = await fsStat(filePath);
+          if (st.size > MAX_FILE_SIZE) return false;
+
+          // Skip binary files: read first 8KB and check for null bytes
+          const file = Bun.file(filePath);
+          const head = new Uint8Array(await file.slice(0, 8192).arrayBuffer());
+          if (isBinaryBuffer(head)) return false;
+
+          const fileContent = await file.text();
+          const lines = fileContent.split("\n");
+
+          const matchLineIndices: number[] = [];
+          for (let i = 0; i < lines.length; i++) {
+            if (lineRegex.test(lines[i]!)) {
+              matchLineIndices.push(i);
+            }
+          }
+
+          if (matchLineIndices.length === 0) return false;
+
+          const fileMatchCount = matchLineIndices.length;
+          totalMatches += fileMatchCount;
+
+          if (output_mode === "files_with_matches") {
+            if (filesWithMatches.length < max_results) {
+              filesWithMatches.push(filePath);
+            }
+            return filesWithMatches.length >= max_results;
+          }
+
+          if (output_mode === "count") {
+            if (countPerFile.length < max_results) {
+              countPerFile.push({ file: filePath, count: fileMatchCount });
+            }
+            return countPerFile.length >= max_results;
+          }
+
+          // output_mode === "content"
+          if (context_lines !== undefined && context_lines > 0) {
+            const ranges = buildContextRanges(matchLineIndices, lines.length, context_lines);
+            const matchSet = new Set(matchLineIndices);
+
+            for (const [rangeStart, rangeEnd] of ranges) {
+              if (contentMatches.length >= max_results) return true;
+
+              const contextArr: ContextLine[] = [];
+              for (let j = rangeStart; j <= rangeEnd; j++) {
+                contextArr.push({
+                  lineNumber: j + 1,
+                  line: lines[j]!,
+                  ...(matchSet.has(j) ? { isMatch: true } : {}),
+                });
+              }
+
+              contentMatches.push({
+                file: filePath,
+                context: contextArr,
+              });
+            }
+          } else {
+            for (const idx of matchLineIndices) {
+              if (contentMatches.length >= max_results) return true;
+              const m = lines[idx]!.match(lineRegex);
+              contentMatches.push({
+                file: filePath,
+                line: lines[idx]!,
+                lineNumber: idx + 1,
+                match: m ? m[0] : "",
+              });
+            }
+          }
+
+          return contentMatches.length >= max_results;
+        } catch {
+          return false;
+        }
+      };
+
+      // Search a single file (multiline mode)
+      const searchFileMultiline = async (filePath: string): Promise<boolean> => {
+        try {
+          // Skip large files
+          const st = await fsStat(filePath);
+          if (st.size > MAX_FILE_SIZE) return false;
+
+          // Skip binary files: read first 8KB and check for null bytes
+          const file = Bun.file(filePath);
+          const head = new Uint8Array(await file.slice(0, 8192).arrayBuffer());
+          if (isBinaryBuffer(head)) return false;
+
+          const fileContent = await file.text();
+
+          regex.lastIndex = 0;
+          let m: RegExpExecArray | null;
+          let fileMatchCount = 0;
+
+          while ((m = regex.exec(fileContent)) !== null) {
+            fileMatchCount++;
+            totalMatches++;
+
+            if (output_mode === "content" && contentMatches.length < max_results) {
+              const beforeMatch = fileContent.slice(0, m.index);
+              const startLineNum = beforeMatch.split("\n").length;
+
+              contentMatches.push({
+                file: filePath,
+                line: m[0].length > 200 ? m[0].slice(0, 200) + "..." : m[0],
+                lineNumber: startLineNum,
+                match: m[0].length > 200 ? m[0].slice(0, 200) + "..." : m[0],
+              });
+            }
+
+            if (m[0].length === 0) {
+              regex.lastIndex++;
+            }
+          }
+
+          if (fileMatchCount === 0) return false;
+
+          if (output_mode === "files_with_matches") {
+            if (filesWithMatches.length < max_results) {
+              filesWithMatches.push(filePath);
+            }
+            return filesWithMatches.length >= max_results;
+          }
+
+          if (output_mode === "count") {
+            if (countPerFile.length < max_results) {
+              countPerFile.push({ file: filePath, count: fileMatchCount });
+            }
+            return countPerFile.length >= max_results;
+          }
+
+          return contentMatches.length >= max_results;
+        } catch {
+          return false;
+        }
+      };
+
+      const searchFile = multiline ? searchFileMultiline : searchFileLineByLine;
+
       if (!isDir) {
-        // Single file search
         await searchFile(searchPath);
       } else {
-        // Recursive directory walk
+        // Recursive directory walk with .gitignore and blacklist support
         const walkDir = async (dirPath: string): Promise<boolean> => {
           let entries;
           try {
@@ -685,12 +1011,24 @@ export const grep_files: Tool = {
           for (const entry of entries) {
             const entryPath = path.join(dirPath, entry.name);
             if (entry.isDirectory()) {
+              // Blacklist check
+              if (SKIP_DIRS.has(entry.name)) continue;
+              // .gitignore check
+              if (ig) {
+                const relativePath = path.relative(searchPath, entryPath);
+                if (ig.ignores(relativePath + "/")) continue;
+              }
               const capped = await walkDir(entryPath);
               if (capped) return true;
             } else if (entry.isFile()) {
               // Apply include filter on filename
               if (includeRegex && !includeRegex.test(entry.name)) {
                 continue;
+              }
+              // .gitignore check for files
+              if (ig) {
+                const relativePath = path.relative(searchPath, entryPath);
+                if (ig.ignores(relativePath)) continue;
               }
               const capped = await searchFile(entryPath);
               if (capped) return true;
@@ -702,13 +1040,152 @@ export const grep_files: Tool = {
         await walkDir(searchPath);
       }
 
+      // Build token-efficient text output, grouped by file
+      const outputLines: string[] = [];
+
+      if (output_mode === "files_with_matches") {
+        for (const f of filesWithMatches) {
+          outputLines.push(f);
+        }
+      } else if (output_mode === "count") {
+        for (const entry of countPerFile) {
+          outputLines.push(`${entry.file}:${entry.count}`);
+        }
+      } else {
+        let currentFile = "";
+        for (let i = 0; i < contentMatches.length; i++) {
+          const m = contentMatches[i]!;
+
+          if (m.context) {
+            if (m.file !== currentFile) {
+              if (currentFile !== "") outputLines.push("");
+              outputLines.push(`=== ${m.file} ===`);
+              currentFile = m.file!;
+            } else {
+              outputLines.push("--");
+            }
+            for (const ctx of m.context) {
+              if (ctx.isMatch) {
+                outputLines.push(`:${ctx.lineNumber}:${ctx.line}`);
+              } else {
+                outputLines.push(`-${ctx.lineNumber}-${ctx.line}`);
+              }
+            }
+          } else {
+            if (m.file !== currentFile) {
+              if (currentFile !== "") outputLines.push("");
+              outputLines.push(`=== ${m.file} ===`);
+              currentFile = m.file!;
+            }
+            outputLines.push(`${m.lineNumber}:${m.line}`);
+          }
+        }
+      }
+
+      // Append summary footer
+      const truncated =
+        output_mode === "files_with_matches"
+          ? filesWithMatches.length >= max_results && totalMatches > filesWithMatches.length
+          : output_mode === "count"
+            ? countPerFile.length >= max_results
+            : totalMatches > contentMatches.length;
+
+      if (truncated) {
+        outputLines.push(`\n[${totalMatches} total matches, showing first ${max_results}]`);
+      }
+
       return {
         success: true,
-        result: {
-          matches,
-          totalMatches,
-          truncated: totalMatches > matches.length,
-        },
+        result: outputLines.join("\n"),
+        startedAt,
+        completedAt: Date.now(),
+        durationMs: Date.now() - startedAt,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        startedAt,
+        completedAt: Date.now(),
+        durationMs: Date.now() - startedAt,
+      };
+    }
+  },
+};
+
+// ── glob_files ─────────────────────────────────
+
+export const glob_files: Tool = {
+  name: "glob_files",
+  description: "Find files by name pattern. Use this when you need to locate files (e.g. '**/*.ts', 'src/**/*.test.ts'). "
+    + "Returns file paths sorted by modification time (newest first). "
+    + "Prefer glob_files over list_files when searching by extension or name pattern across directories.",
+  category: "file" as ToolCategory,
+  parameters: z.object({
+    pattern: z.string().describe("Glob pattern (e.g. '**/*.ts', 'src/components/**/*.tsx', '*.config.{js,ts}')"),
+    cwd: z.string().optional().describe("Base directory (defaults to process.cwd())"),
+    max_results: z.coerce.number().int().positive().optional().default(100).describe("Maximum files to return"),
+  }),
+  async execute(params: unknown, context: ToolContext): Promise<ToolResult> {
+    const startedAt = Date.now();
+    const { pattern: globPattern, cwd: cwdParam, max_results = 100 } = params as {
+      pattern: string;
+      cwd?: string;
+      max_results?: number;
+    };
+
+    try {
+      const basePath = cwdParam ? normalizePath(cwdParam) : process.cwd();
+
+      // Check path permissions
+      const allowedPaths = context.allowedPaths;
+      if (allowedPaths && allowedPaths.length > 0) {
+        if (!isPathAllowed(basePath, allowedPaths)) {
+          throw new ToolPermissionError("glob_files", `Path "${basePath}" is not in allowed paths`);
+        }
+      }
+
+      // Use Bun.Glob for pattern matching
+      const glob = new Bun.Glob(globPattern);
+      const entries: string[] = [];
+      for await (const entry of glob.scan({ cwd: basePath, onlyFiles: true })) {
+        entries.push(entry);
+        // Best-effort mtime sorting: collect up to 2x max_results, sort, then truncate.
+        // With very large result sets, the final order may not be globally optimal.
+        if (entries.length >= max_results * 2) break;
+      }
+
+      // Stat each file to get mtime, sort by mtime descending
+      const filesWithMtime: Array<{ path: string; mtime: number }> = [];
+      for (const entry of entries) {
+        try {
+          const fullPath = path.join(basePath, entry);
+          const stats = await fsStat(fullPath);
+          filesWithMtime.push({
+            path: entry,
+            mtime: stats.mtime?.getTime() || 0,
+          });
+        } catch {
+          // Skip files that can't be stat'd
+        }
+      }
+
+      // Sort by mtime descending (newest first)
+      filesWithMtime.sort((a, b) => b.mtime - a.mtime);
+
+      // Truncate to max_results
+      const truncated = filesWithMtime.length > max_results;
+      const result = filesWithMtime.slice(0, max_results).map(f => f.path);
+
+      // Plain text output: one file per line
+      let output = result.join("\n");
+      if (truncated) {
+        output += `\n[showing ${max_results} of ${filesWithMtime.length}+ files]`;
+      }
+
+      return {
+        success: true,
+        result: output,
         startedAt,
         completedAt: Date.now(),
         durationMs: Date.now() - startedAt,
