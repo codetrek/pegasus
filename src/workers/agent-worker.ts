@@ -276,15 +276,24 @@ async function initSubAgent(config: SubAgentConfig): Promise<void> {
   //    SubAgent mode: auto-shutdown when task completes or fails.
   //    The final notify is tagged with metadata.subagentDone so MainAgent
   //    can call markDone() before the Worker close event fires.
+  //
+  //    IMPORTANT: Only trigger shutdown when the INITIAL task (the one created
+  //    by agent.submit()) completes — NOT child tasks spawned via spawn_task.
+  //    Child task completions fire notifyCallback too, but shutting down on
+  //    those would kill the parent task prematurely.
+  let initialTaskId: string | null = null;
+
   agent.onNotify((notification: TaskNotification) => {
     const isDone = notification.type === "completed" || notification.type === "failed";
-    const metadata = isDone
+    const isInitialTask = isDone && initialTaskId !== null && notification.taskId === initialTaskId;
+
+    const metadata = isInitialTask
       ? { subagentDone: notification.type }
       : undefined;
 
     sendNotify(notificationToText(notification), metadata);
 
-    if (isDone) {
+    if (isInitialTask) {
       // Give a short delay for the notify message to be delivered
       setTimeout(async () => {
         await handleShutdown();
@@ -301,11 +310,12 @@ async function initSubAgent(config: SubAgentConfig): Promise<void> {
   // 10. Auto-submit initial input (subagent mode only)
   //     If memorySnapshot is available, prepend it to the input so the
   //     SubAgent's first reasoning cycle has access to long-term memory.
+  //     Capture the returned taskId so onNotify only shuts down for THIS task.
   if (input) {
     const fullInput = memorySnapshot
       ? `[Available Memory]\n${memorySnapshot}\n\n---\n\n${input}`
       : input;
-    agent.submit(fullInput, "main-agent");
+    initialTaskId = await agent.submit(fullInput, "main-agent");
   }
 }
 
