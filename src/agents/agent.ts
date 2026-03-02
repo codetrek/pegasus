@@ -28,7 +28,7 @@ import { ToolRegistry } from "../tools/registry.ts";
 import { ToolExecutor } from "../tools/executor.ts";
 import { BackgroundTaskManager } from "../tools/background.ts";
 import type { ToolResult } from "../tools/types.ts";
-import { allBuiltInTools, reflectionTools, allTaskTools } from "../tools/builtins/index.ts";
+import { reflectionTools, allTaskTools } from "../tools/builtins/index.ts";
 import type { AITaskTypeRegistry } from "../aitask-types/index.ts";
 import type { MemoryIndexEntry } from "../identity/prompt.ts";
 import { TaskPersister } from "../task/persister.ts";
@@ -125,6 +125,8 @@ export interface AgentDeps {
   persona: Persona;
   settings?: Settings;
   aiTaskTypeRegistry?: AITaskTypeRegistry;
+  /** Extra tools to register in both global and per-type registries (e.g. spawn_task for SubAgent). */
+  additionalTools?: import("../tools/types.ts").Tool[];
 }
 
 export class Agent {
@@ -152,6 +154,7 @@ export class Agent {
   private settings: Settings;
   private notifyCallback: ((notification: TaskNotification) => void) | null = null;
   private aiTaskTypeRegistry: AITaskTypeRegistry | null = null;
+  private additionalTools: import("../tools/types.ts").Tool[] = [];
   private extractModel: LanguageModel | null = null;
   private modelRegistry: ModelRegistry | null = null;
   private backgroundTaskManager: BackgroundTaskManager;
@@ -165,7 +168,14 @@ export class Agent {
 
     // Create tool infrastructure — global registry for ToolExecutor (can execute any tool)
     this.toolRegistry = new ToolRegistry();
-    this.toolRegistry.registerMany(allBuiltInTools);
+    this.toolRegistry.registerMany(allTaskTools);
+
+    // Register additional tools (e.g. spawn_task for SubAgent mode)
+    const extraTools = deps.additionalTools ?? [];
+    this.additionalTools = extraTools;
+    if (extraTools.length > 0) {
+      this.toolRegistry.registerMany(extraTools);
+    }
 
     // Per-type registries for LLM tool visibility + execution validation
     this.typeToolRegistries = new Map();
@@ -177,6 +187,8 @@ export class Agent {
     if (this.aiTaskTypeRegistry) {
       // Build from AITaskTypeRegistry definitions
       const allToolMap = new Map(allTaskTools.map((t) => [t.name, t]));
+      // Include additional tools in the lookup map so per-type registries can resolve them
+      for (const t of extraTools) allToolMap.set(t.name, t);
       for (const def of this.aiTaskTypeRegistry.listAll()) {
         const registry = new ToolRegistry();
         const toolNames = this.aiTaskTypeRegistry.getToolNames(def.name);
@@ -184,12 +196,19 @@ export class Agent {
           .map((name) => allToolMap.get(name))
           .filter((t): t is NonNullable<typeof t> => t != null);
         registry.registerMany(tools);
+        // Also register extra tools in every per-type registry so they're always visible
+        if (extraTools.length > 0) {
+          registry.registerMany(extraTools);
+        }
         this.typeToolRegistries.set(def.name, registry);
       }
     } else {
-      // Fallback: register "general" with all tools
+      // Fallback: register "general" with all tools + extras
       const generalRegistry = new ToolRegistry();
       generalRegistry.registerMany(allTaskTools);
+      if (extraTools.length > 0) {
+        generalRegistry.registerMany(extraTools);
+      }
       this.typeToolRegistries.set("general", generalRegistry);
     }
 
@@ -468,7 +487,7 @@ export class Agent {
     // Get AI task type-specific system prompt from registry
     const aiTaskTypePrompt = this.aiTaskTypeRegistry?.getPrompt(task.context.taskType) ?? undefined;
 
-    // Resolve per-type model (from SUBAGENT.md model field or fallback to default)
+    // Resolve per-type model (from AITASK.md model field or fallback to default)
     const typeModel = this._resolveTypeModel(task.context.taskType);
 
     const reasoning = await this.llmSemaphore.use(() =>
@@ -805,6 +824,8 @@ export class Agent {
     // Rebuild per-type tool registries from AI task type definitions
     this.typeToolRegistries.clear();
     const allToolMap = new Map(allTaskTools.map((t) => [t.name, t]));
+    // Include additional tools in the lookup map
+    for (const t of this.additionalTools) allToolMap.set(t.name, t);
     for (const def of registry.listAll()) {
       const typeRegistry = new ToolRegistry();
       const toolNames = registry.getToolNames(def.name);
@@ -812,6 +833,10 @@ export class Agent {
         .map((name) => allToolMap.get(name))
         .filter((t): t is NonNullable<typeof t> => t != null);
       typeRegistry.registerMany(tools);
+      // Also register extra tools so they're always visible
+      if (this.additionalTools.length > 0) {
+        typeRegistry.registerMany(this.additionalTools);
+      }
       this.typeToolRegistries.set(def.name, typeRegistry);
     }
   }

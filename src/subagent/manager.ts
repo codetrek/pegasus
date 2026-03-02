@@ -65,8 +65,12 @@ export class SubAgentManager {
     }
 
     // Start the Worker via WorkerAdapter
+    // Field names must match SubAgentConfig in agent-worker.ts:
+    //   sessionPath (not sessionDir), channelType, channelId
     this.workerAdapter.startWorker("subagent", id, "subagent", {
-      sessionDir,
+      sessionPath: sessionDir,
+      channelType: "subagent",
+      channelId: id,
       input,
       description,
       settings,
@@ -158,8 +162,11 @@ export class SubAgentManager {
     }
 
     // Start a new Worker for the same SubAgent
+    // Field names must match SubAgentConfig in agent-worker.ts
     this.workerAdapter.startWorker("subagent", id, "subagent", {
-      sessionDir,
+      sessionPath: sessionDir,
+      channelType: "subagent",
+      channelId: id,
       input,
       description: entry.description,
       settings,

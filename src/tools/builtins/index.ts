@@ -205,6 +205,12 @@ export const allTaskTools: Tool[] = [
   notify,
 ];
 
+/** Tools for SubAgent Workers — task tools + spawn_task for orchestration. */
+export const subAgentTools: Tool[] = [
+  ...allTaskTools,
+  spawn_task,
+];
+
 /** Tools for Main Agent (curated simple tools + spawn_task + resume_task + reply + project tools). */
 export const mainAgentTools: Tool[] = [
   current_time,

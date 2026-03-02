@@ -5,7 +5,7 @@
 import { describe, it, expect } from "bun:test";
 import { ToolRegistry } from "../../../src/tools/registry.ts";
 import type { Tool, ToolCategory } from "../../../src/tools/types.ts";
-import { allBuiltInTools } from "../../../src/tools/builtins/index.ts";
+import { allTaskTools } from "../../../src/tools/builtins/index.ts";
 import { z } from "zod";
 
 describe("ToolRegistry", () => {
@@ -178,8 +178,8 @@ describe("ToolRegistry", () => {
     expect(llmTools[0]!.parameters).toEqual(rawSchema);
   });
 
-  it("allBuiltInTools should include memory tools", () => {
-    const memoryTools = allBuiltInTools.filter((t) => t.category === "memory");
+  it("allTaskTools should include memory tools", () => {
+    const memoryTools = allTaskTools.filter((t) => t.category === "memory");
     expect(memoryTools).toHaveLength(5);
     expect(memoryTools.map((t) => t.name).sort()).toEqual([
       "memory_append",

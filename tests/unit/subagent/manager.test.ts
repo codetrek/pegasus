@@ -130,9 +130,12 @@ describe("SubAgentManager — spawn", () => {
     const config = call[3] as Record<string, unknown>;
     expect(config.input).toBe("Find X");
     expect(config.description).toBe("Research task");
-    expect(config.sessionDir).toBe(
+    // Field must be sessionPath (not sessionDir) to match SubAgentConfig in agent-worker.ts
+    expect(config.sessionPath).toBe(
       path.join(TEST_DATA_DIR, "subagents", id, "session"),
     );
+    expect(config.channelType).toBe("subagent");
+    expect(config.channelId).toBe(id);
     expect(config).toHaveProperty("settings");
   });
 
@@ -383,9 +386,12 @@ describe("SubAgentManager — resume", () => {
     const config = call[3] as Record<string, unknown>;
     expect(config.input).toBe("new input");
     expect(config.description).toBe("Research task");
-    expect(config.sessionDir).toBe(
+    // Field must be sessionPath (not sessionDir) to match SubAgentConfig
+    expect(config.sessionPath).toBe(
       path.join(TEST_DATA_DIR, "subagents", id, "session"),
     );
+    expect(config.channelType).toBe("subagent");
+    expect(config.channelId).toBe(id);
     expect(config).toHaveProperty("settings");
   });
 
