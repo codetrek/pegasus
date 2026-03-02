@@ -618,7 +618,7 @@ describe("file tools", () => {
       expect(ctx[2]!.line).toBe("line4");
     });
 
-    it("should merge overlapping context ranges", async () => {
+    it("should merge overlapping context ranges into single entry", async () => {
       const context = { taskId: "test-task-id" };
       const filePath = `${testDir}/context-merge.txt`;
       await Bun.write(filePath, "a\nb\nMATCH1\nd\nMATCH2\nf\ng");
@@ -630,13 +630,24 @@ describe("file tools", () => {
       }, context);
 
       expect(result.success).toBe(true);
-      const r = result.result as { matches: Array<{ context: Array<{ lineNumber: number; isMatch?: boolean }> }>; totalMatches: number };
+      const r = result.result as { matches: Array<{ context: Array<{ lineNumber: number; line: string; isMatch?: boolean }> }>; totalMatches: number };
       expect(r.totalMatches).toBe(2);
-      // Both matches should share the same merged context range
-      expect(r.matches).toHaveLength(2);
-      // The context should be merged (lines 2-6)
+      // Overlapping ranges merged into ONE entry (ripgrep behavior)
+      expect(r.matches).toHaveLength(1);
       const ctx = r.matches[0]!.context!;
-      expect(ctx.length).toBeGreaterThanOrEqual(4); // at least b, MATCH1, d, MATCH2
+      // Merged range: lines 2-6 (b, MATCH1, d, MATCH2, f)
+      expect(ctx).toHaveLength(5);
+      expect(ctx[0]!.lineNumber).toBe(2);
+      expect(ctx[0]!.line).toBe("b");
+      expect(ctx[0]!.isMatch).toBeUndefined();
+      expect(ctx[1]!.lineNumber).toBe(3);
+      expect(ctx[1]!.isMatch).toBe(true); // MATCH1
+      expect(ctx[2]!.lineNumber).toBe(4);
+      expect(ctx[2]!.isMatch).toBeUndefined();
+      expect(ctx[3]!.lineNumber).toBe(5);
+      expect(ctx[3]!.isMatch).toBe(true); // MATCH2
+      expect(ctx[4]!.lineNumber).toBe(6);
+      expect(ctx[4]!.isMatch).toBeUndefined();
     });
 
     it("should handle context at file boundaries", async () => {

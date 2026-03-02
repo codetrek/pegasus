@@ -502,9 +502,9 @@ export const grep_files: Tool = {
       // Result accumulators based on output mode
       const contentMatches: Array<{
         file: string;
-        line: string;
-        lineNumber: number;
-        match: string;
+        line?: string;
+        lineNumber?: number;
+        match?: string;
         context?: ContextLine[];
       }> = [];
       const filesWithMatches: string[] = [];
@@ -569,34 +569,27 @@ export const grep_files: Tool = {
 
           // output_mode === "content"
           if (context_lines !== undefined && context_lines > 0) {
-            // Context mode: group matches by merged ranges
+            // Context mode: one entry per merged range (like ripgrep -C).
+            // Overlapping matches are combined into a single context block.
             const ranges = buildContextRanges(matchLineIndices, lines.length, context_lines);
             const matchSet = new Set(matchLineIndices);
 
             for (const [rangeStart, rangeEnd] of ranges) {
-              // Find the first match line in this range to use as the primary match
-              const matchIndicesInRange = matchLineIndices.filter(idx => idx >= rangeStart && idx <= rangeEnd);
-              for (const matchIdx of matchIndicesInRange) {
-                if (contentMatches.length >= max_results) return true;
+              if (contentMatches.length >= max_results) return true;
 
-                const m = lines[matchIdx]!.match(lineRegex);
-                const contextArr: ContextLine[] = [];
-                for (let j = rangeStart; j <= rangeEnd; j++) {
-                  contextArr.push({
-                    lineNumber: j + 1,
-                    line: lines[j]!,
-                    ...(matchSet.has(j) ? { isMatch: true } : {}),
-                  });
-                }
-
-                contentMatches.push({
-                  file: filePath,
-                  line: lines[matchIdx]!,
-                  lineNumber: matchIdx + 1,
-                  match: m ? m[0] : "",
-                  context: contextArr,
+              const contextArr: ContextLine[] = [];
+              for (let j = rangeStart; j <= rangeEnd; j++) {
+                contextArr.push({
+                  lineNumber: j + 1,
+                  line: lines[j]!,
+                  ...(matchSet.has(j) ? { isMatch: true } : {}),
                 });
               }
+
+              contentMatches.push({
+                file: filePath,
+                context: contextArr,
+              });
             }
           } else {
             // No context: original behavior
