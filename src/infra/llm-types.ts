@@ -6,6 +6,7 @@
  */
 
 import type { ToolCall, ToolDefinition } from "../models/tool.ts";
+import type { ImageAttachment } from "../media/types.ts";
 
 /**
  * Message in a conversation with an LLM.
@@ -13,6 +14,7 @@ import type { ToolCall, ToolDefinition } from "../models/tool.ts";
 export interface Message {
   role: "user" | "assistant" | "system" | "tool";
   content: string;
+  images?: ImageAttachment[]; // optional image attachments
   toolCallId?: string;
   toolCalls?: ToolCall[];
 }
