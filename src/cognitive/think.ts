@@ -17,11 +17,16 @@ import type { ToolRegistry } from "../tools/registry.ts";
 const logger = getLogger("cognitive.think");
 
 export class Thinker {
+  /** The default model used by this Thinker. */
+  readonly model: LanguageModel;
+
   constructor(
-    private model: LanguageModel,
+    model: LanguageModel,
     private persona: Persona,
     private toolRegistry?: ToolRegistry,
-  ) {}
+  ) {
+    this.model = model;
+  }
 
   /**
    * Run a reasoning step.
@@ -52,24 +57,29 @@ export class Thinker {
       toolCalls: m.toolCalls,
     }));
 
-    // Inject memory index as first user message (only when provided, i.e., iteration=1)
-    if (memoryIndex && memoryIndex.length > 0) {
-      const memoryContent = [
-        "[Available memory]",
-        ...memoryIndex.map((e) => `- ${e.path} (${formatSize(e.size)}): ${e.summary}`),
-        "",
-        "Use memory_read to load relevant files before responding.",
-      ].join("\n");
-      messages.unshift({ role: "user" as const, content: memoryContent });
-    }
-
     // Add the current input only when starting fresh (no conversation history yet).
+    // Must happen BEFORE memory index injection to avoid length check confusion.
     // In resume scenarios, inputText is already in context.messages (pushed by prepareContextForResume).
     if (context.messages.length === 0) {
       const userMsg = { role: "user" as const, content: context.inputText };
       messages.push(userMsg);
       // Persist to context.messages so subsequent iterations see the original input
       context.messages.push(userMsg);
+    }
+
+    // Inject memory index as first user message (only on first injection).
+    // Persisted to context.messages so subsequent iterations see the available files.
+    if (memoryIndex && memoryIndex.length > 0 && !context.memoryIndexInjected) {
+      const memoryContent = [
+        "[Available memory]",
+        ...memoryIndex.map((e) => `- ${e.path} (${formatSize(e.size)}): ${e.summary}`),
+        "",
+        "Use memory_read to load relevant files before responding.",
+      ].join("\n");
+      const memoryMsg = { role: "user" as const, content: memoryContent };
+      messages.unshift(memoryMsg);
+      context.messages.unshift(memoryMsg);
+      context.memoryIndexInjected = true;
     }
 
     // Use override registry if provided, otherwise fall back to instance default

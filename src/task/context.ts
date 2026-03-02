@@ -102,6 +102,9 @@ export interface TaskContext {
 
   // Conversation history
   messages: Message[];
+
+  // Whether memory index has been injected into this task's conversation
+  memoryIndexInjected: boolean;
 }
 
 export function createTaskContext(
@@ -131,6 +134,7 @@ export function createTaskContext(
     suspendedState: null,
     suspendReason: null,
     messages: [],
+    memoryIndexInjected: false,
   };
 }
 
