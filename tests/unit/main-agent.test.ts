@@ -174,7 +174,7 @@ describe("MainAgent", () => {
 
     // Verify session was persisted
     const content = await Bun.file(
-      `${testDataDir}/main/current.jsonl`,
+      `${testDataDir}/agents/main/session/current.jsonl`,
     ).text();
     expect(content).toContain("test message");
     // The reply text is delivered via tool call, so "Hi there!" appears in
@@ -451,7 +451,7 @@ describe("MainAgent", () => {
 
     // Verify spawn tool result includes description in session messages
     const sessionContent = await Bun.file(
-      `${testDataDir}/main/current.jsonl`,
+      `${testDataDir}/agents/main/session/current.jsonl`,
     ).text();
     expect(sessionContent).toContain('"description":"Do a complex search"');
 
@@ -566,7 +566,7 @@ describe("MainAgent", () => {
 
     // But the monologue should be persisted in the session
     const content = await Bun.file(
-      `${testDataDir}/main/current.jsonl`,
+      `${testDataDir}/agents/main/session/current.jsonl`,
     ).text();
     expect(content).toContain(monologueText);
 
@@ -931,7 +931,7 @@ describe("MainAgent", () => {
 
     // Verify compact happened: archive file should exist
     const { readdir } = await import("node:fs/promises");
-    const files = await readdir(`${testDataDir}/main`);
+    const files = await readdir(`${testDataDir}/agents/main/session`);
     const archives = files.filter((f: string) => f.endsWith(".jsonl") && f !== "current.jsonl");
     expect(archives.length).toBeGreaterThanOrEqual(1);
 
@@ -1013,7 +1013,7 @@ describe("MainAgent", () => {
 
     // Verify compact happened: archive file should exist
     const { readdir } = await import("node:fs/promises");
-    const files = await readdir(`${testDataDir}/main`);
+    const files = await readdir(`${testDataDir}/agents/main/session`);
     const archives = files.filter((f: string) => f.endsWith(".jsonl") && f !== "current.jsonl");
     expect(archives.length).toBeGreaterThanOrEqual(1);
 
@@ -1383,7 +1383,7 @@ describe("MainAgent", () => {
 
   it("should inject memory index with full facts content on start", async () => {
     // 1. Create memory files before starting
-    const memoryDir = `${testDataDir}/memory`;
+    const memoryDir = `${testDataDir}/agents/main/memory`;
     await mkdir(`${memoryDir}/facts`, { recursive: true });
     await mkdir(`${memoryDir}/episodes`, { recursive: true });
     writeFileSync(`${memoryDir}/facts/user.md`, "# User Info\n- Name: Test User\n- Lang: EN");
@@ -1409,7 +1409,7 @@ describe("MainAgent", () => {
     await agent.start();
 
     // 3. Check session messages contain memory index
-    const content = await Bun.file(`${testDataDir}/main/current.jsonl`).text();
+    const content = await Bun.file(`${testDataDir}/agents/main/session/current.jsonl`).text();
     expect(content).toContain("[Available memory]");
 
     // Facts should be loaded in full (content included)
@@ -1442,7 +1442,7 @@ describe("MainAgent", () => {
     await agent.start();
 
     // Check session file — should NOT contain memory index
-    const sessionFile = Bun.file(`${testDataDir}/main/current.jsonl`);
+    const sessionFile = Bun.file(`${testDataDir}/agents/main/session/current.jsonl`);
     const exists = await sessionFile.exists();
     if (exists) {
       const content = await sessionFile.text();
@@ -1453,14 +1453,14 @@ describe("MainAgent", () => {
   }, 10_000);
 
   it("should not re-inject memory index on restart when session has messages", async () => {
-    const memoryDir = `${testDataDir}/memory`;
+    const memoryDir = `${testDataDir}/agents/main/memory`;
     await mkdir(`${memoryDir}/facts`, { recursive: true });
     writeFileSync(`${memoryDir}/facts/user.md`, "# User Info\n- Name: Test User");
 
     // Create an existing session file to simulate restart
-    await mkdir(`${testDataDir}/main`, { recursive: true });
+    await mkdir(`${testDataDir}/agents/main/session`, { recursive: true });
     writeFileSync(
-      `${testDataDir}/main/current.jsonl`,
+      `${testDataDir}/agents/main/session/current.jsonl`,
       JSON.stringify({ role: "user", content: "hello from previous session" }) + "\n",
     );
 
@@ -1480,7 +1480,7 @@ describe("MainAgent", () => {
     await agent.start();
 
     // Session should contain the old message but NOT a new memory index injection
-    const content = await Bun.file(`${testDataDir}/main/current.jsonl`).text();
+    const content = await Bun.file(`${testDataDir}/agents/main/session/current.jsonl`).text();
     expect(content).toContain("hello from previous session");
     // Memory index should NOT be re-injected since session already has messages
     expect(content).not.toContain("[Available memory]");
@@ -1577,7 +1577,7 @@ describe("MainAgent", () => {
 
   describe("_runMainReflection", () => {
     it("should run PostTaskReflector and complete successfully", async () => {
-      await mkdir(`${testDataDir}/memory`, { recursive: true });
+      await mkdir(`${testDataDir}/agents/main/memory`, { recursive: true });
 
       const model: LanguageModel = {
         provider: "test",
@@ -1612,7 +1612,7 @@ describe("MainAgent", () => {
     }, 10_000);
 
     it("should write memory when reflector decides to", async () => {
-      await mkdir(`${testDataDir}/memory`, { recursive: true });
+      await mkdir(`${testDataDir}/agents/main/memory`, { recursive: true });
 
       let callCount = 0;
       const model: LanguageModel = {
@@ -1662,7 +1662,7 @@ describe("MainAgent", () => {
       await agent._runMainReflection(messages);
 
       // Verify memory was written
-      const content = await Bun.file(`${testDataDir}/memory/facts/user.md`).text();
+      const content = await Bun.file(`${testDataDir}/agents/main/memory/facts/user.md`).text();
       expect(content).toContain("Alice");
       expect(content).toContain("TypeScript");
 
@@ -1750,7 +1750,7 @@ describe("MainAgent", () => {
 
       // Verify compact happened
       const { readdir } = await import("node:fs/promises");
-      const files = await readdir(`${testDataDir}/main`).catch(() => [] as string[]);
+      const files = await readdir(`${testDataDir}/agents/main/session`).catch(() => [] as string[]);
       const archives = files.filter((f: string) => f.endsWith(".jsonl") && f !== "current.jsonl");
       expect(archives.length).toBeGreaterThanOrEqual(1);
 
@@ -1764,7 +1764,7 @@ describe("MainAgent", () => {
     }, 20_000);
 
     it("should not crash compact when reflection fails", async () => {
-      await mkdir(`${testDataDir}/memory`, { recursive: true });
+      await mkdir(`${testDataDir}/agents/main/memory`, { recursive: true });
 
       // Directly test that _runMainReflection handles errors gracefully
       const model: LanguageModel = {
@@ -1976,7 +1976,7 @@ describe("MainAgent", () => {
 
       // Verify session has the spawn result (tool message)
       const sessionContent = await Bun.file(
-        `${testDataDir}/main/current.jsonl`,
+        `${testDataDir}/agents/main/session/current.jsonl`,
       ).text();
       expect(sessionContent).toContain("spawn_subagent");
       expect(sessionContent).toContain("Research weather patterns");
@@ -2104,7 +2104,7 @@ describe("MainAgent", () => {
 
       // Verify session has the resume result
       const sessionContent = await Bun.file(
-        `${testDataDir}/main/current.jsonl`,
+        `${testDataDir}/agents/main/session/current.jsonl`,
       ).text();
       expect(sessionContent).toContain("resume_subagent");
       expect(sessionContent).toContain("resumed");

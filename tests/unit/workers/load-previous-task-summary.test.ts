@@ -3,6 +3,9 @@
  *
  * Verifies that when a SubAgent is resumed, it can load previous task
  * results from JSONL files on disk and present them as context.
+ *
+ * The function now receives the tasks directory directly (not a parent
+ * session directory), so all tests pass the tasksDir path.
  */
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { rm, mkdir, appendFile } from "node:fs/promises";
@@ -49,14 +52,14 @@ describe("loadPreviousTaskSummary", () => {
   });
 
   it("should return null when tasks directory does not exist", async () => {
-    const result = await loadPreviousTaskSummary("/tmp/nonexistent-session-path");
+    const result = await loadPreviousTaskSummary("/tmp/nonexistent-tasks-dir");
     expect(result).toBeNull();
   }, 5_000);
 
   it("should return null when tasks directory is empty (no index)", async () => {
     const tasksDir = path.join(TEST_DIR, "tasks");
     await mkdir(tasksDir, { recursive: true });
-    const result = await loadPreviousTaskSummary(TEST_DIR);
+    const result = await loadPreviousTaskSummary(tasksDir);
     expect(result).toBeNull();
   }, 5_000);
 
@@ -87,7 +90,7 @@ describe("loadPreviousTaskSummary", () => {
       iterations: 3,
     });
 
-    const result = await loadPreviousTaskSummary(TEST_DIR);
+    const result = await loadPreviousTaskSummary(tasksDir);
     expect(result).not.toBeNull();
     expect(result).toContain("Analyze the codebase");
     expect(result).toContain("The codebase has 50 files organized in src/ with clean architecture.");
@@ -123,7 +126,7 @@ describe("loadPreviousTaskSummary", () => {
       iterations: 2,
     });
 
-    const result = await loadPreviousTaskSummary(TEST_DIR);
+    const result = await loadPreviousTaskSummary(tasksDir);
     expect(result).not.toBeNull();
     expect(result).toContain("First task");
     expect(result).toContain("First task done");
@@ -146,7 +149,7 @@ describe("loadPreviousTaskSummary", () => {
       error: "timeout exceeded",
     });
 
-    const result = await loadPreviousTaskSummary(TEST_DIR);
+    const result = await loadPreviousTaskSummary(tasksDir);
     expect(result).not.toBeNull();
     expect(result).toContain("This will fail");
     expect(result).toContain("[Failed: timeout exceeded]");
@@ -168,7 +171,7 @@ describe("loadPreviousTaskSummary", () => {
       iterations: 1,
     });
 
-    const result = await loadPreviousTaskSummary(TEST_DIR);
+    const result = await loadPreviousTaskSummary(tasksDir);
     expect(result).not.toBeNull();
     expect(result).toContain("Simple task");
     expect(result).toContain("Plain string result");
@@ -196,7 +199,7 @@ describe("loadPreviousTaskSummary", () => {
       iterations: 1,
     });
 
-    const result = await loadPreviousTaskSummary(TEST_DIR);
+    const result = await loadPreviousTaskSummary(tasksDir);
     expect(result).not.toBeNull();
     expect(result).toContain("Real work");
     expect(result).toContain("Done");
@@ -219,7 +222,7 @@ describe("loadPreviousTaskSummary", () => {
       iterations: 1,
     });
 
-    const result = await loadPreviousTaskSummary(TEST_DIR);
+    const result = await loadPreviousTaskSummary(tasksDir);
     expect(result).not.toBeNull();
     expect(result).toContain("Fallback description");
   }, 5_000);
@@ -232,7 +235,7 @@ describe("loadPreviousTaskSummary", () => {
     await writeIndex(tasksDir, "missing_1", date);
     await writeIndex(tasksDir, "missing_2", date);
 
-    const result = await loadPreviousTaskSummary(TEST_DIR);
+    const result = await loadPreviousTaskSummary(tasksDir);
     expect(result).toBeNull();
   }, 5_000);
 });

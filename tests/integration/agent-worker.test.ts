@@ -192,8 +192,8 @@ describe("Agent Worker — subagent mode", () => {
   it("should send ready after successful subagent init", async () => {
     worker = new Worker(WORKER_URL);
 
-    const sessionPath = `${TEST_DIR}/session-1`;
-    mkdirSync(sessionPath, { recursive: true });
+    const subagentDir = `${TEST_DIR}/session-1`;
+    mkdirSync(subagentDir, { recursive: true });
 
     const readyPromise = waitForMessage(worker, "ready");
 
@@ -202,10 +202,10 @@ describe("Agent Worker — subagent mode", () => {
       mode: "subagent",
       config: {
         input: "Analyze the test results",
-        sessionPath,
+        subagentDir,
         channelType: "subagent",
         channelId: "sa_1_test",
-        settings: makeTestSettings(sessionPath),
+        settings: makeTestSettings(subagentDir),
       },
     });
 
@@ -216,8 +216,8 @@ describe("Agent Worker — subagent mode", () => {
   it("should auto-submit input and generate llm_request", async () => {
     worker = new Worker(WORKER_URL);
 
-    const sessionPath = `${TEST_DIR}/session-2`;
-    mkdirSync(sessionPath, { recursive: true });
+    const subagentDir = `${TEST_DIR}/session-2`;
+    mkdirSync(subagentDir, { recursive: true });
 
     // Wait for ready, then check for llm_request (auto-submit triggers reasoning)
     const readyPromise = waitForMessage(worker, "ready");
@@ -228,10 +228,10 @@ describe("Agent Worker — subagent mode", () => {
       mode: "subagent",
       config: {
         input: "Hello subagent, do your work",
-        sessionPath,
+        subagentDir,
         channelType: "subagent",
         channelId: "sa_2_test",
-        settings: makeTestSettings(sessionPath),
+        settings: makeTestSettings(subagentDir),
       },
     });
 
@@ -254,7 +254,7 @@ describe("Agent Worker — subagent mode", () => {
       mode: "subagent",
       config: {
         input: "test",
-        sessionPath: `${TEST_DIR}/no-settings`,
+        subagentDir: `${TEST_DIR}/no-settings`,
         channelType: "subagent",
         channelId: "sa_3_test",
         // No settings!
@@ -269,8 +269,8 @@ describe("Agent Worker — subagent mode", () => {
   it("should prepend memorySnapshot to input when provided", async () => {
     worker = new Worker(WORKER_URL);
 
-    const sessionPath = `${TEST_DIR}/session-memory`;
-    mkdirSync(sessionPath, { recursive: true });
+    const subagentDir = `${TEST_DIR}/session-memory`;
+    mkdirSync(subagentDir, { recursive: true });
 
     const readyPromise = waitForMessage(worker, "ready");
     const llmRequestPromise = waitForMessage(worker, "llm_request");
@@ -280,11 +280,11 @@ describe("Agent Worker — subagent mode", () => {
       mode: "subagent",
       config: {
         input: "Do the analysis",
-        sessionPath,
+        subagentDir,
         channelType: "subagent",
         channelId: "sa_mem_test",
         memorySnapshot: "User prefers concise responses.",
-        settings: makeTestSettings(sessionPath),
+        settings: makeTestSettings(subagentDir),
       },
     });
 
@@ -305,8 +305,8 @@ describe("Agent Worker — subagent mode", () => {
   it("should NOT include memorySnapshot prefix when not provided", async () => {
     worker = new Worker(WORKER_URL);
 
-    const sessionPath = `${TEST_DIR}/session-no-memory`;
-    mkdirSync(sessionPath, { recursive: true });
+    const subagentDir = `${TEST_DIR}/session-no-memory`;
+    mkdirSync(subagentDir, { recursive: true });
 
     const readyPromise = waitForMessage(worker, "ready");
     const llmRequestPromise = waitForMessage(worker, "llm_request");
@@ -316,10 +316,10 @@ describe("Agent Worker — subagent mode", () => {
       mode: "subagent",
       config: {
         input: "Simple task",
-        sessionPath,
+        subagentDir,
         channelType: "subagent",
         channelId: "sa_nomem_test",
-        settings: makeTestSettings(sessionPath),
+        settings: makeTestSettings(subagentDir),
       },
     });
 
@@ -335,8 +335,8 @@ describe("Agent Worker — subagent mode", () => {
   it("should handle shutdown gracefully in subagent mode", async () => {
     worker = new Worker(WORKER_URL);
 
-    const sessionPath = `${TEST_DIR}/session-shutdown`;
-    mkdirSync(sessionPath, { recursive: true });
+    const subagentDir = `${TEST_DIR}/session-shutdown`;
+    mkdirSync(subagentDir, { recursive: true });
 
     const readyPromise = waitForMessage(worker, "ready");
 
@@ -345,10 +345,10 @@ describe("Agent Worker — subagent mode", () => {
       mode: "subagent",
       config: {
         input: "",
-        sessionPath,
+        subagentDir,
         channelType: "subagent",
         channelId: "sa_4_test",
-        settings: makeTestSettings(sessionPath),
+        settings: makeTestSettings(subagentDir),
       },
     });
 
@@ -377,8 +377,8 @@ describe("Agent Worker — subagent mode", () => {
 
     worker = new Worker(WORKER_URL);
 
-    const sessionPath = `${TEST_DIR}/session-spawn`;
-    mkdirSync(sessionPath, { recursive: true });
+    const subagentDir = `${TEST_DIR}/session-spawn`;
+    mkdirSync(subagentDir, { recursive: true });
 
     // Collect ALL messages from worker for inspection
     const allMessages: Array<Record<string, unknown>> = [];
@@ -420,10 +420,10 @@ describe("Agent Worker — subagent mode", () => {
       mode: "subagent",
       config: {
         input: "Run a child task to analyze data",
-        sessionPath,
+        subagentDir,
         channelType: "subagent",
         channelId: "sa_spawn_test",
-        settings: makeTestSettings(sessionPath),
+        settings: makeTestSettings(subagentDir),
       },
     });
 
@@ -533,8 +533,8 @@ describe("Agent Worker — subagent mode", () => {
     // The initial task should complete and trigger shutdown with subagentDone.
     worker = new Worker(WORKER_URL);
 
-    const sessionPath = `${TEST_DIR}/session-direct`;
-    mkdirSync(sessionPath, { recursive: true });
+    const subagentDir = `${TEST_DIR}/session-direct`;
+    mkdirSync(subagentDir, { recursive: true });
 
     const allMessages: Array<Record<string, unknown>> = [];
     worker.addEventListener("message", (event: MessageEvent) => {
@@ -549,10 +549,10 @@ describe("Agent Worker — subagent mode", () => {
       mode: "subagent",
       config: {
         input: "Say hello",
-        sessionPath,
+        subagentDir,
         channelType: "subagent",
         channelId: "sa_direct_test",
-        settings: makeTestSettings(sessionPath),
+        settings: makeTestSettings(subagentDir),
       },
     });
 

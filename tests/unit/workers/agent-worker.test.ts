@@ -594,7 +594,7 @@ describe("handleInit", () => {
 
     await handleInit("subagent", {
       input: "test",
-      sessionPath: `${TEST_DIR}/no-settings`,
+      subagentDir: `${TEST_DIR}/no-settings`,
       channelType: "subagent",
       channelId: "sa_test",
     });
@@ -793,15 +793,15 @@ describe("initSubAgent", () => {
   });
 
   it("should send ready for valid subagent init with empty input", async () => {
-    const sessionPath = `${TEST_DIR}/session-empty`;
-    mkdirSync(sessionPath, { recursive: true });
+    const subagentDir = `${TEST_DIR}/session-empty`;
+    mkdirSync(subagentDir, { recursive: true });
 
-    const settings = makeTestSettings(sessionPath);
+    const settings = makeTestSettings(subagentDir);
     setSettings(settings);
 
     await initSubAgent({
       input: "",
-      sessionPath,
+      subagentDir,
       channelType: "subagent",
       channelId: "sa_unit_1",
       settings,
@@ -813,15 +813,15 @@ describe("initSubAgent", () => {
   }, 10_000);
 
   it("should auto-submit input when non-empty", async () => {
-    const sessionPath = `${TEST_DIR}/session-input`;
-    mkdirSync(sessionPath, { recursive: true });
+    const subagentDir = `${TEST_DIR}/session-input`;
+    mkdirSync(subagentDir, { recursive: true });
 
-    const settings = makeTestSettings(sessionPath);
+    const settings = makeTestSettings(subagentDir);
     setSettings(settings);
 
     await initSubAgent({
       input: "Do analysis work",
-      sessionPath,
+      subagentDir,
       channelType: "subagent",
       channelId: "sa_unit_2",
       settings,
@@ -831,15 +831,15 @@ describe("initSubAgent", () => {
   }, 10_000);
 
   it("should inject contextWindow when provided", async () => {
-    const sessionPath = `${TEST_DIR}/session-cw`;
-    mkdirSync(sessionPath, { recursive: true });
+    const subagentDir = `${TEST_DIR}/session-cw`;
+    mkdirSync(subagentDir, { recursive: true });
 
-    const settings = makeTestSettings(sessionPath);
+    const settings = makeTestSettings(subagentDir);
     setSettings(settings);
 
     await initSubAgent({
       input: "",
-      sessionPath,
+      subagentDir,
       channelType: "subagent",
       channelId: "sa_unit_cw",
       settings,
@@ -850,16 +850,16 @@ describe("initSubAgent", () => {
   }, 10_000);
 
   it("should handle default role as object with model field", async () => {
-    const sessionPath = `${TEST_DIR}/session-obj-role`;
-    mkdirSync(sessionPath, { recursive: true });
+    const subagentDir = `${TEST_DIR}/session-obj-role`;
+    mkdirSync(subagentDir, { recursive: true });
 
-    const settings = makeTestSettings(sessionPath);
+    const settings = makeTestSettings(subagentDir);
     settings.llm.default = { model: "provider/model-v2", temperature: 0.7 } as any;
     setSettings(settings);
 
     await initSubAgent({
       input: "",
-      sessionPath,
+      subagentDir,
       channelType: "subagent",
       channelId: "sa_unit_obj",
       settings,
@@ -869,15 +869,15 @@ describe("initSubAgent", () => {
   }, 10_000);
 
   it("should prepend memorySnapshot to input when provided", async () => {
-    const sessionPath = `${TEST_DIR}/session-memory`;
-    mkdirSync(sessionPath, { recursive: true });
+    const subagentDir = `${TEST_DIR}/session-memory`;
+    mkdirSync(subagentDir, { recursive: true });
 
-    const settings = makeTestSettings(sessionPath);
+    const settings = makeTestSettings(subagentDir);
     setSettings(settings);
 
     await initSubAgent({
       input: "Do the analysis",
-      sessionPath,
+      subagentDir,
       channelType: "subagent",
       channelId: "sa_mem_test",
       memorySnapshot: "User prefers concise responses.",
@@ -888,15 +888,15 @@ describe("initSubAgent", () => {
   }, 10_000);
 
   it("should forward notify callback with subagentDone for initial task completion", async () => {
-    const sessionPath = `${TEST_DIR}/session-notify`;
-    mkdirSync(sessionPath, { recursive: true });
+    const subagentDir = `${TEST_DIR}/session-notify`;
+    mkdirSync(subagentDir, { recursive: true });
 
-    const settings = makeTestSettings(sessionPath);
+    const settings = makeTestSettings(subagentDir);
     setSettings(settings);
 
     await initSubAgent({
       input: "Task to complete",
-      sessionPath,
+      subagentDir,
       channelType: "subagent",
       channelId: "sa_notify_test",
       settings,
@@ -1027,7 +1027,7 @@ describe("loadPreviousTaskSummary — additional branches", () => {
       "utf-8",
     );
 
-    const result = await loadPreviousTaskSummary(TEST_DIR);
+    const result = await loadPreviousTaskSummary(tasksDir);
     expect(result).not.toBeNull();
     expect(result).toContain("Incomplete task");
     expect(result).toContain("[No result recorded]");
@@ -1073,7 +1073,7 @@ describe("loadPreviousTaskSummary — additional branches", () => {
       "utf-8",
     );
 
-    const result = await loadPreviousTaskSummary(TEST_DIR);
+    const result = await loadPreviousTaskSummary(tasksDir);
     expect(result).not.toBeNull();
     expect(result).toContain("Object result task");
     expect(result).toContain("some-data");
@@ -1130,7 +1130,7 @@ describe("loadPreviousTaskSummary — additional branches", () => {
       "utf-8",
     );
 
-    const result = await loadPreviousTaskSummary(TEST_DIR);
+    const result = await loadPreviousTaskSummary(tasksDir);
     expect(result).not.toBeNull();
     expect(result).toContain("Valid task");
     expect(result).toContain("Valid result");
@@ -1177,7 +1177,7 @@ describe("loadPreviousTaskSummary — additional branches", () => {
       "utf-8",
     );
 
-    const result = await loadPreviousTaskSummary(TEST_DIR);
+    const result = await loadPreviousTaskSummary(tasksDir);
     expect(result).not.toBeNull();
     expect(result).toContain("(no input)");
   }, 5_000);

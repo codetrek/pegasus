@@ -23,6 +23,7 @@ import { EventBus } from "@pegasus/events/bus.ts";
 import { resume_task } from "@pegasus/tools/builtins/resume-task-tool.ts";
 import { rm, readFile } from "node:fs/promises";
 import path from "node:path";
+import { buildMainAgentPaths } from "@pegasus/storage/paths.ts";
 
 // ── Helpers ────────────────────────────────────────
 
@@ -72,6 +73,7 @@ function testAgentDeps(): AgentDeps {
       dataDir: testDataDir,
       authDir: "/tmp/pegasus-test-auth",
     }),
+    storePaths: buildMainAgentPaths(testDataDir),
   };
 }
 
@@ -353,6 +355,7 @@ describe("Task Resume — Agent.resume()", () => {
 
 describe("Task Resume — Persister", () => {
   const persisterDataDir = "/tmp/pegasus-test-task-resume-persister";
+  const persisterTasksDir = `${persisterDataDir}/tasks`;
 
   afterAll(async () => {
     await rm(persisterDataDir, { recursive: true, force: true }).catch(() => {});
@@ -361,7 +364,7 @@ describe("Task Resume — Persister", () => {
   test("TASK_RESUMED event is recorded in JSONL and replay reconstructs context", async () => {
     const bus = new EventBus({ keepHistory: true });
     const registry = new TaskRegistry();
-    const persister = new TaskPersister(bus, registry, persisterDataDir);
+    const persister = new TaskPersister(bus, registry, persisterTasksDir);
     // Keep reference to prevent GC (side-effect: subscribes to EventBus)
     void persister;
 
@@ -404,7 +407,7 @@ describe("Task Resume — Persister", () => {
 
       // Verify JSONL file exists and has TASK_RESUMED
       const taskPath = await TaskPersister.resolveTaskPath(
-        path.join(persisterDataDir, "tasks"),
+        persisterTasksDir,
         taskId,
       );
       expect(taskPath).not.toBeNull();
@@ -429,7 +432,7 @@ describe("Task Resume — Persister", () => {
       expect(userMsgs.some((m) => m.content === "continue please")).toBe(true);
 
       // Verify pending.json was updated (task added back)
-      const pendingPath = path.join(persisterDataDir, "tasks", "pending.json");
+      const pendingPath = path.join(persisterTasksDir, "pending.json");
       const pendingContent = await readFile(pendingPath, "utf-8");
       const pending = JSON.parse(pendingContent);
       expect(pending.some((p: { taskId: string }) => p.taskId === taskId)).toBe(true);
@@ -545,6 +548,7 @@ describe("Task Resume — E2E", () => {
         dataDir: e2eDataDir + "/history",
         authDir: "/tmp/pegasus-test-auth",
       }),
+      storePaths: buildMainAgentPaths(e2eDataDir + "/history"),
     });
 
     await agent.start();
@@ -667,6 +671,7 @@ describe("Task Resume — E2E", () => {
         dataDir: e2eDataDir + "/tool-resume",
         authDir: "/tmp/pegasus-test-auth",
       }),
+      storePaths: buildMainAgentPaths(e2eDataDir + "/tool-resume"),
     });
 
     await agent.start();
@@ -753,6 +758,7 @@ describe("Task Resume — E2E", () => {
         dataDir,
         authDir: "/tmp/pegasus-test-auth",
       }),
+      storePaths: buildMainAgentPaths(dataDir),
     });
 
     await agent.start();
@@ -768,7 +774,7 @@ describe("Task Resume — E2E", () => {
       await Bun.sleep(200);
 
       // Verify JSONL file exists before removal
-      const tasksDir = path.join(dataDir, "tasks");
+      const tasksDir = buildMainAgentPaths(dataDir).tasks;
       const jsonlPath = await TaskPersister.resolveTaskPath(tasksDir, taskId);
       expect(jsonlPath).not.toBeNull();
 
@@ -830,6 +836,7 @@ describe("Task Resume — E2E", () => {
         dataDir: e2eDataDir + "/notify",
         authDir: "/tmp/pegasus-test-auth",
       }),
+      storePaths: buildMainAgentPaths(e2eDataDir + "/notify"),
     });
 
     agent.onNotify(n => notifications.push(n));
@@ -897,6 +904,7 @@ describe("Task Resume — E2E", () => {
         dataDir: e2eDataDir + "/multi-resume",
         authDir: "/tmp/pegasus-test-auth",
       }),
+      storePaths: buildMainAgentPaths(e2eDataDir + "/multi-resume"),
     });
 
     await agent.start();
@@ -962,6 +970,7 @@ describe("Task Resume — E2E", () => {
         dataDir,
         authDir: "/tmp/pegasus-test-auth",
       }),
+      storePaths: buildMainAgentPaths(dataDir),
     });
 
     await agent.start();
@@ -977,7 +986,7 @@ describe("Task Resume — E2E", () => {
       await Bun.sleep(200);
 
       // Read and parse JSONL
-      const tasksDir = path.join(dataDir, "tasks");
+      const tasksDir = buildMainAgentPaths(dataDir).tasks;
       const jsonlPath = await TaskPersister.resolveTaskPath(tasksDir, taskId);
       expect(jsonlPath).not.toBeNull();
 

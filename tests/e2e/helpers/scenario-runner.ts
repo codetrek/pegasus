@@ -13,6 +13,7 @@ import { TaskState } from "@pegasus/task/states.ts";
 import type { LanguageModel, GenerateTextResult } from "@pegasus/infra/llm-types.ts";
 import type { Persona } from "@pegasus/identity/persona.ts";
 import type { Scenario, ScenarioStep, ScenarioResult } from "./types.ts";
+import { buildMainAgentPaths } from "@pegasus/storage/paths.ts";
 
 // ── Minimal test persona ─────────────────────────────
 
@@ -133,6 +134,7 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
       model,
       persona: testPersona,
       settings,
+      storePaths: buildMainAgentPaths(dataDir),
     });
 
     await agent.start();

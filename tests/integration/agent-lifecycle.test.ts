@@ -7,6 +7,7 @@ import { SettingsSchema } from "@pegasus/infra/config.ts";
 import type { LanguageModel } from "@pegasus/infra/llm-types.ts";
 import type { Persona } from "@pegasus/identity/persona.ts";
 import { rm } from "node:fs/promises";
+import { buildMainAgentPaths } from "@pegasus/storage/paths.ts";
 
 const testDataDir = "/tmp/pegasus-test-agent-lifecycle";
 
@@ -44,6 +45,7 @@ function testAgentDeps(): AgentDeps {
       dataDir: testDataDir,
       authDir: "/tmp/pegasus-test-auth",
     }),
+    storePaths: buildMainAgentPaths(testDataDir),
   };
 }
 
@@ -213,6 +215,7 @@ describe("Agent lifecycle", () => {
         dataDir: testDataDir,
         authDir: "/tmp/pegasus-test-auth",
       }),
+      storePaths: buildMainAgentPaths(testDataDir),
     });
     await agent.start();
 

@@ -53,6 +53,8 @@ import { MCPManager, wrapMCPTools } from "../mcp/index.ts";
 import type { MCPServerConfig } from "../mcp/index.ts";
 import { TokenRefreshMonitor } from "../mcp/auth/refresh-monitor.ts";
 import type { DeviceCodeAuthConfig } from "../mcp/auth/types.ts";
+import { buildMainAgentPaths } from "../storage/paths.ts";
+import type { AgentStorePaths } from "../storage/paths.ts";
 
 const logger = getLogger("main_agent");
 
@@ -91,6 +93,7 @@ export class MainAgent {
   private aiTaskTypeRegistry: AITaskTypeRegistry;
   private projectManager: ProjectManager;
   private projectAdapter: ProjectAdapter;
+  private mainStorePaths: AgentStorePaths;
   private subAgentManager: SubAgentManager | null = null;
   private imageManager: ImageManager | null = null; // null when vision disabled
   private imageReadCache: Map<string, { data: string; mimeType: string }> = new Map();
@@ -105,7 +108,8 @@ export class MainAgent {
     this.settings = deps.settings ?? getSettings();
 
     // Session persistence
-    this.sessionStore = new SessionStore(this.settings.dataDir);
+    this.mainStorePaths = buildMainAgentPaths(this.settings.dataDir);
+    this.sessionStore = new SessionStore(this.mainStorePaths.session);
 
     // Load Codex credentials synchronously BEFORE models.get()
     // (device code login happens later in start() if needed)
@@ -129,7 +133,7 @@ export class MainAgent {
     this.aiTaskTypeRegistry = new AITaskTypeRegistry();
 
     // Projects
-    const projectsDir = path.join(this.settings.dataDir, "projects");
+    const projectsDir = path.join(this.settings.dataDir, "agents", "projects");
     this.projectManager = new ProjectManager(projectsDir);
     this.projectAdapter = deps._projectAdapter ?? new ProjectAdapter();
 
@@ -168,6 +172,7 @@ export class MainAgent {
         modelRegistry: this.models,
         persona: this.persona,
         settings: this.settings,
+        storePaths: this.mainStorePaths,
       });
     } catch (err) {
       // If codex auth failed and default model is codex, this will throw.
@@ -618,8 +623,9 @@ export class MainAgent {
             tc.arguments,
             {
               taskId: "main-agent",
-              memoryDir: `${this.settings.dataDir}/memory`,
-              sessionDir: `${this.settings.dataDir}/main`,
+              memoryDir: this.mainStorePaths.memory!,
+              sessionDir: this.mainStorePaths.session,
+              tasksDir: this.mainStorePaths.tasks,
               projectManager: this.projectManager,
               mediaDir: this.imageManager
                 ? path.join(this.settings.dataDir, "media")
@@ -971,7 +977,7 @@ export class MainAgent {
 
     // 2. Pre-load existing facts (full content) and episode index
     //    Same pattern as Agent._runPostReflection (agent.ts lines 638-677)
-    const memoryDir = path.join(this.settings.dataDir, "memory");
+    const memoryDir = this.mainStorePaths.memory!;
     const existingFacts: Array<{ path: string; content: string }> = [];
     const episodeIndex: Array<{ path: string; summary: string }> = [];
 
@@ -1284,7 +1290,7 @@ export class MainAgent {
    */
   private async _getMemorySnapshot(): Promise<string | undefined> {
     try {
-      const memoryDir = path.join(this.settings.dataDir, "memory");
+      const memoryDir = this.mainStorePaths.memory!;
       const listResult = await this.toolExecutor.execute(
         "memory_list",
         {},
@@ -1336,7 +1342,7 @@ export class MainAgent {
    */
   private async _injectMemoryIndex(): Promise<void> {
     try {
-      const memoryDir = path.join(this.settings.dataDir, "memory");
+      const memoryDir = this.mainStorePaths.memory!;
       const listResult = await this.toolExecutor.execute(
         "memory_list",
         {},

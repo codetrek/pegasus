@@ -5,6 +5,7 @@ import type { Persona } from "@pegasus/identity/persona.ts";
 import { SettingsSchema } from "@pegasus/infra/config.ts";
 import { TaskState } from "@pegasus/task/states.ts";
 import { rm } from "node:fs/promises";
+import { buildMainAgentPaths } from "@pegasus/storage/paths.ts";
 
 const testDataDir = "/tmp/pegasus-test-agent-tool-loop";
 
@@ -74,6 +75,7 @@ describe("Agent tool use loop", () => {
       model: mockModel,
       persona: testPersona,
       settings: createToolTestSettings(),
+      storePaths: buildMainAgentPaths(testDataDir),
     });
 
     await agent.start();
@@ -135,6 +137,7 @@ describe("Agent tool use loop", () => {
       model: mockModel,
       persona: testPersona,
       settings: createToolTestSettings(),
+      storePaths: buildMainAgentPaths(testDataDir),
     });
 
     await agent.start();

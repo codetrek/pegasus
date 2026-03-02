@@ -67,7 +67,7 @@ MainAgent (conversation brain, always running)
 | **Persistent memory** | Yes (global) | No | No | Yes (project-scoped) |
 | **Session persistence** | Yes | Yes (for debugging + resume) | No (task logs only) | Yes |
 | **User communication** | `reply()` tool | Via `notify` → MainAgent | Via `notify` → caller | Via `notify` → MainAgent |
-| **Data directory** | `data/main/` | `data/subagents/<id>/` | `data/tasks/` | `data/projects/<name>/` |
+| **Data directory** | `data/agents/main/` | `data/agents/subagents/<id>/` | `data/agents/main/tasks/` | `data/agents/projects/<name>/` |
 
 ### When to Use What
 
@@ -290,7 +290,7 @@ self.onmessage = async (event) => {
       // Load from init message (no disk)
       persona = buildSubagentPersona(config.input, config.systemPrompt);
       settings = buildSubagentSettings();
-      sessionStore = new SessionStore(config.sessionPath);  // for debugging + resume
+      sessionStore = new SessionStore(config.subagentDir);  // for debugging + resume
     }
 
     // Everything below is identical for both modes
@@ -316,7 +316,7 @@ self.onmessage = async (event) => {
   config: {
     input: string;           // the task description from MainAgent
     systemPrompt?: string;   // optional custom system prompt
-    sessionPath: string;     // e.g. "data/subagents/abc123/session"
+    subagentDir: string;      // e.g. "data/agents/subagents/abc123"
     memorySnapshot?: string; // MainAgent memory index (read-only, injected once)
     contextWindow?: number;  // optional override
   }
@@ -327,7 +327,7 @@ self.onmessage = async (event) => {
   type: "init",
   mode: "project",
   config: {
-    projectPath: string;     // e.g. "data/projects/frontend-redesign"
+    projectPath: string;     // e.g. "data/agents/projects/frontend-redesign"
     contextWindow?: number;
   }
 }
@@ -377,16 +377,20 @@ SubAgent persists its session to disk for two purposes:
 2. **Resume**: MainAgent can resume a completed SubAgent with new input
 
 ```
-data/subagents/
+data/agents/subagents/
 ├── abc123/
-│   └── session/
-│       └── current.jsonl    ← SubAgent conversation history
+│   ├── session/
+│   │   └── current.jsonl    ← SubAgent conversation history
+│   └── tasks/
+│       └── index.jsonl      ← SubAgent's own task logs
 ├── def456/
-│   └── session/
-│       └── current.jsonl
+│   ├── session/
+│   │   └── current.jsonl
+│   └── tasks/
+│       └── index.jsonl
 ```
 
-No memory persistence, no task persistence, no skills directory. SubAgent is temporary — only the session log survives for debugging and resume.
+No memory persistence, no skills directory. SubAgent is temporary — session and task logs survive for debugging and resume.
 
 ### Lifecycle
 
@@ -476,7 +480,7 @@ interface WorkerEntry {
 ### Manager Responsibilities
 
 **ProjectManager** (unchanged from current design):
-- Scan `data/projects/*/PROJECT.md` on startup
+- Scan `data/agents/projects/*/PROJECT.md` on startup
 - CRUD operations (create, suspend, resume, complete, archive)
 - Status transitions and PROJECT.md updates
 - Calls `WorkerAdapter.startWorker()` / `stopWorker()` for lifecycle
@@ -485,7 +489,7 @@ interface WorkerEntry {
 - Spawn SubAgent Workers on demand (from `spawn_subagent` tool)
 - Track active SubAgents
 - Auto-destroy Worker when SubAgent completes
-- Manage session persistence path (`data/subagents/<id>/`)
+- Manage session persistence path (`data/agents/subagents/<id>/`)
 - Handle `resume_subagent` (load session, spawn new Worker)
 
 ## Communication Model
@@ -717,7 +721,7 @@ Only starts after Phase 1 is merged to main.
 ```
 src/workers/          ← unified Worker management
 src/subagent/         ← SubAgent lifecycle (NOT src/subagents/ — that's gone in Phase 1)
-data/subagents/       ← runtime SubAgent sessions (created at runtime)
+data/agents/subagents/       ← runtime SubAgent sessions (created at runtime)
 ```
 
 **Documentation updates**:

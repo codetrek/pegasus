@@ -106,14 +106,15 @@ describe("SubAgentManager — spawn", () => {
     expect(counter2).toBe(counter1 + 1);
   });
 
-  it("should create session directory", () => {
+  it("should create session and tasks directories", () => {
     const wa = createMockWorkerAdapter();
     const manager = new SubAgentManager(wa, TEST_DATA_DIR);
 
     const id = manager.spawn("Task", "input");
 
-    const sessionDir = path.join(TEST_DATA_DIR, "subagents", id, "session");
-    expect(existsSync(sessionDir)).toBe(true);
+    const subagentDir = path.join(TEST_DATA_DIR, "agents", "subagents", id);
+    expect(existsSync(path.join(subagentDir, "session"))).toBe(true);
+    expect(existsSync(path.join(subagentDir, "tasks"))).toBe(true);
   });
 
   it("should delegate to WorkerAdapter.startWorker with correct args", () => {
@@ -130,9 +131,9 @@ describe("SubAgentManager — spawn", () => {
     const config = call[3] as Record<string, unknown>;
     expect(config.input).toBe("Find X");
     expect(config.description).toBe("Research task");
-    // Field must be sessionPath (not sessionDir) to match SubAgentConfig in agent-worker.ts
-    expect(config.sessionPath).toBe(
-      path.join(TEST_DATA_DIR, "subagents", id, "session"),
+    // Field must be subagentDir to match SubAgentConfig in agent-worker.ts
+    expect(config.subagentDir).toBe(
+      path.join(TEST_DATA_DIR, "agents", "subagents", id),
     );
     expect(config.channelType).toBe("subagent");
     expect(config.channelId).toBe(id);
@@ -386,9 +387,9 @@ describe("SubAgentManager — resume", () => {
     const config = call[3] as Record<string, unknown>;
     expect(config.input).toBe("new input");
     expect(config.description).toBe("Research task");
-    // Field must be sessionPath (not sessionDir) to match SubAgentConfig
-    expect(config.sessionPath).toBe(
-      path.join(TEST_DATA_DIR, "subagents", id, "session"),
+    // Field must be subagentDir to match SubAgentConfig
+    expect(config.subagentDir).toBe(
+      path.join(TEST_DATA_DIR, "agents", "subagents", id),
     );
     expect(config.channelType).toBe("subagent");
     expect(config.channelId).toBe(id);

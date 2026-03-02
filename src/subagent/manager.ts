@@ -39,7 +39,7 @@ export class SubAgentManager {
   /**
    * Spawn a new SubAgent Worker.
    *
-   * Creates a session directory at `<dataDir>/subagents/<id>/session/`,
+   * Creates directories at `<dataDir>/agents/subagents/<id>/{session,tasks}/`,
    * starts a Worker via WorkerAdapter, and tracks the entry.
    *
    * @param description — human-readable description of the SubAgent's task.
@@ -51,9 +51,10 @@ export class SubAgentManager {
     this.counter++;
     const id = `sa_${this.counter}_${Date.now()}`;
 
-    // Create persistent session directory
-    const sessionDir = path.join(this.dataDir, "subagents", id, "session");
-    mkdirSync(sessionDir, { recursive: true });
+    // Create persistent directories for the subagent
+    const subagentDir = path.join(this.dataDir, "agents", "subagents", id);
+    mkdirSync(path.join(subagentDir, "session"), { recursive: true });
+    mkdirSync(path.join(subagentDir, "tasks"), { recursive: true });
 
     // Serialize current settings for the Worker thread
     // (Workers don't share module state — settings must be passed via config)
@@ -66,9 +67,9 @@ export class SubAgentManager {
 
     // Start the Worker via WorkerAdapter
     // Field names must match SubAgentConfig in agent-worker.ts:
-    //   sessionPath (not sessionDir), channelType, channelId
+    //   subagentDir, channelType, channelId
     this.workerAdapter.startWorker("subagent", id, "subagent", {
-      sessionPath: sessionDir,
+      subagentDir,
       channelType: "subagent",
       channelId: id,
       input,
@@ -151,7 +152,7 @@ export class SubAgentManager {
       throw new Error(`SubAgent "${id}" is already active — cannot resume`);
     }
 
-    const sessionDir = path.join(this.dataDir, "subagents", id, "session");
+    const subagentDir = path.join(this.dataDir, "agents", "subagents", id);
 
     // Serialize current settings for the Worker thread
     let settings: Record<string, unknown> = {};
@@ -164,7 +165,7 @@ export class SubAgentManager {
     // Start a new Worker for the same SubAgent
     // Field names must match SubAgentConfig in agent-worker.ts
     this.workerAdapter.startWorker("subagent", id, "subagent", {
-      sessionPath: sessionDir,
+      subagentDir,
       channelType: "subagent",
       channelId: id,
       input,

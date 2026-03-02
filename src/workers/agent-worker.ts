@@ -26,6 +26,7 @@ import { parseProjectFile } from "../projects/loader.ts";
 import { ProxyLanguageModel } from "../projects/proxy-language-model.ts";
 import { spawn_task } from "../tools/builtins/index.ts";
 import { TaskPersister } from "../task/persister.ts";
+import { buildProjectAgentPaths, buildSubAgentPaths } from "../storage/paths.ts";
 
 // ── Types ────────────────────────────────────────────
 
@@ -81,7 +82,7 @@ export interface ProjectConfig extends BaseConfig {
 /** Init config for subagent mode. */
 export interface SubAgentConfig extends BaseConfig {
   input: string;
-  sessionPath: string;
+  subagentDir: string;
   channelType: string;
   channelId: string;
   memorySnapshot?: string;
@@ -221,14 +222,10 @@ export async function initProject(config: ProjectConfig): Promise<void> {
     values: ["accuracy", "efficiency"],
   };
 
-  // 5. Override settings: dataDir → projectPath, inject contextWindow if provided
-  const projectSettings: Settings = {
-    ...settings,
-    dataDir: projectPath,
-    ...(contextWindow != null && {
-      llm: { ...settings.llm, contextWindow },
-    }),
-  };
+  // 5. Build agent settings — only override contextWindow if provided
+  const agentSettings: Settings = contextWindow != null
+    ? { ...settings, llm: { ...settings.llm, contextWindow } }
+    : settings;
 
   // 6. Store channel info
   workerChannelType = "project";
@@ -238,7 +235,8 @@ export async function initProject(config: ProjectConfig): Promise<void> {
   agent = _createAgent({
     model: proxyModel,
     persona,
-    settings: projectSettings,
+    settings: agentSettings,
+    storePaths: buildProjectAgentPaths(projectPath),
   });
 
   // 8. Register notify callback → forward to main thread as InboundMessage
@@ -256,7 +254,7 @@ export async function initProject(config: ProjectConfig): Promise<void> {
 // ── SubAgent mode init ───────────────────────────────
 
 export async function initSubAgent(config: SubAgentConfig): Promise<void> {
-  const { input, sessionPath, channelType, channelId, contextWindow, memorySnapshot } = config;
+  const { input, subagentDir, channelType, channelId, contextWindow, memorySnapshot } = config;
 
   // 1. Load global settings
   const settings = getSettings();
@@ -280,25 +278,24 @@ export async function initSubAgent(config: SubAgentConfig): Promise<void> {
     background: SUBAGENT_SYSTEM_PROMPT,
   };
 
-  // 4. Override settings: dataDir → sessionPath, inject contextWindow if provided
-  const subAgentSettings: Settings = {
-    ...settings,
-    dataDir: sessionPath,
-    ...(contextWindow != null && {
-      llm: { ...settings.llm, contextWindow },
-    }),
-  };
+  // 4. Build agent settings — only override contextWindow if provided
+  const agentSettings: Settings = contextWindow != null
+    ? { ...settings, llm: { ...settings.llm, contextWindow } }
+    : settings;
 
   // 5. Store channel info (used to tag notify messages back to MainAgent)
   workerChannelType = channelType;
   workerChannelId = channelId;
 
   // 6. Create Agent (with spawn_task so SubAgent can orchestrate AITasks)
+  const storePaths = buildSubAgentPaths(subagentDir);
   agent = _createAgent({
     model: proxyModel,
     persona,
-    settings: subAgentSettings,
+    settings: agentSettings,
     additionalTools: [spawn_task],
+    storePaths,
+    enableReflection: false,
   });
 
   // 7. Register notify callback → forward to main thread as InboundMessage
@@ -343,7 +340,7 @@ export async function initSubAgent(config: SubAgentConfig): Promise<void> {
   //     as context so the SubAgent knows what was already accomplished.
   //     Capture the returned taskId so onNotify only shuts down for THIS task.
   if (input) {
-    const previousContext = await loadPreviousTaskSummary(sessionPath);
+    const previousContext = await loadPreviousTaskSummary(storePaths.tasks);
     const fullInput = [
       previousContext ? `[Previous Session Context]\n${previousContext}` : null,
       memorySnapshot ? `[Available Memory]\n${memorySnapshot}` : null,
@@ -388,18 +385,17 @@ export async function handleShutdown(): Promise<void> {
 // ── Helpers ──────────────────────────────────────────
 
 /**
- * Load a summary of previous task results from a session directory.
+ * Load a summary of previous task results from a tasks directory.
  *
  * When a SubAgent is resumed, the new Agent starts fresh with no memory of
  * previous tasks. This function reads completed JSONL task logs from disk
  * and extracts their input + final result, providing context so the resumed
  * SubAgent knows what was already accomplished.
  *
- * @param sessionPath — the session directory (contains tasks/ subdirectory).
+ * @param tasksDir — the tasks directory (contains index.jsonl, date dirs).
  * @returns summary string, or null if no previous tasks found.
  */
-export async function loadPreviousTaskSummary(sessionPath: string): Promise<string | null> {
-  const tasksDir = path.join(sessionPath, "tasks");
+export async function loadPreviousTaskSummary(tasksDir: string): Promise<string | null> {
   if (!existsSync(tasksDir)) return null;
 
   try {

@@ -1,5 +1,5 @@
 /**
- * SessionStore — persists Main Agent conversation history as JSONL.
+ * SessionStore — persists Agent conversation history as JSONL.
  *
  * Supports append, load, compact (archive + summarize), and listing archives.
  */
@@ -37,8 +37,8 @@ export class SessionStore {
   private dir: string;
   private currentPath: string;
 
-  constructor(dataDir: string) {
-    this.dir = path.join(dataDir, "main");
+  constructor(sessionDir: string) {
+    this.dir = sessionDir;
     this.currentPath = path.join(this.dir, "current.jsonl");
   }
 

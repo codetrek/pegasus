@@ -23,11 +23,21 @@ export const task_list: Tool = {
       .optional()
       .describe("Date in YYYY-MM-DD format (defaults to today)"),
   }),
-  async execute(params: unknown, _context: ToolContext): Promise<ToolResult> {
+  async execute(params: unknown, context: ToolContext): Promise<ToolResult> {
     const startedAt = Date.now();
     const { date } = params as { date?: string };
-    const effectiveDataDir = process.env.PEGASUS_DATA_DIR ?? "data";
-    const tasksDir = path.join(effectiveDataDir, "tasks");
+
+    if (!context.tasksDir) {
+      return {
+        success: false,
+        error: "ToolContext.tasksDir is required but missing",
+        startedAt,
+        completedAt: Date.now(),
+        durationMs: Date.now() - startedAt,
+      };
+    }
+
+    const tasksDir = context.tasksDir;
     const targetDate = date ?? new Date().toISOString().slice(0, 10);
 
     try {
@@ -93,11 +103,21 @@ export const task_replay: Tool = {
   parameters: z.object({
     taskId: z.string().describe("The task ID to replay"),
   }),
-  async execute(params: unknown, _context: ToolContext): Promise<ToolResult> {
+  async execute(params: unknown, context: ToolContext): Promise<ToolResult> {
     const startedAt = Date.now();
     const { taskId } = params as { taskId: string };
-    const effectiveDataDir = process.env.PEGASUS_DATA_DIR ?? "data";
-    const tasksDir = path.join(effectiveDataDir, "tasks");
+
+    if (!context.tasksDir) {
+      return {
+        success: false,
+        error: "ToolContext.tasksDir is required but missing",
+        startedAt,
+        completedAt: Date.now(),
+        durationMs: Date.now() - startedAt,
+      };
+    }
+
+    const tasksDir = context.tasksDir;
 
     try {
       const filePath = await TaskPersister.resolveTaskPath(tasksDir, taskId);
