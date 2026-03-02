@@ -420,14 +420,14 @@ describe("file tools", () => {
       }, context);
 
       expect(result.success).toBe(true);
-      const r = result.result as { matches: Array<{ file: string; line: string; lineNumber: number; match: string }>; totalMatches: number; truncated: boolean };
-      expect(r.totalMatches).toBe(2);
-      expect(r.matches).toHaveLength(2);
-      expect(r.matches[0]!.lineNumber).toBe(2);
-      expect(r.matches[0]!.line).toBe("second match here");
-      expect(r.matches[0]!.match).toBe("match");
-      expect(r.matches[1]!.lineNumber).toBe(4);
-      expect(r.truncated).toBe(false);
+      const output = result.result as string;
+      const lines = output.split("\n").filter(l => l !== "--");
+      expect(lines).toHaveLength(2);
+      // ripgrep format: file:lineNumber:line
+      expect(lines[0]).toContain(":2:second match here");
+      expect(lines[1]).toContain(":4:fourth match here");
+      // No truncation footer
+      expect(output).not.toContain("[");
     });
 
     it("should search across multiple files in a directory", async () => {
@@ -442,11 +442,10 @@ describe("file tools", () => {
       }, context);
 
       expect(result.success).toBe(true);
-      const r = result.result as { matches: Array<{ file: string }>; totalMatches: number };
-      expect(r.totalMatches).toBe(2);
-      const files = r.matches.map(m => m.file);
-      expect(files.some(f => f.endsWith("a.txt"))).toBe(true);
-      expect(files.some(f => f.endsWith("b.txt"))).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("a.txt");
+      expect(output).toContain("b.txt");
+      expect(output).not.toContain("c.txt");
     });
 
     it("should filter files with include pattern", async () => {
@@ -462,12 +461,15 @@ describe("file tools", () => {
       }, context);
 
       expect(result.success).toBe(true);
-      const r = result.result as { matches: Array<{ file: string }>; totalMatches: number };
-      expect(r.totalMatches).toBe(1);
-      expect(r.matches[0]!.file).toContain("code.ts");
+      const output = result.result as string;
+      expect(output).toContain("code.ts");
+      expect(output).not.toContain("code.js");
+      // Only one match line (no separators)
+      const lines = output.split("\n").filter(l => l !== "--" && l !== "");
+      expect(lines).toHaveLength(1);
     });
 
-    it("should return empty matches when no results found", async () => {
+    it("should return empty string when no results found", async () => {
       const context = { taskId: "test-task-id" };
       await Bun.write(`${testDir}/nope.txt`, "nothing here");
 
@@ -477,10 +479,8 @@ describe("file tools", () => {
       }, context);
 
       expect(result.success).toBe(true);
-      const r = result.result as { matches: unknown[]; totalMatches: number; truncated: boolean };
-      expect(r.matches).toHaveLength(0);
-      expect(r.totalMatches).toBe(0);
-      expect(r.truncated).toBe(false);
+      const output = result.result as string;
+      expect(output).toBe("");
     });
 
     it("should respect max_results and report truncation", async () => {
@@ -495,10 +495,12 @@ describe("file tools", () => {
       }, context);
 
       expect(result.success).toBe(true);
-      const r = result.result as { matches: unknown[]; totalMatches: number; truncated: boolean };
-      expect(r.matches).toHaveLength(5);
-      expect(r.totalMatches).toBe(20);
-      expect(r.truncated).toBe(true);
+      const output = result.result as string;
+      // Should have 5 match lines separated by "--"
+      const matchLines = output.split("\n").filter(l => l !== "--" && l !== "" && !l.startsWith("["));
+      expect(matchLines).toHaveLength(5);
+      // Truncation footer
+      expect(output).toContain("[20 total matches, showing first 5]");
     });
 
     it("should error on invalid regex pattern", async () => {
@@ -540,8 +542,13 @@ describe("file tools", () => {
       }, context);
 
       expect(result.success).toBe(true);
-      const r = result.result as { matches: Array<{ file: string }>; totalMatches: number };
-      expect(r.totalMatches).toBe(2);
+      const output = result.result as string;
+      // Both files should appear in output
+      expect(output).toContain("top.txt");
+      expect(output).toContain("nested.txt");
+      // Two match blocks separated by "--"
+      const matchLines = output.split("\n").filter(l => l !== "--" && l !== "");
+      expect(matchLines).toHaveLength(2);
     });
 
     it("should error on non-existent path", async () => {
@@ -570,9 +577,13 @@ describe("file tools", () => {
       }, context);
 
       expect(result.success).toBe(true);
-      const r = result.result as { matches: Array<{ match: string }>; totalMatches: number };
-      expect(r.totalMatches).toBe(3);
-      expect(r.matches).toHaveLength(3);
+      const output = result.result as string;
+      // 3 match lines (Hello, hello, HELLO) — "goodbye" excluded
+      const matchLines = output.split("\n").filter(l => l !== "--" && l !== "");
+      expect(matchLines).toHaveLength(3);
+      expect(output).toContain(":1:Hello World");
+      expect(output).toContain(":2:hello world");
+      expect(output).toContain(":3:HELLO WORLD");
     });
 
     it("should be case-sensitive by default", async () => {
@@ -586,8 +597,11 @@ describe("file tools", () => {
       }, context);
 
       expect(result.success).toBe(true);
-      const r = result.result as { totalMatches: number };
-      expect(r.totalMatches).toBe(1); // Only "hello world" matches
+      const output = result.result as string;
+      // Only "hello world" matches (line 2)
+      const matchLines = output.split("\n").filter(l => l !== "--" && l !== "");
+      expect(matchLines).toHaveLength(1);
+      expect(output).toContain(":2:hello world");
     });
 
     // ── context_lines tests ──
@@ -604,21 +618,16 @@ describe("file tools", () => {
       }, context);
 
       expect(result.success).toBe(true);
-      const r = result.result as { matches: Array<{ context: Array<{ lineNumber: number; line: string; isMatch?: boolean }> }> };
-      expect(r.matches).toHaveLength(1);
-      const ctx = r.matches[0]!.context!;
-      expect(ctx).toHaveLength(3); // 1 before + match + 1 after
-      expect(ctx[0]!.lineNumber).toBe(2);
-      expect(ctx[0]!.line).toBe("line2");
-      expect(ctx[0]!.isMatch).toBeUndefined();
-      expect(ctx[1]!.lineNumber).toBe(3);
-      expect(ctx[1]!.line).toBe("MATCH_HERE");
-      expect(ctx[1]!.isMatch).toBe(true);
-      expect(ctx[2]!.lineNumber).toBe(4);
-      expect(ctx[2]!.line).toBe("line4");
+      const output = result.result as string;
+      const lines = output.split("\n").filter(l => l !== "--" && l !== "");
+      expect(lines).toHaveLength(3); // 1 before + match + 1 after
+      // Context lines use "-" separator, match lines use ":"
+      expect(lines[0]).toContain("-2-line2");
+      expect(lines[1]).toContain(":3:MATCH_HERE");
+      expect(lines[2]).toContain("-4-line4");
     });
 
-    it("should merge overlapping context ranges into single entry", async () => {
+    it("should merge overlapping context ranges into single block", async () => {
       const context = { taskId: "test-task-id" };
       const filePath = `${testDir}/context-merge.txt`;
       await Bun.write(filePath, "a\nb\nMATCH1\nd\nMATCH2\nf\ng");
@@ -630,24 +639,19 @@ describe("file tools", () => {
       }, context);
 
       expect(result.success).toBe(true);
-      const r = result.result as { matches: Array<{ context: Array<{ lineNumber: number; line: string; isMatch?: boolean }> }>; totalMatches: number };
-      expect(r.totalMatches).toBe(2);
-      // Overlapping ranges merged into ONE entry (ripgrep behavior)
-      expect(r.matches).toHaveLength(1);
-      const ctx = r.matches[0]!.context!;
+      const output = result.result as string;
+      // Overlapping ranges merged into ONE block (ripgrep behavior)
+      // No "--" block separators since it's a single merged block
+      expect(output).not.toContain("\n--\n");
+      // Check the 5 content lines (filter out empty lines and footer)
+      const contentLines = output.split("\n").filter(l => l !== "" && !l.startsWith("["));
       // Merged range: lines 2-6 (b, MATCH1, d, MATCH2, f)
-      expect(ctx).toHaveLength(5);
-      expect(ctx[0]!.lineNumber).toBe(2);
-      expect(ctx[0]!.line).toBe("b");
-      expect(ctx[0]!.isMatch).toBeUndefined();
-      expect(ctx[1]!.lineNumber).toBe(3);
-      expect(ctx[1]!.isMatch).toBe(true); // MATCH1
-      expect(ctx[2]!.lineNumber).toBe(4);
-      expect(ctx[2]!.isMatch).toBeUndefined();
-      expect(ctx[3]!.lineNumber).toBe(5);
-      expect(ctx[3]!.isMatch).toBe(true); // MATCH2
-      expect(ctx[4]!.lineNumber).toBe(6);
-      expect(ctx[4]!.isMatch).toBeUndefined();
+      expect(contentLines).toHaveLength(5);
+      expect(contentLines[0]).toContain("-2-b");
+      expect(contentLines[1]).toContain(":3:MATCH1");
+      expect(contentLines[2]).toContain("-4-d");
+      expect(contentLines[3]).toContain(":5:MATCH2");
+      expect(contentLines[4]).toContain("-6-f");
     });
 
     it("should handle context at file boundaries", async () => {
@@ -662,11 +666,13 @@ describe("file tools", () => {
       }, context);
 
       expect(result.success).toBe(true);
-      const r = result.result as { matches: Array<{ context: Array<{ lineNumber: number; line: string }> }> };
-      const ctx = r.matches[0]!.context!;
-      // Should start from line 1 (no negative lines)
-      expect(ctx[0]!.lineNumber).toBe(1);
-      expect(ctx.length).toBe(3); // MATCH_FIRST, second, third
+      const output = result.result as string;
+      const lines = output.split("\n").filter(l => l !== "--" && l !== "");
+      // Should have 3 lines: MATCH_FIRST, second, third (no negative lines)
+      expect(lines).toHaveLength(3);
+      expect(lines[0]).toContain(":1:MATCH_FIRST");
+      expect(lines[1]).toContain("-2-second");
+      expect(lines[2]).toContain("-3-third");
     });
 
     // ── output_mode tests ──
@@ -684,11 +690,13 @@ describe("file tools", () => {
       }, context);
 
       expect(result.success).toBe(true);
-      const r = result.result as { files: string[]; totalMatches: number };
-      expect(r.files).toHaveLength(2);
-      expect(r.totalMatches).toBe(2);
-      expect(r.files.some(f => f.includes("fwm-a.txt"))).toBe(true);
-      expect(r.files.some(f => f.includes("fwm-c.txt"))).toBe(true);
+      const output = result.result as string;
+      const lines = output.split("\n").filter(l => l !== "");
+      expect(lines).toHaveLength(2);
+      expect(lines.some(l => l.includes("fwm-a.txt"))).toBe(true);
+      expect(lines.some(l => l.includes("fwm-c.txt"))).toBe(true);
+      // Should NOT contain fwm-b.txt
+      expect(output).not.toContain("fwm-b.txt");
     });
 
     it("should return match counts with output_mode=count", async () => {
@@ -704,15 +712,16 @@ describe("file tools", () => {
       }, context);
 
       expect(result.success).toBe(true);
-      const r = result.result as { counts: Array<{ file: string; count: number }>; totalMatches: number };
-      expect(r.counts).toHaveLength(2); // Only files with matches
-      expect(r.totalMatches).toBe(2); // 2 files with matches (line-by-line: 1 match per line)
-      const countA = r.counts.find(c => c.file.includes("count-a.txt"));
-      const countB = r.counts.find(c => c.file.includes("count-b.txt"));
+      const output = result.result as string;
+      const lines = output.split("\n").filter(l => l !== "");
+      expect(lines).toHaveLength(2); // Only files with matches
+      // Count format: file:count
+      const countA = lines.find(l => l.includes("count-a.txt"));
+      const countB = lines.find(l => l.includes("count-b.txt"));
       expect(countA).toBeDefined();
-      expect(countA!.count).toBe(1); // "x x x" is one line with one match
+      expect(countA).toMatch(/:1$/); // "x x x" is one line with one match
       expect(countB).toBeDefined();
-      expect(countB!.count).toBe(1);
+      expect(countB).toMatch(/:1$/);
     });
 
     // ── multiline tests ──
@@ -729,12 +738,11 @@ describe("file tools", () => {
       }, context);
 
       expect(result.success).toBe(true);
-      const r = result.result as { matches: Array<{ match: string; lineNumber: number }>; totalMatches: number };
-      expect(r.totalMatches).toBe(1);
-      expect(r.matches).toHaveLength(1);
-      expect(r.matches[0]!.match).toContain("foo()");
-      expect(r.matches[0]!.match).toContain("return");
-      expect(r.matches[0]!.lineNumber).toBe(1);
+      const output = result.result as string;
+      // Should contain the match starting at line 1
+      expect(output).toContain(":1:");
+      expect(output).toContain("foo()");
+      expect(output).toContain("return");
     });
 
     it("should not match across lines without multiline", async () => {
@@ -749,8 +757,8 @@ describe("file tools", () => {
       }, context);
 
       expect(result.success).toBe(true);
-      const r = result.result as { totalMatches: number };
-      expect(r.totalMatches).toBe(0);
+      const output = result.result as string;
+      expect(output).toBe(""); // No matches
     });
 
     it("should match across lines with multiline=true using dotAll", async () => {
@@ -765,10 +773,11 @@ describe("file tools", () => {
       }, context);
 
       expect(result.success).toBe(true);
-      const r = result.result as { totalMatches: number; matches: Array<{ match: string }> };
-      expect(r.totalMatches).toBe(1);
-      expect(r.matches[0]!.match).toContain("foo");
-      expect(r.matches[0]!.match).toContain("bar");
+      const output = result.result as string;
+      expect(output).toContain("foo");
+      expect(output).toContain("bar");
+      // Should not be empty
+      expect(output.length).toBeGreaterThan(0);
     });
   });
 
