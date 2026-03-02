@@ -76,6 +76,7 @@ function makeTestSettings(dataDir: string): Settings {
     tools: {
       timeout: 10,
       allowedPaths: [],
+      maxFileSize: 52_428_800,
       mcpServers: [],
     },
     session: { compactThreshold: 0.8 },
