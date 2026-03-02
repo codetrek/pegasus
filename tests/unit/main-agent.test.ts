@@ -12,6 +12,9 @@ import { mkdir, rm } from "node:fs/promises";
 import { writeFileSync } from "node:fs";
 import { ModelRegistry } from "@pegasus/infra/model-registry.ts";
 import type { LLMConfig } from "@pegasus/infra/config-schema.ts";
+import { ProjectAdapter } from "@pegasus/projects/project-adapter.ts";
+import { WorkerAdapter } from "@pegasus/workers/worker-adapter.ts";
+import { mock } from "bun:test";
 
 const testDataDir = "/tmp/pegasus-test-main-agent";
 
@@ -1869,5 +1872,440 @@ describe("MainAgent", () => {
 
       await agent.stop();
     }, 15_000);
+  });
+
+  // ── SubAgent integration tests ──
+
+  describe("SubAgent integration", () => {
+    /**
+     * Create a mock WorkerAdapter that records calls without spawning real Workers.
+     * Used to inject into ProjectAdapter for SubAgent tests.
+     */
+    function createMockWorkerAdapter() {
+      return {
+        shutdownTimeoutMs: 30_000,
+        activeCount: 0,
+        startWorker: mock(() => {}),
+        stopWorker: mock(async () => {}),
+        stopAll: mock(async () => {}),
+        deliver: mock(() => true),
+        has: mock(() => false),
+        hasByKey: mock(() => false),
+        setModelRegistry: mock(() => {}),
+        setOnNotify: mock(() => {}),
+        setOnWorkerClose: mock(() => {}),
+        addOnWorkerClose: mock(() => {}),
+      } as unknown as WorkerAdapter;
+    }
+
+    it("should handle spawn_subagent tool call (no follow-up think)", async () => {
+      let callCount = 0;
+      const model: LanguageModel = {
+        provider: "test",
+        modelId: "test-model",
+        async generate(): Promise<GenerateTextResult> {
+          callCount++;
+          if (callCount === 1) {
+            // LLM requests spawn_subagent
+            return {
+              text: "I'll spawn a subagent for this.",
+              finishReason: "tool_calls",
+              toolCalls: [
+                {
+                  id: "tc-spawn-sa",
+                  name: "spawn_subagent",
+                  arguments: {
+                    description: "Research weather patterns",
+                    input: "Analyze weather data for the past week",
+                  },
+                },
+              ],
+              usage: { promptTokens: 10, completionTokens: 10 },
+            };
+          }
+          // If called again (shouldn't happen for spawn_subagent — it's terminal),
+          // just stop the loop. This verifies no follow-up think was triggered.
+          return {
+            text: "unexpected follow-up",
+            finishReason: "stop",
+            usage: { promptTokens: 5, completionTokens: 5 },
+          };
+        },
+      };
+
+      const mockWA = createMockWorkerAdapter();
+      const projectAdapter = new ProjectAdapter(mockWA);
+
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+        _projectAdapter: projectAdapter,
+      });
+
+      await agent.start();
+      agent.onReply(() => {});
+
+      agent.send({
+        text: "analyze weather",
+        channel: { type: "cli", channelId: "test" },
+      });
+
+      await Bun.sleep(500);
+
+      // Verify spawn was called on WorkerAdapter
+      expect(mockWA.startWorker).toHaveBeenCalledTimes(1);
+      const spawnCall = (mockWA.startWorker as ReturnType<typeof mock>).mock.calls[0]!;
+      expect(spawnCall[0]).toBe("subagent"); // channelType
+      expect(spawnCall[2]).toBe("subagent"); // mode
+
+      // Verify SubAgentManager tracks the entry
+      expect(agent.subAgents).not.toBeNull();
+      const entries = agent.subAgents!.list();
+      expect(entries).toHaveLength(1);
+      expect(entries[0]!.description).toBe("Research weather patterns");
+      expect(entries[0]!.status).toBe("active");
+
+      // Verify session has the spawn result (tool message)
+      const sessionContent = await Bun.file(
+        `${testDataDir}/main/current.jsonl`,
+      ).text();
+      expect(sessionContent).toContain("spawn_subagent");
+      expect(sessionContent).toContain("Research weather patterns");
+
+      // spawn_subagent is terminal — callCount should be 1 (no follow-up)
+      expect(callCount).toBe(1);
+
+      await agent.stop();
+    }, 10_000);
+
+    it("should handle resume_subagent tool call on completed subagent", async () => {
+      let callCount = 0;
+      let spawnedSubagentId: string | null = null;
+      const model: LanguageModel = {
+        provider: "test",
+        modelId: "test-model",
+        async generate(options: {
+          system?: string;
+          messages?: Message[];
+        }): Promise<GenerateTextResult> {
+          const isMainAgent = options.system?.includes("INNER MONOLOGUE") ?? false;
+          if (!isMainAgent) {
+            return { text: "", finishReason: "stop", usage: { promptTokens: 5, completionTokens: 0 } };
+          }
+
+          callCount++;
+          if (callCount === 1) {
+            // First call: spawn a subagent
+            return {
+              text: "Spawning subagent.",
+              finishReason: "tool_calls",
+              toolCalls: [
+                {
+                  id: "tc-spawn",
+                  name: "spawn_subagent",
+                  arguments: {
+                    description: "Analyze data",
+                    input: "initial analysis",
+                  },
+                },
+              ],
+              usage: { promptTokens: 10, completionTokens: 10 },
+            };
+          }
+          if (callCount === 2) {
+            // Second call: after subagent notification, try to resume
+            // Extract subagentId from session
+            const toolMsgs = (options.messages ?? []).filter(
+              (m: Message) => m.role === "tool" && m.content.includes("subagentId"),
+            );
+            if (toolMsgs.length > 0) {
+              try {
+                const parsed = JSON.parse(toolMsgs[0]!.content);
+                spawnedSubagentId = parsed.subagentId;
+              } catch { /* ignore */ }
+            }
+            if (spawnedSubagentId) {
+              return {
+                text: "Resuming subagent with new input.",
+                finishReason: "tool_calls",
+                toolCalls: [
+                  {
+                    id: "tc-resume-sa",
+                    name: "resume_subagent",
+                    arguments: { subagent_id: spawnedSubagentId, input: "do more analysis" },
+                  },
+                ],
+                usage: { promptTokens: 20, completionTokens: 10 },
+              };
+            }
+          }
+          // Default: stop
+          return {
+            text: "",
+            finishReason: "stop",
+            usage: { promptTokens: 5, completionTokens: 0 },
+          };
+        },
+      };
+
+      const mockWA = createMockWorkerAdapter();
+      const projectAdapter = new ProjectAdapter(mockWA);
+
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+        _projectAdapter: projectAdapter,
+      });
+
+      await agent.start();
+      agent.onReply(() => {});
+
+      // Step 1: Spawn the subagent
+      agent.send({
+        text: "analyze data",
+        channel: { type: "cli", channelId: "test" },
+      });
+      await Bun.sleep(300);
+
+      // Verify spawn
+      expect(agent.subAgents).not.toBeNull();
+      const entries = agent.subAgents!.list();
+      expect(entries).toHaveLength(1);
+      spawnedSubagentId = entries[0]!.id;
+
+      // Step 2: Complete the subagent (simulate Worker completing)
+      await agent.subAgents!.complete(spawnedSubagentId);
+      const afterComplete = agent.subAgents!.get(spawnedSubagentId);
+      expect(afterComplete?.status).toBe("completed");
+
+      // Step 3: Send another message which triggers the LLM to call resume_subagent
+      agent.send({
+        text: "continue analysis",
+        channel: { type: "cli", channelId: "test" },
+      });
+      await Bun.sleep(300);
+
+      // Verify resume happened — Worker should be started again
+      expect(mockWA.startWorker).toHaveBeenCalledTimes(2); // spawn + resume
+
+      // Verify entry is active again
+      const afterResume = agent.subAgents!.get(spawnedSubagentId);
+      expect(afterResume?.status).toBe("active");
+
+      // Verify session has the resume result
+      const sessionContent = await Bun.file(
+        `${testDataDir}/main/current.jsonl`,
+      ).text();
+      expect(sessionContent).toContain("resume_subagent");
+      expect(sessionContent).toContain("resumed");
+
+      await agent.stop();
+    }, 10_000);
+
+    it("should handle resume_subagent error (triggers follow-up think)", async () => {
+      let callCount = 0;
+      const model: LanguageModel = {
+        provider: "test",
+        modelId: "test-model",
+        async generate(): Promise<GenerateTextResult> {
+          callCount++;
+          if (callCount === 1) {
+            // Request resume_subagent with non-existent ID
+            return {
+              text: "Let me resume that subagent.",
+              finishReason: "tool_calls",
+              toolCalls: [
+                {
+                  id: "tc-resume-bad",
+                  name: "resume_subagent",
+                  arguments: { subagent_id: "nonexistent-sa-xyz", input: "continue" },
+                },
+              ],
+              usage: { promptTokens: 10, completionTokens: 10 },
+            };
+          }
+          // After error → follow-up think should happen, LLM replies to user
+          return {
+            text: "",
+            finishReason: "tool_calls",
+            toolCalls: [
+              {
+                id: "tc-reply",
+                name: "reply",
+                arguments: { text: "SubAgent not found", channelType: "cli", channelId: "test" },
+              },
+            ],
+            usage: { promptTokens: 15, completionTokens: 10 },
+          };
+        },
+      };
+
+      const mockWA = createMockWorkerAdapter();
+      const projectAdapter = new ProjectAdapter(mockWA);
+
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+        _projectAdapter: projectAdapter,
+      });
+
+      await agent.start();
+
+      const replies: OutboundMessage[] = [];
+      agent.onReply((msg) => replies.push(msg));
+
+      agent.send({
+        text: "resume old subagent",
+        channel: { type: "cli", channelId: "test" },
+      });
+      await Bun.sleep(500);
+
+      // Error triggers follow-up → LLM replies with "SubAgent not found"
+      expect(callCount).toBeGreaterThanOrEqual(2); // 1st: resume, 2nd: follow-up
+      expect(replies.length).toBeGreaterThanOrEqual(1);
+      expect(replies[0]!.text).toBe("SubAgent not found");
+
+      await agent.stop();
+    }, 10_000);
+
+    it("should handle subagent messages through the message queue", async () => {
+      let callCount = 0;
+      const model: LanguageModel = {
+        provider: "test",
+        modelId: "test-model",
+        async generate(options: {
+          messages?: Message[];
+        }): Promise<GenerateTextResult> {
+          callCount++;
+          // Check if the latest message mentions a subagent notification
+          const msgs = options.messages ?? [];
+          const lastUser = msgs.filter((m: Message) => m.role === "user").pop();
+          if (lastUser?.content.includes("channel: subagent")) {
+            // LLM sees the subagent notification and replies
+            return {
+              text: "",
+              finishReason: "tool_calls",
+              toolCalls: [
+                {
+                  id: "tc-reply-sa",
+                  name: "reply",
+                  arguments: {
+                    text: "SubAgent completed its work!",
+                    channelType: "cli",
+                    channelId: "test",
+                  },
+                },
+              ],
+              usage: { promptTokens: 20, completionTokens: 10 },
+            };
+          }
+          // Default: inner monologue
+          return {
+            text: "thinking...",
+            finishReason: "stop",
+            usage: { promptTokens: 5, completionTokens: 0 },
+          };
+        },
+      };
+
+      const mockWA = createMockWorkerAdapter();
+      const projectAdapter = new ProjectAdapter(mockWA);
+
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+        _projectAdapter: projectAdapter,
+      });
+
+      await agent.start();
+
+      const replies: OutboundMessage[] = [];
+      agent.onReply((msg) => replies.push(msg));
+
+      // Simulate a SubAgent sending a notification back to MainAgent
+      // This is what happens when WorkerAdapter's onNotify callback fires
+      agent.send({
+        text: "Analysis complete: found 42 weather patterns",
+        channel: { type: "subagent", channelId: "sa_1_12345" },
+      });
+
+      await Bun.sleep(500);
+
+      // MainAgent should have processed the subagent message via _think()
+      // and the LLM should have produced a reply
+      expect(callCount).toBeGreaterThanOrEqual(1);
+      expect(replies.length).toBeGreaterThanOrEqual(1);
+      expect(replies[0]!.text).toBe("SubAgent completed its work!");
+
+      await agent.stop();
+    }, 10_000);
+
+    it("should stop active subagents on agent.stop()", async () => {
+      let callCount = 0;
+      const model: LanguageModel = {
+        provider: "test",
+        modelId: "test-model",
+        async generate(): Promise<GenerateTextResult> {
+          callCount++;
+          if (callCount === 1) {
+            return {
+              text: "Spawning subagent.",
+              finishReason: "tool_calls",
+              toolCalls: [
+                {
+                  id: "tc-spawn-sa",
+                  name: "spawn_subagent",
+                  arguments: {
+                    description: "Background task",
+                    input: "do something",
+                  },
+                },
+              ],
+              usage: { promptTokens: 10, completionTokens: 10 },
+            };
+          }
+          return {
+            text: "",
+            finishReason: "stop",
+            usage: { promptTokens: 5, completionTokens: 0 },
+          };
+        },
+      };
+
+      const mockWA = createMockWorkerAdapter();
+      const projectAdapter = new ProjectAdapter(mockWA);
+
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+        _projectAdapter: projectAdapter,
+      });
+
+      await agent.start();
+      agent.onReply(() => {});
+
+      agent.send({
+        text: "start background work",
+        channel: { type: "cli", channelId: "test" },
+      });
+      await Bun.sleep(300);
+
+      // Verify subagent is active
+      expect(agent.subAgents!.list("active")).toHaveLength(1);
+
+      // Stop MainAgent — should clean up active subagents
+      await agent.stop();
+
+      // After stop, subAgentManager is nulled
+      expect(agent.subAgents).toBeNull();
+
+      // stopWorker should have been called for the subagent
+      expect(mockWA.stopWorker).toHaveBeenCalled();
+    }, 10_000);
   });
 });

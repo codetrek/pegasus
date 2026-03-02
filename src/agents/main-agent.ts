@@ -41,6 +41,7 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { loginCodexDeviceCode } from "../infra/codex-device-login.ts";
 import { ProjectManager } from "../projects/manager.ts";
 import { ProjectAdapter } from "../projects/project-adapter.ts";
+import { SubAgentManager } from "../subagent/manager.ts";
 
 // Main Agent's curated tool set
 import { mainAgentTools, reflectionTools } from "../tools/builtins/index.ts";
@@ -57,6 +58,8 @@ export interface MainAgentDeps {
   models: ModelRegistry;
   persona: Persona;
   settings?: Settings;
+  /** Optional ProjectAdapter for dependency injection (testing). */
+  _projectAdapter?: ProjectAdapter;
 }
 
 type QueueItem =
@@ -86,6 +89,7 @@ export class MainAgent {
   private aiTaskTypeRegistry: AITaskTypeRegistry;
   private projectManager: ProjectManager;
   private projectAdapter: ProjectAdapter;
+  private subAgentManager: SubAgentManager | null = null;
   private systemPrompt: string = "";
   private _codexCredPath: string;
   private _copilotCredPath: string;
@@ -123,7 +127,7 @@ export class MainAgent {
     // Projects
     const projectsDir = path.join(this.settings.dataDir, "projects");
     this.projectManager = new ProjectManager(projectsDir);
-    this.projectAdapter = new ProjectAdapter();
+    this.projectAdapter = deps._projectAdapter ?? new ProjectAdapter();
   }
 
   /** Start the Main Agent and underlying Task System. */
@@ -249,6 +253,27 @@ export class MainAgent {
       }
     }
 
+    // Set up SubAgentManager (shares WorkerAdapter with ProjectAdapter)
+    const workerAdapter = this.projectAdapter.getWorkerAdapter();
+    this.subAgentManager = new SubAgentManager(workerAdapter, this.settings.dataDir);
+
+    // Handle SubAgent Worker close events (compose with ProjectAdapter's handler)
+    workerAdapter.addOnWorkerClose((channelType, channelId) => {
+      if (channelType === "subagent" && this.subAgentManager) {
+        const entry = this.subAgentManager.get(channelId);
+        if (entry && entry.status === "active") {
+          // Worker closed while still active — mark as completed.
+          // complete() calls stopWorker which is a no-op since Worker already closed.
+          this.subAgentManager.complete(channelId).catch((err) => {
+            logger.warn(
+              { subagentId: channelId, error: errorToString(err) },
+              "subagent_auto_complete_failed",
+            );
+          });
+        }
+      }
+    });
+
     // Build system prompt once (stable for LLM prefix caching)
     this.systemPrompt = this._buildSystemPrompt();
 
@@ -260,7 +285,23 @@ export class MainAgent {
 
   /** Stop the Main Agent. */
   async stop(): Promise<void> {
-    // Stop project Workers first
+    // Stop active SubAgents first (they share the WorkerAdapter)
+    if (this.subAgentManager) {
+      const activeSubAgents = this.subAgentManager.list("active");
+      for (const entry of activeSubAgents) {
+        try {
+          await this.subAgentManager.complete(entry.id);
+        } catch (err) {
+          logger.warn(
+            { subagentId: entry.id, error: errorToString(err) },
+            "subagent_stop_failed",
+          );
+        }
+      }
+      this.subAgentManager = null;
+    }
+
+    // Stop project Workers
     await this.projectAdapter.stop();
 
     // Stop token refresh monitor
@@ -475,6 +516,11 @@ export class MainAgent {
         } else if (tc.name === "resume_task") {
           const resumeNeedsFollowUp = await this._handleResumeTask(tc);
           if (resumeNeedsFollowUp) needsFollowUp = true;
+        } else if (tc.name === "spawn_subagent") {
+          await this._handleSpawnSubagent(tc);
+        } else if (tc.name === "resume_subagent") {
+          const resumeNeedsFollowUp = await this._handleResumeSubagent(tc);
+          if (resumeNeedsFollowUp) needsFollowUp = true;
         } else if (tc.name === "use_skill") {
           // Handle use_skill tool call
           const { skill: skillName, args: skillArgs } = tc.arguments as { skill: string; args?: string };
@@ -633,6 +679,87 @@ export class MainAgent {
       await this.sessionStore.append(toolMsg);
 
       logger.warn({ taskId: task_id, error: errorMsg }, "task_resume_failed");
+      return true; // LLM needs to see the error and react
+    }
+  }
+
+  // ── SubAgent spawning ──
+
+  /**
+   * Handle spawn_subagent tool call — spawn a SubAgent Worker.
+   * This is a terminal action (no follow-up think needed).
+   */
+  private async _handleSpawnSubagent(tc: ToolCall): Promise<void> {
+    const { description, input } = tc.arguments as { description: string; input: string };
+
+    if (!this.subAgentManager) {
+      const toolMsg: Message = {
+        role: "tool",
+        content: JSON.stringify({ error: "SubAgentManager not initialized" }),
+        toolCallId: tc.id,
+      };
+      this.sessionMessages.push(toolMsg);
+      await this.sessionStore.append(toolMsg);
+      return;
+    }
+
+    const subagentId = this.subAgentManager.spawn(description, input);
+
+    const toolMsg: Message = {
+      role: "tool",
+      content: JSON.stringify({ subagentId, status: "spawned", description }),
+      toolCallId: tc.id,
+    };
+    this.sessionMessages.push(toolMsg);
+    await this.sessionStore.append(toolMsg);
+
+    logger.info({ subagentId, description }, "subagent_spawned");
+  }
+
+  // ── SubAgent resuming ──
+
+  /**
+   * Handle resume_subagent tool call — resume a completed/failed SubAgent.
+   * Returns true if LLM needs follow-up (error case).
+   */
+  private async _handleResumeSubagent(tc: ToolCall): Promise<boolean> {
+    const { subagent_id, input } = tc.arguments as { subagent_id: string; input: string };
+
+    if (!this.subAgentManager) {
+      const toolMsg: Message = {
+        role: "tool",
+        content: JSON.stringify({ error: "SubAgentManager not initialized" }),
+        toolCallId: tc.id,
+      };
+      this.sessionMessages.push(toolMsg);
+      await this.sessionStore.append(toolMsg);
+      return true; // LLM needs to see the error
+    }
+
+    try {
+      this.subAgentManager.resume(subagent_id, input);
+
+      const toolMsg: Message = {
+        role: "tool",
+        content: JSON.stringify({ subagentId: subagent_id, status: "resumed" }),
+        toolCallId: tc.id,
+      };
+      this.sessionMessages.push(toolMsg);
+      await this.sessionStore.append(toolMsg);
+
+      logger.info({ subagentId: subagent_id }, "subagent_resumed");
+      return false; // No follow-up needed — SubAgent notifications arrive via send()
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      const toolMsg: Message = {
+        role: "tool",
+        content: JSON.stringify({ error: errorMsg }),
+        toolCallId: tc.id,
+      };
+      this.sessionMessages.push(toolMsg);
+      await this.sessionStore.append(toolMsg);
+
+      logger.warn({ subagentId: subagent_id, error: errorMsg }, "subagent_resume_failed");
       return true; // LLM needs to see the error and react
     }
   }
@@ -1184,5 +1311,10 @@ export class MainAgent {
   /** Expose project manager for testing. */
   get projects(): ProjectManager {
     return this.projectManager;
+  }
+
+  /** Expose SubAgentManager for testing. */
+  get subAgents(): SubAgentManager | null {
+    return this.subAgentManager;
   }
 }

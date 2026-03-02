@@ -203,6 +203,8 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("memory_patch");
     expect(prompt).toContain("memory_append");
     expect(prompt).toContain("spawn_task");
+    expect(prompt).toContain("spawn_subagent");
+    expect(prompt).toContain("resume_subagent");
     expect(prompt).toContain("current_time");
     expect(prompt).toContain("session_archive_read");
   });
@@ -222,14 +224,14 @@ describe("buildSystemPrompt", () => {
     expect(prompt).not.toContain("## Thinking Style");
   });
 
-  test("includes Reply vs Spawn in main mode", () => {
+  test("includes How to Delegate Work in main mode", () => {
     const prompt = buildSystemPrompt({ mode: "main", persona });
-    expect(prompt).toContain("## When to Reply vs Spawn");
+    expect(prompt).toContain("## How to Delegate Work");
   });
 
-  test("does NOT include Reply vs Spawn in task mode", () => {
+  test("does NOT include How to Delegate Work in task mode", () => {
     const prompt = buildSystemPrompt({ mode: "task", persona });
-    expect(prompt).not.toContain("## When to Reply vs Spawn");
+    expect(prompt).not.toContain("## How to Delegate Work");
   });
 
   test("includes Channels in main mode", () => {
@@ -339,7 +341,7 @@ describe("buildSystemPrompt - prompt structure", () => {
     const thinkIdx = prompt.indexOf("## How You Think");
     const toolsIdx = prompt.indexOf("## Tools");
     const styleIdx = prompt.indexOf("## Thinking Style");
-    const spawnIdx = prompt.indexOf("## When to Reply vs Spawn");
+    const spawnIdx = prompt.indexOf("## How to Delegate Work");
     const aiTaskIdx = prompt.indexOf("## Available AI Task Types");
     const channelIdx = prompt.indexOf("## Channels and reply()");
     const sessionIdx = prompt.indexOf("## Session History");
@@ -384,7 +386,7 @@ describe("buildSystemPrompt - prompt structure", () => {
     expect(prompt).not.toContain("## How You Think");
     expect(prompt).not.toContain("## Tools");
     expect(prompt).not.toContain("## Thinking Style");
-    expect(prompt).not.toContain("## When to Reply vs Spawn");
+    expect(prompt).not.toContain("## How to Delegate Work");
     expect(prompt).not.toContain("## Channels");
     expect(prompt).not.toContain("## Session History");
   });

@@ -1,6 +1,6 @@
 # Execution Model: MainAgent, SubAgent, AITask, Project
 
-> **Status**: Design — not yet implemented
+> **Status**: Implemented
 > **Supersedes**: Parts of [AITask Types](./aitask-types.md) (renames "subagent" → "AITask") and extends [Project System](./project-system.md)
 
 ## Problem Statement

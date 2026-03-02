@@ -80,6 +80,18 @@ const resume_task = resumeTaskModule.resume_task;
 
 export { resume_task };
 
+// Spawn subagent tool (for Main Agent)
+import * as spawnSubagentModule from "./spawn-subagent-tool.ts";
+const spawn_subagent = spawnSubagentModule.spawn_subagent;
+
+export { spawn_subagent };
+
+// Resume subagent tool (for Main Agent)
+import * as resumeSubagentModule from "./resume-subagent-tool.ts";
+const resume_subagent = resumeSubagentModule.resume_subagent;
+
+export { resume_subagent };
+
 // Reply tool (for Main Agent inner monologue)
 import * as replyToolModule from "./reply-tool.ts";
 const reply = replyToolModule.reply;
@@ -206,6 +218,8 @@ export const mainAgentTools: Tool[] = [
   session_archive_read,
   spawn_task,
   resume_task,
+  spawn_subagent,
+  resume_subagent,
   reply,
   use_skill,
   create_project,
