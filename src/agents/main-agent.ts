@@ -874,6 +874,7 @@ export class MainAgent {
     const maxTokens = contextWindow * threshold;
 
     // Estimate current token usage
+    const keepLastNTurns = this.settings.vision?.keepLastNTurns ?? 5;
     let estimatedTokens: number;
     if (this.lastPromptTokens > 0) {
       // Use lastPromptTokens as base, but also estimate full session
@@ -881,6 +882,7 @@ export class MainAgent {
       const fullEstimate = await this.sessionStore.estimateTokens(
         this.sessionMessages,
         this.tokenCounter,
+        keepLastNTurns,
       );
       // Use the larger of: lastPromptTokens or full estimate
       estimatedTokens = Math.max(this.lastPromptTokens, fullEstimate);
@@ -889,6 +891,7 @@ export class MainAgent {
       estimatedTokens = await this.sessionStore.estimateTokens(
         this.sessionMessages,
         this.tokenCounter,
+        keepLastNTurns,
       );
     }
 

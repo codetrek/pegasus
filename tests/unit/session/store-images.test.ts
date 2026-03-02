@@ -4,6 +4,12 @@ import { mkdtemp, rm, readFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import type { Message } from "../../../src/infra/llm-types.ts";
+import type { TokenCounter } from "../../../src/infra/token-counter.ts";
+
+// Simple mock counter: 1 token per 4 chars
+const mockCounter: TokenCounter = {
+  count: async (text: string) => Math.ceil(text.length / 4),
+};
 
 describe("SessionStore with images", () => {
   let tmpDir: string;
@@ -126,5 +132,100 @@ describe("SessionStore with images", () => {
     for (const img of m.images!) {
       expect(img.data).toBeUndefined();
     }
+  });
+});
+
+describe("estimateTokens with images", () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(path.join(os.tmpdir(), "pegasus-session-est-"));
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("should add ~1600 tokens per hydratable image", async () => {
+    const store = new SessionStore(tmpDir);
+    const messages: Message[] = [
+      {
+        role: "user",
+        content: "analyze",
+        images: [
+          { id: "img1", mimeType: "image/jpeg" },
+          { id: "img2", mimeType: "image/png" },
+        ],
+      },
+    ];
+
+    const estimate = await store.estimateTokens(messages, mockCounter, 5);
+    // Text tokens (~2) + 2 images * 1600 = ~3202
+    expect(estimate).toBeGreaterThan(3000);
+    expect(estimate).toBeLessThan(4000);
+  });
+
+  it("should not count images outside keepLastNTurns", async () => {
+    const store = new SessionStore(tmpDir);
+    const messages: Message[] = [
+      {
+        role: "user",
+        content: "old",
+        images: [{ id: "old1", mimeType: "image/jpeg" }],
+      },
+      { role: "assistant", content: "reply1" },
+      {
+        role: "user",
+        content: "recent",
+        images: [{ id: "new1", mimeType: "image/jpeg" }],
+      },
+    ];
+
+    const estimateN1 = await store.estimateTokens(messages, mockCounter, 1);
+    const estimateAll = await store.estimateTokens(messages, mockCounter);
+
+    // N=1: only new1 counted (1 image = 1600)
+    // All: both images counted (2 images = 3200)
+    expect(estimateAll - estimateN1).toBeGreaterThanOrEqual(1500);
+    expect(estimateAll - estimateN1).toBeLessThanOrEqual(1700);
+  });
+
+  it("should handle messages without images", async () => {
+    const store = new SessionStore(tmpDir);
+    const messages: Message[] = [{ role: "user", content: "hello world" }];
+    const estimate = await store.estimateTokens(messages, mockCounter, 5);
+    // Only text tokens, no image overhead
+    expect(estimate).toBeLessThan(100);
+  });
+
+  it("should count all images when keepLastNTurns is omitted", async () => {
+    const store = new SessionStore(tmpDir);
+    const messages: Message[] = [
+      {
+        role: "user",
+        content: "first",
+        images: [{ id: "a", mimeType: "image/jpeg" }],
+      },
+      { role: "assistant", content: "ok" },
+      {
+        role: "user",
+        content: "second",
+        images: [
+          { id: "b", mimeType: "image/png" },
+          { id: "c", mimeType: "image/png" },
+        ],
+      },
+    ];
+
+    const estimate = await store.estimateTokens(messages, mockCounter);
+    // 3 images * 1600 = 4800 + some text tokens
+    expect(estimate).toBeGreaterThan(4800);
+    expect(estimate).toBeLessThan(5000);
+  });
+
+  it("should return 0 for empty messages", async () => {
+    const store = new SessionStore(tmpDir);
+    const estimate = await store.estimateTokens([], mockCounter, 5);
+    expect(estimate).toBe(0);
   });
 });

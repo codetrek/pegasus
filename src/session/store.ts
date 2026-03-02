@@ -20,6 +20,9 @@ import { formatTimestamp } from "../infra/time.ts";
 
 const logger = getLogger("session_store");
 
+/** Estimated tokens per hydrated image (conservative, based on Claude's ~1600 for 1080p). */
+const IMAGE_TOKEN_ESTIMATE = 1600;
+
 export interface SessionEntry {
   ts: number;
   role: string;
@@ -151,13 +154,14 @@ export class SessionStore {
     }
   }
 
-  /** Estimate total tokens for a list of messages. */
+  /** Estimate total tokens for a list of messages (text + hydrated images). */
   async estimateTokens(
     messages: Message[],
     counter: TokenCounter,
+    keepLastNTurns?: number,
   ): Promise<number> {
     if (messages.length === 0) return 0;
-    // Concatenate all message content for a rough total estimate
+    // Text tokens (concatenate all message content)
     const allText = messages
       .map((m) => {
         let text = m.content;
@@ -165,7 +169,43 @@ export class SessionStore {
         return text;
       })
       .join("\n");
-    return counter.count(allText);
+    let tokens = await counter.count(allText);
+
+    // Image tokens: count images that would be hydrated
+    const imageCount = this._countHydratableImages(messages, keepLastNTurns);
+    tokens += imageCount * IMAGE_TOKEN_ESTIMATE;
+
+    return tokens;
+  }
+
+  /** Count images that would be hydrated in the last N turns. */
+  private _countHydratableImages(
+    messages: Message[],
+    keepLastNTurns?: number,
+  ): number {
+    if (!keepLastNTurns) {
+      // Count ALL images
+      return messages.reduce((sum, m) => sum + (m.images?.length ?? 0), 0);
+    }
+
+    // Find cutoff (same logic as hydrateImages)
+    let assistantCount = 0;
+    let cutoffIndex = 0;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i]!.role === "assistant") {
+        assistantCount++;
+        if (assistantCount >= keepLastNTurns) {
+          cutoffIndex = i;
+          break;
+        }
+      }
+    }
+
+    let count = 0;
+    for (let i = cutoffIndex; i < messages.length; i++) {
+      count += messages[i]!.images?.length ?? 0;
+    }
+    return count;
   }
 
   /**
