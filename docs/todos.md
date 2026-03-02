@@ -32,11 +32,11 @@ Tracked features, improvements, and ideas — what's done and what's next.
 
 ### Project System
 - [x] PROJECT.md format: frontmatter (name, status, model, workdir, timestamps) + markdown body
-- [x] Project directory structure: `data/projects/<name>/` with session/, memory/, skills/
+- [x] Project directory structure: `data/agents/projects/<name>/` with session/, memory/, skills/
 - [x] ProjectAdapter: ChannelAdapter implementation using Bun Worker threads
 - [x] Project Agent Worker: independent Agent instance running in Worker thread
 - [x] Project lifecycle FSM: active ⇄ suspended → completed → archived
-- [x] Project discovery: scan `data/projects/*/PROJECT.md` on startup
+- [x] Project discovery: scan `data/agents/projects/*/PROJECT.md` on startup
 - [x] MainAgent project tools: create/list/suspend/resume/complete/archive
 - [x] Project memory isolation: scoped memory per project
 - [x] Project skill loading: global + project-specific skills

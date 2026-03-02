@@ -13,7 +13,7 @@ Persist task execution as incremental event logs. Each state change appends one 
 ## Storage Layout
 
 ```
-data/tasks/
+data/agents/main/tasks/
 ├── index.jsonl                      ← taskId → date lookup
 ├── 2026-02-25/
 │   ├── a1b2c3d4e5f6.jsonl
@@ -28,7 +28,7 @@ data/tasks/
 
 ## Index
 
-Two control files at `data/tasks/`:
+Two control files at `data/agents/main/tasks/`:
 
 **`index.jsonl`** — taskId → date folder mapping. Append-only, one line per task, written on creation.
 
@@ -90,7 +90,7 @@ EventBus events
     ↓ (subscribe)
 TaskPersister
     ↓ (append)
-data/tasks/YYYY-MM-DD/{taskId}.jsonl
+data/agents/main/tasks/YYYY-MM-DD/{taskId}.jsonl
     ↓ (replay)
 TaskContext / Message[]
     ↓ (via tools)

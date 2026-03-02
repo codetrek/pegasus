@@ -282,7 +282,7 @@ Main Agent maintains a session-level message history. This is the record of its 
 ### Persistence
 
 ```
-data/main/
+data/agents/main/session/
 ├── current.jsonl              ← active session
 ├── 2026-02-25-143000.jsonl    ← compacted previous session
 └── 2026-02-24-180000.jsonl    ← older
@@ -316,7 +316,7 @@ This is purely a session data integrity concern — SessionStore doesn't know or
 
 Handled by Agent during its own `start()`, completely independent of Main Agent:
 
-1. TaskPersister scans `data/tasks/pending.json` for unfinished tasks
+1. TaskPersister scans `data/agents/main/tasks/pending.json` for unfinished tasks
 2. For each: append `TASK_FAILED` to its JSONL log, remove from `pending.json`
 3. Push failure notification through the `onNotify` callback → enters Main Agent queue
 
@@ -448,7 +448,7 @@ Main Agent and the Task System are separate layers:
 | User interaction | Via `reply` tool | None (internal only) |
 | State | Session history (cross-task) | TaskContext (per-task) |
 | Tools | reply + spawn_task + simple tools | Full tool suite |
-| Persistence | data/main/ (session JSONL) | data/tasks/ (task JSONL) |
+| Persistence | data/agents/main/session/ (session JSONL) | data/agents/main/tasks/ (task JSONL) |
 | Lifetime | Entire session | Single task |
 | Communication | Receives notifications via callback | Pushes results to Main Agent queue |
 | Recovery | Repairs unclosed tool calls in session | Marks pending tasks as failed |

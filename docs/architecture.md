@@ -92,7 +92,7 @@ Pegasus is not a request-response service. It is a **continuously running autono
                             │ InboundMessage
                             ▼
                      ┌──────────────┐
-                     │  Main Agent  │──── Session History (data/main/)
+                     │  Main Agent  │──── Session History (data/agents/main/session/)
                      │  (LLM brain) │
                      └──────┬───────┘
                             │ spawn_task / spawn_subagent

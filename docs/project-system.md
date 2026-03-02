@@ -55,7 +55,7 @@ MainAgent (brain, main thread)
 | # | Question | Decision | Rationale |
 |---|----------|----------|-----------|
 | 1 | Naming | **Project** | Distinct from OpenClaw's Workspace; intuitive |
-| 2 | Core directory | `data/projects/<name>/` | Unified plain directory for session, memory, skills, tasks |
+| 2 | Core directory | `data/agents/projects/<name>/` | Unified plain directory for session, memory, skills, tasks |
 | 3 | Working data | Separate from core directory | Code/work files live in independent git repos; Project directory stores only the agent's brain |
 | 4 | Agent instance | **Independent Agent per Project** | Own EventBus, TaskFSM, cognitive pipeline in Worker thread |
 | 5 | Lifecycle | **Four states**: active ⇄ suspended → completed → archived | Simple, no transient states |
@@ -73,7 +73,7 @@ MainAgent (brain, main thread)
 ## Project Directory Structure
 
 ```
-data/projects/
+data/agents/projects/
 ├── frontend-redesign/
 │   ├── PROJECT.md              ← definition file (system prompt + metadata)
 │   ├── session/
@@ -364,8 +364,8 @@ Main Thread (MainAgent)
 │   │   ├── Own Agent (TaskRegistry, TaskFSM, cognitive pipeline)
 │   │   ├── Proxy LanguageModel (→ main thread)
 │   │   ├── Own ToolRegistry + ToolExecutor
-│   │   ├── Own SessionStore (data/projects/frontend-redesign/session/)
-│   │   └── Own memory tools (data/projects/frontend-redesign/memory/)
+│   │   ├── Own SessionStore (data/agents/projects/frontend-redesign/session/)
+│   │   └── Own memory tools (data/agents/projects/frontend-redesign/memory/)
 │   │
 │   └── Worker Thread 2 (Project "social-media")
 │       └── ... (same structure)
@@ -486,7 +486,7 @@ A Project Agent has a similar tool set to a `general` AITask, plus:
 
 On MainAgent startup:
 
-1. Scan `data/projects/*/PROJECT.md`
+1. Scan `data/agents/projects/*/PROJECT.md`
 2. Parse frontmatter to get status
 3. For each `active` Project → spawn Worker thread via ProjectAdapter
 4. For `suspended`/`completed`/`archived` → register metadata only (no Worker)
@@ -497,7 +497,7 @@ This mirrors how tasks and skills are discovered — file scanning, no index fil
 
 ## Session Management Within Projects
 
-Each Project has its own SessionStore (`data/projects/<name>/session/`):
+Each Project has its own SessionStore (`data/agents/projects/<name>/session/`):
 
 - **Same format as MainAgent**: JSONL files, append-only
 - **Same compaction logic**: auto-compact when context window fills up
@@ -508,12 +508,12 @@ Each Project has its own SessionStore (`data/projects/<name>/session/`):
 ## Memory Isolation
 
 ```
-data/memory/                          ← MainAgent memory (global)
+data/agents/main/memory/                 ← MainAgent memory (global)
 ├── facts/user.md
 ├── facts/project.md
 └── episodes/2026-02.md
 
-data/projects/frontend-redesign/      ← Project memory (scoped)
+data/agents/projects/frontend-redesign/  ← Project memory (scoped)
 ├── memory/facts/context.md
 ├── memory/facts/decisions.md
 └── memory/episodes/2026-02.md
@@ -521,7 +521,7 @@ data/projects/frontend-redesign/      ← Project memory (scoped)
 
 - MainAgent memory = global knowledge (user preferences, system facts)
 - Project memory = project-specific knowledge (decisions made, patterns found, progress notes)
-- Project Agent's `memory_*` tools are scoped to `data/projects/<name>/memory/`
+- Project Agent's `memory_*` tools are scoped to `data/agents/projects/<name>/memory/`
 - MainAgent can read Project memory if needed (via `memory_read` with explicit path)
 - Cross-pollination happens through MainAgent ↔ Project messages, not shared memory
 
@@ -534,7 +534,7 @@ The existing AITask system (`spawn_task`, TaskFSM, etc.) is unchanged. Both Main
 ### Skills
 
 - **Global skills** (`skills/`, `data/skills/`): available to MainAgent and all Projects
-- **Project skills** (`data/projects/<name>/skills/`): only available to that Project
+- **Project skills** (`data/agents/projects/<name>/skills/`): only available to that Project
 - Project Agent's SkillRegistry loads both global and project-specific skills
 
 ### Channel Adapters

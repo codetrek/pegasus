@@ -174,7 +174,7 @@ interface ToolStats {
 
 ### Memory Tools (MEMORY)
 
-Memory tools operate on markdown files stored under `data/memory/` (facts and episodes). Each file may contain a `> Summary: ...` line used as an index entry.
+Memory tools operate on markdown files stored under the agent's memory directory (e.g., `data/agents/main/memory/` for MainAgent). Each file may contain a `> Summary: ...` line used as an index entry.
 
 | Tool | Description | Parameters | Return |
 |------|-------------|------------|--------|
