@@ -7,6 +7,7 @@ import { TaskFSM } from "../../src/task/fsm.ts";
 import { rm, mkdir } from "node:fs/promises";
 
 const testDir = "/tmp/pegasus-test-persister";
+const tasksDir = `${testDir}/tasks`;
 
 describe("TaskPersister", () => {
   let persister: TaskPersister;
@@ -18,7 +19,7 @@ describe("TaskPersister", () => {
     await mkdir(testDir, { recursive: true });
     bus = new EventBus();
     registry = new TaskRegistry();
-    persister = new TaskPersister(bus, registry, testDir);
+    persister = new TaskPersister(bus, registry, tasksDir);
   });
 
   afterEach(async () => {
@@ -623,7 +624,7 @@ describe("TaskPersister", () => {
       const bus2 = new EventBus();
       const registry2 = new TaskRegistry();
       // Side-effect: subscribes to EventBus events
-      void new TaskPersister(bus2, registry2, testDir);
+      void new TaskPersister(bus2, registry2, tasksDir);
       await bus2.start();
 
       const task = new TaskFSM({ taskId: "typed-task" });

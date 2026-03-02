@@ -233,7 +233,7 @@ export class Agent {
     }
 
     // Task persistence (side-effect: subscribes to EventBus)
-    new TaskPersister(this.eventBus, this.taskRegistry, this.settings.dataDir);
+    new TaskPersister(this.eventBus, this.taskRegistry, path.join(this.settings.dataDir, "tasks"));
 
     // Initialize cognitive processors with model + persona
     this.thinker = new Thinker(deps.model, deps.persona, this.toolRegistry);

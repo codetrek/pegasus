@@ -2,7 +2,7 @@
  * TaskPersister — append-only JSONL persistence for task events.
  *
  * Subscribes to EventBus events and writes delta lines to
- * `{dataDir}/tasks/YYYY-MM-DD/{taskId}.jsonl`.
+ * `{tasksDir}/YYYY-MM-DD/{taskId}.jsonl`.
  *
  * An `index.jsonl` maps taskId → date for lookup.
  * A `pending.json` tracks active tasks.
@@ -27,10 +27,10 @@ export class TaskPersister {
   private messageIndex = new Map<string, number>(); // taskId → last written message index
   private pendingLock: Promise<void> = Promise.resolve(); // serialize pending.json writes
 
-  constructor(bus: EventBus, registry: TaskRegistry, dataDir: string) {
+  constructor(bus: EventBus, registry: TaskRegistry, tasksDir: string) {
     this.bus = bus;
     this.registry = registry;
-    this.tasksDir = path.join(dataDir, "tasks");
+    this.tasksDir = tasksDir;
     this._subscribe();
   }
 

@@ -353,6 +353,7 @@ describe("Task Resume — Agent.resume()", () => {
 
 describe("Task Resume — Persister", () => {
   const persisterDataDir = "/tmp/pegasus-test-task-resume-persister";
+  const persisterTasksDir = `${persisterDataDir}/tasks`;
 
   afterAll(async () => {
     await rm(persisterDataDir, { recursive: true, force: true }).catch(() => {});
@@ -361,7 +362,7 @@ describe("Task Resume — Persister", () => {
   test("TASK_RESUMED event is recorded in JSONL and replay reconstructs context", async () => {
     const bus = new EventBus({ keepHistory: true });
     const registry = new TaskRegistry();
-    const persister = new TaskPersister(bus, registry, persisterDataDir);
+    const persister = new TaskPersister(bus, registry, persisterTasksDir);
     // Keep reference to prevent GC (side-effect: subscribes to EventBus)
     void persister;
 
@@ -404,7 +405,7 @@ describe("Task Resume — Persister", () => {
 
       // Verify JSONL file exists and has TASK_RESUMED
       const taskPath = await TaskPersister.resolveTaskPath(
-        path.join(persisterDataDir, "tasks"),
+        persisterTasksDir,
         taskId,
       );
       expect(taskPath).not.toBeNull();
@@ -429,7 +430,7 @@ describe("Task Resume — Persister", () => {
       expect(userMsgs.some((m) => m.content === "continue please")).toBe(true);
 
       // Verify pending.json was updated (task added back)
-      const pendingPath = path.join(persisterDataDir, "tasks", "pending.json");
+      const pendingPath = path.join(persisterTasksDir, "pending.json");
       const pendingContent = await readFile(pendingPath, "utf-8");
       const pending = JSON.parse(pendingContent);
       expect(pending.some((p: { taskId: string }) => p.taskId === taskId)).toBe(true);
