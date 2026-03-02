@@ -33,7 +33,7 @@ import { reflectionTools, allTaskTools } from "../tools/builtins/index.ts";
 import type { AITaskTypeRegistry } from "../aitask-types/index.ts";
 import { type MemoryIndexEntry, TASK_COMPACT_PROMPT } from "../prompts/index.ts";
 import { TaskPersister } from "../task/persister.ts";
-import { getContextWindowSize } from "../session/context-windows.ts";
+import { getContextWindowSize } from "../context/context-windows.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import type { MCPManager, MCPServerConfig } from "../mcp/index.ts";
 import { wrapMCPTools } from "../mcp/index.ts";

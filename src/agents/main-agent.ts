@@ -27,7 +27,7 @@ import { Agent } from "./agent.ts";
 import type { TaskNotification } from "./agent.ts";
 import type { ToolCall } from "../models/tool.ts";
 import { EstimateCounter } from "../infra/token-counter.ts";
-import { getContextWindowSize } from "../session/context-windows.ts";
+import { getContextWindowSize } from "../context/context-windows.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import path from "node:path";
 import { SkillRegistry, loadAllSkills } from "../skills/index.ts";

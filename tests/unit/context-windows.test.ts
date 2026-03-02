@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { getContextWindowSize } from "@pegasus/session/context-windows.ts";
+import { getContextWindowSize } from "@pegasus/context/context-windows.ts";
 
 describe("getContextWindowSize", () => {
   // ── OpenAI ──
