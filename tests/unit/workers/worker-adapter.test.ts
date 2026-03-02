@@ -462,6 +462,56 @@ describe("WorkerAdapter — Worker lifecycle (mocked Worker)", () => {
     }
   });
 
+  it("worker.onmessage 'error' should terminate the worker and trigger cleanup", async () => {
+    const { FakeWorker, instances } = createFakeWorkerClass();
+    globalThis.Worker = FakeWorker as any;
+
+    try {
+      const adapter = new WorkerAdapter("/fake-worker.ts");
+      adapter.setOnNotify(() => {});
+
+      // Track close callback invocations
+      const closedWorkers: Array<{ channelType: string; channelId: string }> = [];
+      adapter.setOnWorkerClose((channelType, channelId) => {
+        closedWorkers.push({ channelType, channelId });
+      });
+
+      adapter.startWorker("subagent", "sa-fail", "subagent", { task: "do stuff" });
+      expect(adapter.has("subagent", "sa-fail")).toBe(true);
+      expect(adapter.activeCount).toBe(1);
+
+      const fakeWorker = instances[0]!;
+
+      // Track terminate calls
+      let terminateCalled = false;
+      fakeWorker.terminate = () => {
+        terminateCalled = true;
+        // Simulate what real Worker.terminate() does: fires "close" event
+        for (const listener of fakeWorker.closeListeners) {
+          listener();
+        }
+      };
+
+      // Simulate the Worker sending an error message (e.g. PROJECT.md missing)
+      fakeWorker.onmessage!(new MessageEvent("message", {
+        data: { type: "error", message: "Failed to parse PROJECT.md at /tmp/proj/PROJECT.md" },
+      }));
+
+      // Worker should have been terminated
+      expect(terminateCalled).toBe(true);
+
+      // Close event cleanup chain should have fired
+      expect(adapter.has("subagent", "sa-fail")).toBe(false);
+      expect(adapter.activeCount).toBe(0);
+
+      // onWorkerClose callback should have been invoked (triggers SubAgentManager.fail())
+      expect(closedWorkers).toHaveLength(1);
+      expect(closedWorkers[0]).toEqual({ channelType: "subagent", channelId: "sa-fail" });
+    } finally {
+      globalThis.Worker = OriginalWorker;
+    }
+  });
+
   it("worker.onerror should not throw", async () => {
     const { FakeWorker, instances } = createFakeWorkerClass();
     globalThis.Worker = FakeWorker as any;

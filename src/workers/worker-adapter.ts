@@ -30,6 +30,7 @@ export function makeWorkerKey(channelType: string, channelId: string): WorkerKey
 /** Messages sent from Worker -> Main thread. */
 export type WorkerOutbound =
   | { type: "notify"; message: InboundMessage }
+  | { type: "error"; message: string }
   | LLMProxyRequest;
 
 /** Messages sent from Main thread -> Worker. */
@@ -154,6 +155,13 @@ export class WorkerAdapter {
           this._handleLLMRequest(key, data).catch((err) => {
             logger.error({ key, error: errorToString(err) }, "llm_proxy_error");
           });
+          break;
+        case "error":
+          logger.error({ key, message: data.message }, "worker_init_error");
+          // Terminate the Worker — it failed to initialize.
+          // worker.terminate() triggers the "close" event, which cleans up
+          // the workers Map and calls onWorkerClose (-> SubAgentManager.fail()).
+          worker.terminate();
           break;
         default:
           logger.warn({ key, data }, "unknown_worker_message");

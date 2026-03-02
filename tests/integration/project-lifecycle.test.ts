@@ -1,13 +1,51 @@
-import { describe, it, expect, afterEach } from "bun:test";
+import { describe, it, expect, afterEach, beforeEach } from "bun:test";
 import { ProjectManager } from "../../src/projects/manager.ts";
 import { ProjectAdapter } from "../../src/projects/project-adapter.ts";
 import type { InboundMessage } from "../../src/channels/types.ts";
 import { ModelRegistry } from "../../src/infra/model-registry.ts";
 import type { LanguageModel, GenerateTextResult } from "../../src/infra/llm-types.ts";
-import type { LLMConfig } from "../../src/infra/config-schema.ts";
+import type { LLMConfig, Settings } from "../../src/infra/config-schema.ts";
+import { setSettings, resetSettings } from "../../src/infra/config.ts";
 import { rm } from "node:fs/promises";
 
 const TEST_DIR = "/tmp/pegasus-test-project-integration";
+
+/** Create test settings so ProjectAdapter can pass them to Worker threads. */
+function makeTestSettings(): Settings {
+  return {
+    llm: {
+      providers: {},
+      default: "test/test-model",
+      tiers: { balanced: "test/test-model" },
+      codex: { enabled: false, baseURL: "https://example.com", model: "test" },
+      copilot: { enabled: false },
+      maxConcurrentCalls: 1,
+      timeout: 30,
+      contextWindow: 4096,
+    },
+    memory: {},
+    agent: {
+      maxActiveTasks: 3,
+      maxConcurrentTools: 2,
+      maxCognitiveIterations: 5,
+      heartbeatInterval: 60,
+      taskTimeout: 30,
+    },
+    identity: { personaPath: "data/personas/default.json" },
+    tools: {
+      timeout: 10,
+      allowedPaths: [],
+      mcpServers: [],
+    },
+    session: { compactThreshold: 0.8 },
+    channels: { telegram: { enabled: false } },
+    logLevel: "silent",
+    dataDir: TEST_DIR,
+    authDir: "/tmp/pegasus-test-auth",
+    logFormat: "json",
+    nodeEnv: "test",
+  };
+}
 
 /**
  * Create a mock ModelRegistry whose subAgent role returns a stub response.
@@ -46,6 +84,11 @@ function createMockModelRegistry(): ModelRegistry {
 describe("Project Lifecycle Integration", () => {
   let adapter: ProjectAdapter | null = null;
 
+  beforeEach(() => {
+    // Initialize settings so ProjectAdapter can serialize them to Worker threads
+    setSettings(makeTestSettings());
+  });
+
   afterEach(async () => {
     // Stop adapter if still running (safety net)
     if (adapter) {
@@ -56,6 +99,7 @@ describe("Project Lifecycle Integration", () => {
       }
       adapter = null;
     }
+    resetSettings();
     await rm(TEST_DIR, { recursive: true, force: true }).catch(() => {});
   });
 
