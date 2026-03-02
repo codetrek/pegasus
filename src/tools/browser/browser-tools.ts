@@ -43,7 +43,7 @@ export const browser_navigate: Tool = {
     try {
       const manager = getBrowserManager(context);
       const { url } = params as { url: string };
-      const result = await manager.navigate(url);
+      const result = await manager.navigate(context.taskId, url);
       return {
         success: true,
         result: { snapshot: result.snapshot, truncated: result.truncated },
@@ -76,7 +76,7 @@ export const browser_snapshot: Tool = {
     const startedAt = Date.now();
     try {
       const manager = getBrowserManager(context);
-      const result = await manager.takeSnapshot();
+      const result = await manager.takeSnapshot(context.taskId);
       return {
         success: true,
         result: { snapshot: result.snapshot, truncated: result.truncated },
@@ -116,7 +116,7 @@ export const browser_screenshot: Tool = {
     try {
       const manager = getBrowserManager(context);
       const { fullPage } = params as { fullPage: boolean };
-      const result = await manager.screenshot(fullPage);
+      const result = await manager.screenshot(context.taskId, fullPage);
       return {
         success: true,
         result: {
@@ -159,7 +159,7 @@ export const browser_click: Tool = {
     try {
       const manager = getBrowserManager(context);
       const { ref } = params as { ref: string };
-      const result = await manager.click(ref);
+      const result = await manager.click(context.taskId, ref);
       return {
         success: true,
         result: { snapshot: result.snapshot, truncated: result.truncated },
@@ -206,7 +206,7 @@ export const browser_type: Tool = {
         text: string;
         submit: boolean;
       };
-      const result = await manager.type(ref, text, submit);
+      const result = await manager.type(context.taskId, ref, text, submit);
       return {
         success: true,
         result: { snapshot: result.snapshot, truncated: result.truncated },
@@ -254,7 +254,7 @@ export const browser_scroll: Tool = {
         direction: "up" | "down";
         amount: number;
       };
-      const result = await manager.scroll(direction, amount);
+      const result = await manager.scroll(context.taskId, direction, amount);
       return {
         success: true,
         result: { snapshot: result.snapshot, truncated: result.truncated },
@@ -279,17 +279,17 @@ export const browser_scroll: Tool = {
 export const browser_close: Tool = {
   name: "browser_close",
   description:
-    "Close the browser. Call this when you're done with browser tasks to free resources.",
+    "Close the browser session for the current task. Call this when you're done with browser tasks to free resources.",
   category: ToolCategory.BROWSER,
   parameters: z.object({}),
   async execute(_params: unknown, context: ToolContext): Promise<ToolResult> {
     const startedAt = Date.now();
     try {
       const manager = getBrowserManager(context);
-      await manager.close();
+      await manager.closeSession(context.taskId);
       return {
         success: true,
-        result: { message: "Browser closed successfully." },
+        result: { message: "Browser session closed successfully." },
         startedAt,
         completedAt: Date.now(),
         durationMs: Date.now() - startedAt,

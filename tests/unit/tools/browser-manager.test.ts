@@ -11,6 +11,9 @@ import type { BrowserConfig } from "../../../src/tools/browser/types.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
+const TEST_TASK = "task-1";
+const TEST_TASK_2 = "task-2";
+
 /** Default config for all tests. */
 function defaultConfig(overrides?: Partial<BrowserConfig>): BrowserConfig {
   return {
@@ -65,12 +68,14 @@ function createMocks() {
   const mockContext = {
     pages: mock(() => [mockPage]),
     newPage: mock(() => Promise.resolve(mockPage)),
+    close: mock(() => Promise.resolve()),
   };
 
   const mockBrowser = {
     newContext: mock(() => Promise.resolve(mockContext)),
     contexts: mock(() => [mockContext]),
     close: mock(() => Promise.resolve()),
+    on: mock((_event: string, _handler: () => void) => {}),
   };
 
   const mockLauncher: BrowserLauncher = {
@@ -92,31 +97,43 @@ describe("BrowserManager", () => {
     manager = new BrowserManager(defaultConfig(), mocks.mockLauncher);
   });
 
-  // ── 1. ensurePage — lazy launch ────────────────────────────────────
+  // ── 1. ensureBrowser — lazy launch ────────────────────────────────
 
-  it("should lazily launch browser and create page on first ensurePage()", async () => {
-    const page = await manager.ensurePage();
+  it("should lazily launch browser on first getSession()", async () => {
+    const session = await manager.getSession(TEST_TASK);
 
     expect(mocks.mockLauncher.launch).toHaveBeenCalledTimes(1);
-    expect(mocks.mockBrowser.newContext).toHaveBeenCalledTimes(1);
-    expect(page).toBe(mocks.mockPage);
+    expect(session.page).toBe(mocks.mockPage);
     expect(manager.isActive).toBe(true);
   });
 
-  // ── 2. ensurePage — reuse ──────────────────────────────────────────
+  // ── 2. getSession — reuse ────────────────────────────────────────
 
-  it("should return the same page on subsequent ensurePage() calls", async () => {
-    const page1 = await manager.ensurePage();
-    const page2 = await manager.ensurePage();
+  it("should return the same session for the same taskId", async () => {
+    const s1 = await manager.getSession(TEST_TASK);
+    const s2 = await manager.getSession(TEST_TASK);
 
-    expect(page1).toBe(page2);
+    expect(s1).toBe(s2);
     expect(mocks.mockLauncher.launch).toHaveBeenCalledTimes(1);
   });
 
-  // ── 3. navigate ────────────────────────────────────────────────────
+  // ── 3. getSession — separate sessions per task ────────────────────
+
+  it("should create separate sessions for different taskIds", async () => {
+    const s1 = await manager.getSession(TEST_TASK);
+    const s2 = await manager.getSession(TEST_TASK_2);
+
+    expect(s1).not.toBe(s2);
+    // Both share the same browser
+    expect(mocks.mockLauncher.launch).toHaveBeenCalledTimes(1);
+    // Two separate contexts created
+    expect(mocks.mockBrowser.newContext).toHaveBeenCalledTimes(2);
+  });
+
+  // ── 4. navigate ────────────────────────────────────────────────────
 
   it("should call page.goto and return snapshot on navigate()", async () => {
-    const result = await manager.navigate("https://example.com");
+    const result = await manager.navigate(TEST_TASK, "https://example.com");
 
     expect(mocks.mockPage.goto).toHaveBeenCalledTimes(1);
     expect(result.snapshot).toContain("[page]");
@@ -124,11 +141,11 @@ describe("BrowserManager", () => {
     expect(result.truncated).toBe(false);
   });
 
-  // ── 4. takeSnapshot ────────────────────────────────────────────────
+  // ── 5. takeSnapshot ────────────────────────────────────────────────
 
   it("should call accessibility.snapshot and return formatted ARIA tree", async () => {
-    await manager.ensurePage();
-    const result = await manager.takeSnapshot();
+    await manager.getSession(TEST_TASK);
+    const result = await manager.takeSnapshot(TEST_TASK);
 
     expect(mocks.mockPage.accessibility.snapshot).toHaveBeenCalledTimes(1);
     expect(result.snapshot).toContain("[page] url: https://example.com");
@@ -137,37 +154,37 @@ describe("BrowserManager", () => {
     expect(result.truncated).toBe(false);
   });
 
-  // ── 5. click — valid ref ───────────────────────────────────────────
+  // ── 6. click — valid ref ───────────────────────────────────────────
 
   it("should resolve ref and click the element", async () => {
     // First navigate to populate refMap
-    await manager.navigate("https://example.com");
+    await manager.navigate(TEST_TASK, "https://example.com");
 
-    const result = await manager.click("e1");
+    const result = await manager.click(TEST_TASK, "e1");
 
     expect(mocks.mockPage.locator).toHaveBeenCalledWith(
-      'role=button[name="OK"]',
+      'role=button[name="OK"] >> nth=0',
     );
     expect(result.snapshot).toContain("[page]");
     // click uses waitForTimeout(500) for DOM stabilization
     expect(mocks.mockPage.waitForTimeout).toHaveBeenCalledWith(500);
   });
 
-  // ── 6. click — invalid ref ────────────────────────────────────────
+  // ── 7. click — invalid ref ────────────────────────────────────────
 
   it("should throw on invalid ref", async () => {
-    await manager.navigate("https://example.com");
+    await manager.navigate(TEST_TASK, "https://example.com");
 
-    await expect(manager.click("e99")).rejects.toThrow(
+    await expect(manager.click(TEST_TASK, "e99")).rejects.toThrow(
       /Invalid ref "e99"/,
     );
   });
 
   it("should list available refs in error message", async () => {
-    await manager.navigate("https://example.com");
+    await manager.navigate(TEST_TASK, "https://example.com");
 
     try {
-      await manager.click("bad");
+      await manager.click(TEST_TASK, "bad");
       expect(true).toBe(false); // should not reach
     } catch (err: any) {
       expect(err.message).toContain("e1");
@@ -177,17 +194,16 @@ describe("BrowserManager", () => {
   });
 
   it("should show helpful message when no refs are available", async () => {
-    // ensurePage without navigate — refMap is empty
-    await manager.ensurePage();
+    await manager.getSession(TEST_TASK);
 
     // Override accessibility.snapshot to return tree with no interactive elements
     mocks.mockPage.accessibility.snapshot = mock(() =>
       Promise.resolve({ role: "WebArea", children: [{ role: "heading", name: "Empty" }] }),
     );
-    await manager.takeSnapshot();
+    await manager.takeSnapshot(TEST_TASK);
 
     try {
-      await manager.click("e1");
+      await manager.click(TEST_TASK, "e1");
       expect(true).toBe(false);
     } catch (err: any) {
       expect(err.message).toContain("No refs available");
@@ -195,23 +211,23 @@ describe("BrowserManager", () => {
     }
   });
 
-  // ── 7. type — without submit ───────────────────────────────────────
+  // ── 8. type — without submit ───────────────────────────────────────
 
   it("should fill text into element by ref", async () => {
-    await manager.navigate("https://example.com");
+    await manager.navigate(TEST_TASK, "https://example.com");
 
-    const result = await manager.type("e1", "hello");
+    const result = await manager.type(TEST_TASK, "e1", "hello");
 
     expect(mocks.mockPage.locator).toHaveBeenCalledWith(
-      'role=button[name="OK"]',
+      'role=button[name="OK"] >> nth=0',
     );
     expect(result.snapshot).toContain("[page]");
   });
 
-  // ── 8. type — with submit ─────────────────────────────────────────
+  // ── 9. type — with submit ─────────────────────────────────────────
 
   it("should fill text and press Enter when submit=true", async () => {
-    await manager.navigate("https://example.com");
+    await manager.navigate(TEST_TASK, "https://example.com");
 
     // Track calls on the locator returned for the specific selector
     const locatorObj = {
@@ -221,7 +237,7 @@ describe("BrowserManager", () => {
     };
     mocks.mockPage.locator = mock(() => locatorObj);
 
-    await manager.type("e1", "search query", true);
+    await manager.type(TEST_TASK, "e1", "search query", true);
 
     expect(locatorObj.fill).toHaveBeenCalledWith("search query", {
       timeout: 5000,
@@ -232,7 +248,7 @@ describe("BrowserManager", () => {
   });
 
   it("should not press Enter when submit is false", async () => {
-    await manager.navigate("https://example.com");
+    await manager.navigate(TEST_TASK, "https://example.com");
 
     const locatorObj = {
       fill: mock(() => Promise.resolve()),
@@ -244,40 +260,39 @@ describe("BrowserManager", () => {
     // Reset waitForTimeout call count after navigate
     mocks.mockPage.waitForTimeout.mockClear();
 
-    await manager.type("e1", "just text", false);
+    await manager.type(TEST_TASK, "e1", "just text", false);
 
     expect(locatorObj.fill).toHaveBeenCalledTimes(1);
     expect(locatorObj.press).not.toHaveBeenCalled();
-    // No waitForTimeout when submit is false (only takeSnapshot calls ensurePage)
   });
 
-  // ── 9. scroll down ────────────────────────────────────────────────
+  // ── 10. scroll down ────────────────────────────────────────────────
 
   it("should scroll down with default amount", async () => {
-    await manager.ensurePage();
+    await manager.getSession(TEST_TASK);
 
-    await manager.scroll("down");
+    await manager.scroll(TEST_TASK, "down");
 
     expect(mocks.mockPage.mouse.wheel).toHaveBeenCalledWith(0, 2160); // 3 * 720 (viewport height)
     expect(mocks.mockPage.waitForTimeout).toHaveBeenCalledWith(300);
   });
 
-  // ── 10. scroll up with custom amount ──────────────────────────────
+  // ── 11. scroll up with custom amount ──────────────────────────────
 
   it("should scroll up with custom amount", async () => {
-    await manager.ensurePage();
+    await manager.getSession(TEST_TASK);
 
-    await manager.scroll("up", 5);
+    await manager.scroll(TEST_TASK, "up", 5);
 
     expect(mocks.mockPage.mouse.wheel).toHaveBeenCalledWith(0, -3600); // -(5 * 720)
   });
 
-  // ── 11. screenshot — default ──────────────────────────────────────
+  // ── 12. screenshot — default ──────────────────────────────────────
 
   it("should take screenshot and return path + snapshot", async () => {
-    await manager.ensurePage();
+    await manager.getSession(TEST_TASK);
 
-    const result = await manager.screenshot();
+    const result = await manager.screenshot(TEST_TASK);
 
     expect(mocks.mockPage.screenshot).toHaveBeenCalledTimes(1);
     const callArgs = (mocks.mockPage.screenshot as any).mock.calls[0];
@@ -289,21 +304,21 @@ describe("BrowserManager", () => {
     expect(result.snapshot).toContain("[page]");
   });
 
-  // ── 12. screenshot — fullPage ─────────────────────────────────────
+  // ── 13. screenshot — fullPage ─────────────────────────────────────
 
   it("should pass fullPage=true to page.screenshot", async () => {
-    await manager.ensurePage();
+    await manager.getSession(TEST_TASK);
 
-    await manager.screenshot(true);
+    await manager.screenshot(TEST_TASK, true);
 
     const callArgs = (mocks.mockPage.screenshot as any).mock.calls[0];
     expect(callArgs[0].fullPage).toBe(true);
   });
 
-  // ── 13. close — cleans up ─────────────────────────────────────────
+  // ── 14. close — cleans up ─────────────────────────────────────────
 
   it("should close browser and clean up state", async () => {
-    await manager.ensurePage();
+    await manager.getSession(TEST_TASK);
     expect(manager.isActive).toBe(true);
 
     await manager.close();
@@ -312,27 +327,27 @@ describe("BrowserManager", () => {
     expect(manager.isActive).toBe(false);
   });
 
-  // ── 14. close — isActive false ────────────────────────────────────
+  // ── 15. close — isActive false ────────────────────────────────────
 
   it("should have isActive=false after close()", async () => {
-    await manager.ensurePage();
+    await manager.getSession(TEST_TASK);
     await manager.close();
     expect(manager.isActive).toBe(false);
   });
 
-  // ── 15. isActive — initial state ──────────────────────────────────
+  // ── 16. isActive — initial state ──────────────────────────────────
 
   it("should have isActive=false before browser is launched", () => {
     const fresh = new BrowserManager(defaultConfig(), mocks.mockLauncher);
     expect(fresh.isActive).toBe(false);
   });
 
-  it("should have isActive=true after ensurePage()", async () => {
-    await manager.ensurePage();
+  it("should have isActive=true after getSession()", async () => {
+    await manager.getSession(TEST_TASK);
     expect(manager.isActive).toBe(true);
   });
 
-  // ── 16. cdpUrl mode ───────────────────────────────────────────────
+  // ── 17. cdpUrl mode ───────────────────────────────────────────────
 
   it("should use connectOverCDP when cdpUrl is configured", async () => {
     const cdpManager = new BrowserManager(
@@ -340,7 +355,7 @@ describe("BrowserManager", () => {
       mocks.mockLauncher,
     );
 
-    await cdpManager.ensurePage();
+    await cdpManager.getSession(TEST_TASK);
 
     expect(mocks.mockLauncher.connectOverCDP).toHaveBeenCalledWith(
       "ws://localhost:9222",
@@ -354,7 +369,7 @@ describe("BrowserManager", () => {
       mocks.mockLauncher,
     );
 
-    await cdpManager.ensurePage();
+    await cdpManager.getSession(TEST_TASK);
 
     // CDP mode uses contexts()[0] instead of newContext()
     expect(mocks.mockBrowser.contexts).toHaveBeenCalled();
@@ -362,7 +377,7 @@ describe("BrowserManager", () => {
   });
 
   it("should use launch when cdpUrl is not configured", async () => {
-    await manager.ensurePage();
+    await manager.getSession(TEST_TASK);
 
     expect(mocks.mockLauncher.launch).toHaveBeenCalledWith({
       headless: true,
@@ -370,18 +385,64 @@ describe("BrowserManager", () => {
     expect(mocks.mockLauncher.connectOverCDP).not.toHaveBeenCalled();
   });
 
-  // ── 17. close then ensurePage — re-creates ────────────────────────
+  // ── 18. closeSession ──────────────────────────────────────────────
 
-  it("should re-create browser after close() + ensurePage()", async () => {
-    await manager.ensurePage();
-    expect(mocks.mockLauncher.launch).toHaveBeenCalledTimes(1);
+  it("should close a single task session without affecting others", async () => {
+    await manager.getSession(TEST_TASK);
+    await manager.getSession(TEST_TASK_2);
 
-    await manager.close();
-    expect(manager.isActive).toBe(false);
+    await manager.closeSession(TEST_TASK);
 
-    await manager.ensurePage();
-    expect(mocks.mockLauncher.launch).toHaveBeenCalledTimes(2);
+    // Context.close called for task-1's session
+    expect(mocks.mockContext.close).toHaveBeenCalledTimes(1);
+    // Browser still active
     expect(manager.isActive).toBe(true);
+    // task-2 still has session
+    const s2 = await manager.getSession(TEST_TASK_2);
+    expect(s2).toBeDefined();
+  });
+
+  it("should handle closeSession for non-existent taskId", async () => {
+    // Should not throw
+    await manager.closeSession("non-existent");
+    expect(manager.isActive).toBe(false);
+  });
+
+  // ── 19. closed flag — ensureBrowser rejects after close ───────────
+
+  it("should throw when getSession is called after close()", async () => {
+    await manager.getSession(TEST_TASK);
+    await manager.close();
+
+    await expect(manager.getSession("new-task")).rejects.toThrow(
+      "Browser is shutting down",
+    );
+  });
+
+  // ── 20. disconnected event recovery ───────────────────────────────
+
+  it("should register disconnected handler on browser", async () => {
+    await manager.getSession(TEST_TASK);
+
+    expect(mocks.mockBrowser.on).toHaveBeenCalledWith(
+      "disconnected",
+      expect.any(Function),
+    );
+  });
+
+  it("should reset state when browser disconnects", async () => {
+    await manager.getSession(TEST_TASK);
+
+    // Trigger the disconnected handler
+    const onCall = (mocks.mockBrowser.on as any).mock.calls.find(
+      (c: any[]) => c[0] === "disconnected",
+    );
+    expect(onCall).toBeDefined();
+    const handler = onCall[1];
+    handler();
+
+    // Browser should be null, sessions cleared
+    expect(manager.isActive).toBe(false);
   });
 
   // ── Edge cases ────────────────────────────────────────────────────
@@ -394,7 +455,7 @@ describe("BrowserManager", () => {
   });
 
   it("should handle browser.close() rejection gracefully", async () => {
-    await manager.ensurePage();
+    await manager.getSession(TEST_TASK);
     mocks.mockBrowser.close = mock(() =>
       Promise.reject(new Error("connection reset")),
     );
@@ -405,39 +466,37 @@ describe("BrowserManager", () => {
   });
 
   it("should throw on type with invalid ref", async () => {
-    await manager.navigate("https://example.com");
+    await manager.navigate(TEST_TASK, "https://example.com");
 
-    await expect(manager.type("e99", "text")).rejects.toThrow(
+    await expect(manager.type(TEST_TASK, "e99", "text")).rejects.toThrow(
       /Invalid ref "e99"/,
     );
   });
 
   it("should return snapshot from scroll", async () => {
-    await manager.ensurePage();
+    await manager.getSession(TEST_TASK);
 
-    const result = await manager.scroll("down", 2);
+    const result = await manager.scroll(TEST_TASK, "down", 2);
 
     expect(result.snapshot).toContain("[page]");
     expect(mocks.mockPage.mouse.wheel).toHaveBeenCalledWith(0, 1440); // 2 * 720
   });
 
-  it("should clear refMap on close", async () => {
-    await manager.navigate("https://example.com");
-
-    // refMap should have entries after navigate
-    const refMapBefore = (manager as any).refMap as Map<string, string>;
-    expect(refMapBefore.size).toBeGreaterThan(0);
+  it("should clear sessions on close", async () => {
+    await manager.navigate(TEST_TASK, "https://example.com");
 
     await manager.close();
 
-    const refMapAfter = (manager as any).refMap as Map<string, string>;
-    expect(refMapAfter.size).toBe(0);
+    // After close, sessions map should be empty (internal check via getSession failing)
+    await expect(manager.getSession("new-task")).rejects.toThrow(
+      "Browser is shutting down",
+    );
   });
 
   it("should pass viewport config to newContext", async () => {
     const config = defaultConfig({ viewport: { width: 800, height: 600 } });
     const m = new BrowserManager(config, mocks.mockLauncher);
-    await m.ensurePage();
+    await m.getSession(TEST_TASK);
 
     expect(mocks.mockBrowser.newContext).toHaveBeenCalledWith({
       viewport: { width: 800, height: 600 },
@@ -447,7 +506,7 @@ describe("BrowserManager", () => {
   it("should pass headless=false when configured", async () => {
     const config = defaultConfig({ headless: false });
     const m = new BrowserManager(config, mocks.mockLauncher);
-    await m.ensurePage();
+    await m.getSession(TEST_TASK);
 
     expect(mocks.mockLauncher.launch).toHaveBeenCalledWith({
       headless: false,
@@ -456,7 +515,7 @@ describe("BrowserManager", () => {
 
   it("should reuse existing page from context.pages()", async () => {
     // context.pages() returns [mockPage], so newPage should not be called
-    await manager.ensurePage();
+    await manager.getSession(TEST_TASK);
 
     expect(mocks.mockContext.pages).toHaveBeenCalled();
     // Since pages()[0] exists, newPage should not be called
@@ -466,14 +525,14 @@ describe("BrowserManager", () => {
   it("should create new page when context.pages() is empty", async () => {
     mocks.mockContext.pages = mock(() => []);
 
-    await manager.ensurePage();
+    await manager.getSession(TEST_TASK);
 
     expect(mocks.mockContext.newPage).toHaveBeenCalledTimes(1);
   });
 
   // ── Concurrent launch guard ─────────────────────────────────────
 
-  it("should not launch twice when ensurePage is called concurrently", async () => {
+  it("should not launch twice when getSession is called concurrently", async () => {
     // Slow launcher to expose race window
     let resolveFirst!: (val: any) => void;
     const slowLauncher: BrowserLauncher = {
@@ -482,15 +541,16 @@ describe("BrowserManager", () => {
     };
     const m = new BrowserManager(defaultConfig(), slowLauncher);
 
-    // Two concurrent ensurePage calls
-    const p1 = m.ensurePage();
-    const p2 = m.ensurePage();
+    // Two concurrent getSession calls
+    const p1 = m.getSession(TEST_TASK);
+    const p2 = m.getSession(TEST_TASK_2);
 
     // Resolve the single launch
     resolveFirst(mocks.mockBrowser);
 
-    const [page1, page2] = await Promise.all([p1, p2]);
-    expect(page1).toBe(page2);
+    const [s1, s2] = await Promise.all([p1, p2]);
+    expect(s1).toBeDefined();
+    expect(s2).toBeDefined();
     expect(slowLauncher.launch).toHaveBeenCalledTimes(1);
   });
 
@@ -507,44 +567,44 @@ describe("BrowserManager", () => {
     const m = new BrowserManager(defaultConfig(), failThenSucceedLauncher);
 
     // First call fails
-    await expect(m.ensurePage()).rejects.toThrow("launch failed");
+    await expect(m.getSession(TEST_TASK)).rejects.toThrow("launch failed");
 
     // Second call should retry (not stuck on failed promise)
-    const page = await m.ensurePage();
-    expect(page).toBeDefined();
+    const session = await m.getSession(TEST_TASK);
+    expect(session).toBeDefined();
     expect(failThenSucceedLauncher.launch).toHaveBeenCalledTimes(2);
   });
 
   // ── URL validation (SSRF protection) ────────────────────────────
 
   it("should reject file:// URLs", async () => {
-    await manager.ensurePage();
-    await expect(manager.navigate("file:///etc/passwd")).rejects.toThrow(
+    await manager.getSession(TEST_TASK);
+    await expect(manager.navigate(TEST_TASK, "file:///etc/passwd")).rejects.toThrow(
       'Blocked URL scheme "file:"',
     );
   });
 
   it("should reject javascript: URLs", async () => {
-    await manager.ensurePage();
-    await expect(manager.navigate("javascript:alert(1)")).rejects.toThrow(
+    await manager.getSession(TEST_TASK);
+    await expect(manager.navigate(TEST_TASK, "javascript:alert(1)")).rejects.toThrow(
       'Blocked URL scheme "javascript:"',
     );
   });
 
   it("should reject invalid URLs", async () => {
-    await manager.ensurePage();
-    await expect(manager.navigate("not a url")).rejects.toThrow("Invalid URL");
+    await manager.getSession(TEST_TASK);
+    await expect(manager.navigate(TEST_TASK, "not a url")).rejects.toThrow("Invalid URL");
   });
 
   it("should allow https:// URLs", async () => {
-    await manager.ensurePage();
-    const result = await manager.navigate("https://example.com");
+    await manager.getSession(TEST_TASK);
+    const result = await manager.navigate(TEST_TASK, "https://example.com");
     expect(result.snapshot).toBeDefined();
   });
 
   it("should allow http:// URLs", async () => {
-    await manager.ensurePage();
-    const result = await manager.navigate("http://example.com");
+    await manager.getSession(TEST_TASK);
+    const result = await manager.navigate(TEST_TASK, "http://example.com");
     expect(result.snapshot).toBeDefined();
   });
 
@@ -553,10 +613,9 @@ describe("BrowserManager", () => {
   it("should scroll by viewport height, not fixed pixels", async () => {
     const config = defaultConfig({ viewport: { width: 1024, height: 600 } });
     const m = new BrowserManager(config, mocks.mockLauncher);
-    await m.ensurePage();
-    await m.takeSnapshot(); // populate refMap
+    await m.getSession(TEST_TASK);
 
-    await m.scroll("down", 2);
+    await m.scroll(TEST_TASK, "down", 2);
     expect(mocks.mockPage.mouse.wheel).toHaveBeenCalledWith(0, 1200); // 2 * 600
   });
 
@@ -567,7 +626,7 @@ describe("BrowserManager", () => {
       Promise.reject(new Error("Timeout 5000ms exceeded")),
     );
 
-    await expect(manager.navigate("https://slow.example.com")).rejects.toThrow(
+    await expect(manager.navigate(TEST_TASK, "https://slow.example.com")).rejects.toThrow(
       /timed out after 5000ms/,
     );
   });
@@ -577,7 +636,7 @@ describe("BrowserManager", () => {
       Promise.reject(new Error("net::ERR_NAME_NOT_RESOLVED")),
     );
 
-    await expect(manager.navigate("https://nonexistent.example")).rejects.toThrow(
+    await expect(manager.navigate(TEST_TASK, "https://nonexistent.example")).rejects.toThrow(
       /Cannot resolve hostname/,
     );
   });
@@ -587,7 +646,7 @@ describe("BrowserManager", () => {
       Promise.reject(new Error("net::ERR_CONNECTION_REFUSED")),
     );
 
-    await expect(manager.navigate("https://down.example.com")).rejects.toThrow(
+    await expect(manager.navigate(TEST_TASK, "https://down.example.com")).rejects.toThrow(
       /Connection refused/,
     );
   });
@@ -598,7 +657,7 @@ describe("BrowserManager", () => {
     );
 
     try {
-      await manager.navigate("https://example.com");
+      await manager.navigate(TEST_TASK, "https://example.com");
       expect(true).toBe(false); // should not reach
     } catch (err: any) {
       expect(err.message).not.toContain("Call log:");
@@ -609,7 +668,7 @@ describe("BrowserManager", () => {
   // ── Error wrapping — click ────────────────────────────────────────
 
   it("should throw friendly error on click timeout", async () => {
-    await manager.navigate("https://example.com");
+    await manager.navigate(TEST_TASK, "https://example.com");
 
     // Override locator to simulate timeout
     mocks.mockPage.locator = mock(() => ({
@@ -618,13 +677,13 @@ describe("BrowserManager", () => {
       press: mock(() => Promise.resolve()),
     }));
 
-    await expect(manager.click("e1")).rejects.toThrow(
+    await expect(manager.click(TEST_TASK, "e1")).rejects.toThrow(
       /Click on ref "e1" timed out/,
     );
   });
 
   it("should throw friendly error on click failure", async () => {
-    await manager.navigate("https://example.com");
+    await manager.navigate(TEST_TASK, "https://example.com");
 
     mocks.mockPage.locator = mock(() => ({
       click: mock(() => Promise.reject(new Error("Element is not visible\nCall log:"))),
@@ -633,7 +692,7 @@ describe("BrowserManager", () => {
     }));
 
     try {
-      await manager.click("e1");
+      await manager.click(TEST_TASK, "e1");
       expect(true).toBe(false);
     } catch (err: any) {
       expect(err.message).toContain('Click on ref "e1" failed');
@@ -644,7 +703,7 @@ describe("BrowserManager", () => {
   // ── Error wrapping — type ─────────────────────────────────────────
 
   it("should throw friendly error on type timeout", async () => {
-    await manager.navigate("https://example.com");
+    await manager.navigate(TEST_TASK, "https://example.com");
 
     mocks.mockPage.locator = mock(() => ({
       click: mock(() => Promise.resolve()),
@@ -652,13 +711,13 @@ describe("BrowserManager", () => {
       press: mock(() => Promise.resolve()),
     }));
 
-    await expect(manager.type("e1", "hello")).rejects.toThrow(
+    await expect(manager.type(TEST_TASK, "e1", "hello")).rejects.toThrow(
       /Type into ref "e1" timed out/,
     );
   });
 
   it("should throw friendly error on type failure", async () => {
-    await manager.navigate("https://example.com");
+    await manager.navigate(TEST_TASK, "https://example.com");
 
     mocks.mockPage.locator = mock(() => ({
       click: mock(() => Promise.resolve()),
@@ -667,7 +726,7 @@ describe("BrowserManager", () => {
     }));
 
     try {
-      await manager.type("e1", "hello");
+      await manager.type(TEST_TASK, "e1", "hello");
       expect(true).toBe(false);
     } catch (err: any) {
       expect(err.message).toContain('Type into ref "e1" failed');
@@ -678,12 +737,9 @@ describe("BrowserManager", () => {
   // ── Error wrapping — _launch (playwright not installed) ───────────
 
   it("should throw friendly error when playwright-core is not installed (or chromium missing)", async () => {
-    // Create manager without injected launcher — will try dynamic import.
-    // In CI/test env playwright-core IS installed but chromium is not,
-    // so we expect either "Playwright is not installed" or "Chromium browser is not installed".
     const m = new BrowserManager(defaultConfig());
 
-    await expect(m.ensurePage()).rejects.toThrow(
+    await expect(m.getSession(TEST_TASK)).rejects.toThrow(
       /Playwright is not installed|Chromium browser is not installed/,
     );
   });
@@ -697,7 +753,7 @@ describe("BrowserManager", () => {
     };
     const m = new BrowserManager(defaultConfig(), failLauncher);
 
-    await expect(m.ensurePage()).rejects.toThrow(
+    await expect(m.getSession(TEST_TASK)).rejects.toThrow(
       /Chromium browser is not installed/,
     );
   });
@@ -712,12 +768,37 @@ describe("BrowserManager", () => {
     const m = new BrowserManager(defaultConfig(), failLauncher);
 
     try {
-      await m.ensurePage();
+      await m.getSession(TEST_TASK);
       expect(true).toBe(false);
     } catch (err: any) {
       expect(err.message).toContain("Failed to launch browser");
       expect(err.message).toContain("Unknown crash");
       expect(err.message).not.toContain("Stack trace here");
     }
+  });
+
+  // ── Multi-task isolation ──────────────────────────────────────────
+
+  it("should isolate refMaps between tasks", async () => {
+    // Task 1 navigates and gets refs
+    await manager.navigate(TEST_TASK, "https://example.com");
+    const s1 = await manager.getSession(TEST_TASK);
+
+    // Task 2 has empty refs
+    const s2 = await manager.getSession(TEST_TASK_2);
+
+    expect(s1.refMap.size).toBeGreaterThan(0);
+    expect(s2.refMap.size).toBe(0);
+  });
+
+  it("should close all sessions on close()", async () => {
+    await manager.getSession(TEST_TASK);
+    await manager.getSession(TEST_TASK_2);
+
+    await manager.close();
+
+    // Both sessions' contexts should have been closed
+    expect(mocks.mockContext.close).toHaveBeenCalledTimes(2);
+    expect(mocks.mockBrowser.close).toHaveBeenCalledTimes(1);
   });
 });

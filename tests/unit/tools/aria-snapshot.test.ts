@@ -229,9 +229,9 @@ describe("formatAriaTree", () => {
     expect(result.snapshot).toContain(
       '[heading] "Title with \\"quotes\\""',
     );
-    // Selector should also have escaped quotes
+    // Selector should also have escaped quotes + nth index
     expect(result.refMap.get("e1")).toBe(
-      'role=button[name="Say \\"Hello\\""]',
+      'role=button[name="Say \\"Hello\\""] >> nth=0',
     );
   });
 
@@ -368,15 +368,15 @@ describe("formatAriaTree", () => {
 
     const result = formatAriaTree(tree);
 
-    expect(result.refMap.get("e1")).toBe('role=button[name="Log In"]');
-    expect(result.refMap.get("e2")).toBe('role=textbox[name="Username"]');
+    expect(result.refMap.get("e1")).toBe('role=button[name="Log In"] >> nth=0');
+    expect(result.refMap.get("e2")).toBe('role=textbox[name="Username"] >> nth=0');
     expect(result.refMap.get("e3")).toBe(
-      'role=link[name="Forgot password?"]',
+      'role=link[name="Forgot password?"] >> nth=0',
     );
-    // No name → selector without name attribute
-    expect(result.refMap.get("e4")).toBe("role=button");
-    // Empty string name → selector without name attribute
-    expect(result.refMap.get("e5")).toBe("role=searchbox");
+    // No name → selector without name attribute + nth (key "button:" is unique, so nth=0)
+    expect(result.refMap.get("e4")).toBe("role=button >> nth=0");
+    // Empty string name → selector without name attribute + nth (key "searchbox:" is unique, so nth=0)
+    expect(result.refMap.get("e5")).toBe("role=searchbox >> nth=0");
   });
 
   // ── 12. Deep nesting limit ──────────────────────────────────────────
@@ -419,7 +419,7 @@ describe("formatAriaTree", () => {
 
     // The node should still appear even beyond max depth
     expect(result.snapshot).toContain('[link] "Very Deep" [ref=e1]');
-    expect(result.refMap.get("e1")).toBe('role=link[name="Very Deep"]');
+    expect(result.refMap.get("e1")).toBe('role=link[name="Very Deep"] >> nth=0');
   });
 
   // ── Additional edge cases ───────────────────────────────────────────
@@ -479,11 +479,11 @@ describe("formatAriaTree", () => {
     );
 
     expect(result.refMap.size).toBe(4);
-    expect(result.refMap.get("e1")).toBe('role=textbox[name="Username"]');
-    expect(result.refMap.get("e2")).toBe('role=textbox[name="Password"]');
-    expect(result.refMap.get("e3")).toBe('role=button[name="Log In"]');
+    expect(result.refMap.get("e1")).toBe('role=textbox[name="Username"] >> nth=0');
+    expect(result.refMap.get("e2")).toBe('role=textbox[name="Password"] >> nth=0');
+    expect(result.refMap.get("e3")).toBe('role=button[name="Log In"] >> nth=0');
     expect(result.refMap.get("e4")).toBe(
-      'role=link[name="Forgot password?"]',
+      'role=link[name="Forgot password?"] >> nth=0',
     );
     expect(result.truncated).toBe(false);
   });
@@ -584,6 +584,74 @@ describe("formatAriaTree", () => {
 
       expect(result.truncated).toBe(true);
       expect(result.snapshot).toContain("showing 150 of ~161 nodes");
+    });
+  });
+
+  // ── nth disambiguation for duplicate elements ──────────────────────
+
+  describe("nth disambiguation", () => {
+    it("should assign unique nth indices to duplicate role+name elements", () => {
+      const tree: AriaNode = {
+        role: "WebArea",
+        children: [
+          { role: "button", name: "Delete" },
+          { role: "button", name: "Delete" },
+          { role: "button", name: "Delete" },
+        ],
+      };
+
+      const result = formatAriaTree(tree);
+
+      expect(result.refMap.get("e1")).toBe('role=button[name="Delete"] >> nth=0');
+      expect(result.refMap.get("e2")).toBe('role=button[name="Delete"] >> nth=1');
+      expect(result.refMap.get("e3")).toBe('role=button[name="Delete"] >> nth=2');
+    });
+
+    it("should track nth counts independently per role+name combination", () => {
+      const tree: AriaNode = {
+        role: "WebArea",
+        children: [
+          { role: "button", name: "Save" },
+          { role: "link", name: "Save" },     // different role, same name
+          { role: "button", name: "Save" },    // second button "Save"
+        ],
+      };
+
+      const result = formatAriaTree(tree);
+
+      expect(result.refMap.get("e1")).toBe('role=button[name="Save"] >> nth=0');
+      expect(result.refMap.get("e2")).toBe('role=link[name="Save"] >> nth=0');
+      expect(result.refMap.get("e3")).toBe('role=button[name="Save"] >> nth=1');
+    });
+
+    it("should use nth=0 for unique elements", () => {
+      const tree: AriaNode = {
+        role: "WebArea",
+        children: [
+          { role: "button", name: "Submit" },
+          { role: "link", name: "Cancel" },
+        ],
+      };
+
+      const result = formatAriaTree(tree);
+
+      expect(result.refMap.get("e1")).toBe('role=button[name="Submit"] >> nth=0');
+      expect(result.refMap.get("e2")).toBe('role=link[name="Cancel"] >> nth=0');
+    });
+
+    it("should track nameless elements of the same role separately", () => {
+      const tree: AriaNode = {
+        role: "WebArea",
+        children: [
+          { role: "button" },
+          { role: "button" },
+        ],
+      };
+
+      const result = formatAriaTree(tree);
+
+      expect(result.refMap.get("e1")).toBe("role=button >> nth=0");
+      expect(result.refMap.get("e2")).toBe("role=button >> nth=1");
     });
   });
 

@@ -291,16 +291,16 @@ export class Agent {
     logger.info("agent_stopping");
     this._running = false;
 
-    // Close browser if active
-    if (this.browserManager) {
-      await this.browserManager.close();
-    }
-
-    // Wait for all background tasks
+    // Wait for all background tasks FIRST (they may still use the browser)
     if (this.backgroundTasks.size > 0) {
       await Promise.allSettled([...this.backgroundTasks]);
     }
     this.backgroundTasks.clear();
+
+    // Close browser AFTER background tasks are done
+    if (this.browserManager) {
+      await this.browserManager.close();
+    }
 
     await this.eventBus.stop();
     logger.info("agent_stopped");

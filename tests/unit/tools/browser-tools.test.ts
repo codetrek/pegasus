@@ -22,48 +22,49 @@ import { ToolCategory } from "../../../src/tools/types.ts";
 
 function createMockManager() {
   return {
-    navigate: mock(() =>
+    navigate: mock((_taskId: string, _url: string) =>
       Promise.resolve({
         snapshot:
           '[page] url: https://example.com\n  [button] "Click" [ref=e1]',
         truncated: false,
       }),
     ),
-    takeSnapshot: mock(() =>
+    takeSnapshot: mock((_taskId: string) =>
       Promise.resolve({
         snapshot:
           '[page] url: https://example.com\n  [button] "Click" [ref=e1]',
         truncated: false,
       }),
     ),
-    click: mock(() =>
+    click: mock((_taskId: string, _ref: string) =>
       Promise.resolve({
         snapshot:
           '[page] url: https://example.com\n  [heading] "Clicked!"',
         truncated: false,
       }),
     ),
-    type: mock(() =>
+    type: mock((_taskId: string, _ref: string, _text: string, _submit?: boolean) =>
       Promise.resolve({
         snapshot:
           '[page] url: https://example.com\n  [textbox] "Email" [ref=e1] value="test@test.com"',
         truncated: false,
       }),
     ),
-    scroll: mock(() =>
+    scroll: mock((_taskId: string, _direction: string, _amount?: number) =>
       Promise.resolve({
         snapshot:
           '[page] url: https://example.com\n  [heading] "Section 2"',
         truncated: false,
       }),
     ),
-    screenshot: mock(() =>
+    screenshot: mock((_taskId: string, _fullPage?: boolean) =>
       Promise.resolve({
         screenshotPath: "/tmp/pegasus-browser-123.png",
         snapshot: "[page] url: https://example.com",
         truncated: false,
       }),
     ),
+    closeSession: mock((_taskId: string) => Promise.resolve()),
     close: mock(() => Promise.resolve()),
     isRunning: true,
   };
@@ -86,7 +87,7 @@ describe("browser_navigate", () => {
     expect(result.success).toBe(true);
     expect((result.result as any).snapshot).toContain("example.com");
     expect((result.result as any).truncated).toBe(false);
-    expect(mgr.navigate).toHaveBeenCalledWith("https://example.com");
+    expect(mgr.navigate).toHaveBeenCalledWith("test-task", "https://example.com");
     expect(result.startedAt).toBeGreaterThan(0);
     expect(result.durationMs).toBeGreaterThanOrEqual(0);
   });
@@ -138,7 +139,7 @@ describe("browser_snapshot", () => {
     expect(result.success).toBe(true);
     expect((result.result as any).snapshot).toContain("[button]");
     expect((result.result as any).truncated).toBe(false);
-    expect(mgr.takeSnapshot).toHaveBeenCalled();
+    expect(mgr.takeSnapshot).toHaveBeenCalledWith("test-task");
   });
 
   it("returns error when browserManager is not available", async () => {
@@ -181,7 +182,7 @@ describe("browser_screenshot", () => {
     const mgr = createMockManager();
     await browser_screenshot.execute({ fullPage: true }, makeContext(mgr));
 
-    expect(mgr.screenshot).toHaveBeenCalledWith(true);
+    expect(mgr.screenshot).toHaveBeenCalledWith("test-task", true);
   });
 
   it("passes fullPage=false by default", async () => {
@@ -189,7 +190,7 @@ describe("browser_screenshot", () => {
     // Zod default — params will have fullPage: false after parsing
     await browser_screenshot.execute({ fullPage: false }, makeContext(mgr));
 
-    expect(mgr.screenshot).toHaveBeenCalledWith(false);
+    expect(mgr.screenshot).toHaveBeenCalledWith("test-task", false);
   });
 
   it("returns error when screenshot throws", async () => {
@@ -219,7 +220,7 @@ describe("browser_click", () => {
 
     expect(result.success).toBe(true);
     expect((result.result as any).snapshot).toContain("Clicked!");
-    expect(mgr.click).toHaveBeenCalledWith("e1");
+    expect(mgr.click).toHaveBeenCalledWith("test-task", "e1");
   });
 
   it("returns error for invalid ref", async () => {
@@ -261,7 +262,7 @@ describe("browser_type", () => {
 
     expect(result.success).toBe(true);
     expect((result.result as any).snapshot).toContain("Email");
-    expect(mgr.type).toHaveBeenCalledWith("e1", "hello", false);
+    expect(mgr.type).toHaveBeenCalledWith("test-task", "e1", "hello", false);
   });
 
   it("passes submit=true to manager", async () => {
@@ -271,7 +272,7 @@ describe("browser_type", () => {
       makeContext(mgr),
     );
 
-    expect(mgr.type).toHaveBeenCalledWith("e1", "search query", true);
+    expect(mgr.type).toHaveBeenCalledWith("test-task", "e1", "search query", true);
   });
 
   it("returns error when browserManager is not available", async () => {
@@ -311,7 +312,7 @@ describe("browser_scroll", () => {
 
     expect(result.success).toBe(true);
     expect((result.result as any).snapshot).toContain("Section 2");
-    expect(mgr.scroll).toHaveBeenCalledWith("down", 3);
+    expect(mgr.scroll).toHaveBeenCalledWith("test-task", "down", 3);
   });
 
   it("scrolls up successfully", async () => {
@@ -322,7 +323,7 @@ describe("browser_scroll", () => {
     );
 
     expect(result.success).toBe(true);
-    expect(mgr.scroll).toHaveBeenCalledWith("up", 3);
+    expect(mgr.scroll).toHaveBeenCalledWith("test-task", "up", 3);
   });
 
   it("passes custom amount", async () => {
@@ -332,7 +333,7 @@ describe("browser_scroll", () => {
       makeContext(mgr),
     );
 
-    expect(mgr.scroll).toHaveBeenCalledWith("down", 5);
+    expect(mgr.scroll).toHaveBeenCalledWith("test-task", "down", 5);
   });
 
   it("returns error when scroll throws", async () => {
@@ -353,13 +354,13 @@ describe("browser_scroll", () => {
 // ── browser_close ───────────────────────────────
 
 describe("browser_close", () => {
-  it("closes browser and returns success message", async () => {
+  it("closes browser session and returns success message", async () => {
     const mgr = createMockManager();
     const result = await browser_close.execute({}, makeContext(mgr));
 
     expect(result.success).toBe(true);
     expect((result.result as any).message).toContain("closed successfully");
-    expect(mgr.close).toHaveBeenCalled();
+    expect(mgr.closeSession).toHaveBeenCalledWith("test-task");
   });
 
   it("returns error when browserManager is not available", async () => {
@@ -369,9 +370,9 @@ describe("browser_close", () => {
     expect(result.error).toContain("Browser not available");
   });
 
-  it("returns error when close throws", async () => {
+  it("returns error when closeSession throws", async () => {
     const mgr = createMockManager();
-    mgr.close = mock(() =>
+    mgr.closeSession = mock(() =>
       Promise.reject(new Error("Browser already closed")),
     );
     const result = await browser_close.execute({}, makeContext(mgr));

@@ -113,6 +113,8 @@ interface WalkState {
   nodeCount: number;
   maxNodes: number;
   truncated: boolean;
+  /** Tracks occurrence count per role+name combination for nth disambiguation. */
+  roleNameCount: Map<string, number>;
 }
 
 /**
@@ -167,7 +169,13 @@ function walkTree(node: AriaNode, depth: number, state: WalkState): void {
   if (isInteractive) {
     state.refCounter++;
     ref = `e${state.refCounter}`;
-    state.refMap.set(ref, buildSelector(node.role, node.name));
+    const key = `${node.role}:${node.name ?? ""}`;
+    const count = state.roleNameCount.get(key) ?? 0;
+    state.roleNameCount.set(key, count + 1);
+
+    const baseSelector = buildSelector(node.role, node.name);
+    const selector = `${baseSelector} >> nth=${count}`;
+    state.refMap.set(ref, selector);
   }
 
   state.lines.push(formatNodeLine(node, ref, indent));
@@ -208,6 +216,7 @@ export function formatAriaTree(
     nodeCount: 0,
     maxNodes: effectiveMax,
     truncated: false,
+    roleNameCount: new Map(),
   };
 
   // Header line
