@@ -36,7 +36,7 @@ import { TaskPersister } from "../task/persister.ts";
  * in every system prompt (both main and task modes). Tells the SubAgent's
  * Agent how to behave as an autonomous orchestrator.
  */
-const SUBAGENT_SYSTEM_PROMPT = `## Your Role
+export const SUBAGENT_SYSTEM_PROMPT = `## Your Role
 
 You are a SubAgent — an autonomous orchestrator working on behalf of the main agent.
 You receive a task description and must independently break it down, execute sub-tasks,
@@ -68,18 +68,18 @@ and return a consolidated result.
 7. ERROR HANDLING: If a sub-task fails, decide whether to retry, skip, or fail the whole task.`;
 
 /** Base config fields shared by all modes. */
-interface BaseConfig {
+export interface BaseConfig {
   settings: Settings;
   contextWindow?: number;
 }
 
 /** Init config for project mode. */
-interface ProjectConfig extends BaseConfig {
+export interface ProjectConfig extends BaseConfig {
   projectPath: string;
 }
 
 /** Init config for subagent mode. */
-interface SubAgentConfig extends BaseConfig {
+export interface SubAgentConfig extends BaseConfig {
   input: string;
   sessionPath: string;
   channelType: string;
@@ -96,11 +96,28 @@ let proxyModel: ProxyLanguageModel | null = null;
 let workerChannelType: string = "unknown";
 let workerChannelId: string = "unknown";
 
+/**
+ * Expose module-level state for unit testing.
+ * Not used in production — only accessed by tests to verify state transitions.
+ */
+export const _testState = {
+  getAgent: () => agent,
+  setAgent: (a: Agent | null) => { agent = a; },
+  getProxyModel: () => proxyModel,
+  setProxyModel: (m: ProxyLanguageModel | null) => { proxyModel = m; },
+  getChannelType: () => workerChannelType,
+  getChannelId: () => workerChannelId,
+  setChannelType: (t: string) => { workerChannelType = t; },
+  setChannelId: (id: string) => { workerChannelId = id; },
+};
+
 // ── Message handler ──────────────────────────────────
 
-self.onmessage = async (event: MessageEvent) => {
-  const data = event.data;
-
+/**
+ * Dispatch a Worker message to the appropriate handler.
+ * Exported for unit testing — in production, called by self.onmessage.
+ */
+export async function dispatchMessage(data: Record<string, unknown>): Promise<void> {
   switch (data.type) {
     case "init":
       await handleInit(
@@ -110,7 +127,7 @@ self.onmessage = async (event: MessageEvent) => {
       break;
 
     case "message":
-      handleMessage(data.message);
+      handleMessage(data.message as { text: string });
       break;
 
     case "llm_response":
@@ -125,11 +142,21 @@ self.onmessage = async (event: MessageEvent) => {
       await handleShutdown();
       break;
   }
-};
+}
+
+// Wire up the Worker message handler only inside a Worker thread.
+// Bun.isMainThread is false when running inside a Worker — using this check
+// prevents setting self.onmessage in the main thread (which would interfere
+// with test runners and other main-thread code that imports this module).
+if (typeof Bun !== "undefined" && !Bun.isMainThread) {
+  self.onmessage = async (event: MessageEvent) => {
+    await dispatchMessage(event.data);
+  };
+}
 
 // ── Handlers ─────────────────────────────────────────
 
-async function handleInit(
+export async function handleInit(
   mode: "project" | "subagent",
   config: Record<string, unknown>,
 ): Promise<void> {
@@ -147,7 +174,7 @@ async function handleInit(
       await initSubAgent(config as unknown as SubAgentConfig);
     }
   } catch (err) {
-    self.postMessage({
+    postToParent({
       type: "error",
       message: err instanceof Error ? err.message : String(err),
     });
@@ -156,7 +183,7 @@ async function handleInit(
 
 // ── Project mode init ────────────────────────────────
 
-async function initProject(config: ProjectConfig): Promise<void> {
+export async function initProject(config: ProjectConfig): Promise<void> {
   const { projectPath, contextWindow } = config;
 
   // 1. Load global settings
@@ -168,7 +195,7 @@ async function initProject(config: ProjectConfig): Promise<void> {
   const projectDef = parseProjectFile(projectFilePath, dirName);
 
   if (!projectDef) {
-    self.postMessage({
+    postToParent({
       type: "error",
       message: `Failed to parse PROJECT.md at ${projectFilePath}`,
     });
@@ -182,7 +209,7 @@ async function initProject(config: ProjectConfig): Promise<void> {
   proxyModel = new ProxyLanguageModel(
     "proxy",
     modelId,
-    (msg: unknown) => self.postMessage(msg),
+    (msg: unknown) => postToParent(msg),
   );
 
   // 4. Build project persona
@@ -223,12 +250,12 @@ async function initProject(config: ProjectConfig): Promise<void> {
   await agent.start();
 
   // 10. Signal ready
-  self.postMessage({ type: "ready" });
+  postToParent({ type: "ready" });
 }
 
 // ── SubAgent mode init ───────────────────────────────
 
-async function initSubAgent(config: SubAgentConfig): Promise<void> {
+export async function initSubAgent(config: SubAgentConfig): Promise<void> {
   const { input, sessionPath, channelType, channelId, contextWindow, memorySnapshot } = config;
 
   // 1. Load global settings
@@ -240,7 +267,7 @@ async function initSubAgent(config: SubAgentConfig): Promise<void> {
   proxyModel = new ProxyLanguageModel(
     "proxy",
     defaultModelSpec,
-    (msg: unknown) => self.postMessage(msg),
+    (msg: unknown) => postToParent(msg),
   );
 
   // 3. Build subagent persona (with SubAgent system prompt injected via background)
@@ -307,7 +334,7 @@ async function initSubAgent(config: SubAgentConfig): Promise<void> {
   await agent.start();
 
   // 9. Signal ready
-  self.postMessage({ type: "ready" });
+  postToParent({ type: "ready" });
 
   // 10. Auto-submit initial input (subagent mode only)
   //     If memorySnapshot is available, prepend it to the input so the
@@ -328,23 +355,23 @@ async function initSubAgent(config: SubAgentConfig): Promise<void> {
 
 // ── Message handling ─────────────────────────────────
 
-function handleMessage(message: { text: string }): void {
+export function handleMessage(message: { text: string }): void {
   if (!agent) return;
   const text = typeof message === "string" ? message : message.text;
   agent.submit(text, "main-agent");
 }
 
-function handleLLMResponse(requestId: string, result: GenerateTextResult): void {
+export function handleLLMResponse(requestId: string, result: GenerateTextResult): void {
   if (!proxyModel) return;
   proxyModel.resolveRequest(requestId, result);
 }
 
-function handleLLMError(requestId: string, error: string): void {
+export function handleLLMError(requestId: string, error: string): void {
   if (!proxyModel) return;
   proxyModel.rejectRequest(requestId, new Error(error));
 }
 
-async function handleShutdown(): Promise<void> {
+export async function handleShutdown(): Promise<void> {
   // Cancel all pending LLM requests first — agent.stop() may await in-flight
   // tasks that are blocked on LLM responses. Without this, stop() can hang
   // forever if the main thread is no longer responding.
@@ -354,8 +381,8 @@ async function handleShutdown(): Promise<void> {
   if (agent) {
     await agent.stop();
   }
-  self.postMessage({ type: "shutdown-complete" });
-  process.exit(0);
+  postToParent({ type: "shutdown-complete" });
+  _exitProcess(0);
 }
 
 // ── Helpers ──────────────────────────────────────────
@@ -421,8 +448,9 @@ export async function loadPreviousTaskSummary(sessionPath: string): Promise<stri
 
 /**
  * Convert a TaskNotification to a display string.
+ * Exported for unit testing.
  */
-function notificationToText(notification: TaskNotification): string {
+export function notificationToText(notification: TaskNotification): string {
   switch (notification.type) {
     case "completed": {
       const result = notification.result;
@@ -447,12 +475,61 @@ function notificationToText(notification: TaskNotification): string {
  * Send a notify message to the main thread as InboundMessage.
  * Includes channel info so MainAgent knows the source.
  * Optional metadata can be attached (e.g., subagentDone status).
+ * Exported for unit testing.
  */
-function sendNotify(text: string, metadata?: Record<string, unknown>): void {
+export function sendNotify(text: string, metadata?: Record<string, unknown>): void {
   const message: InboundMessage = {
     text,
     channel: { type: workerChannelType, channelId: workerChannelId },
     ...(metadata != null && { metadata }),
   };
-  self.postMessage({ type: "notify", message });
+  postToParent({ type: "notify", message });
+}
+
+/**
+ * Post a message to the parent thread.
+ * Abstracted for testability — when _postMessageOverride is set (by tests),
+ * it takes priority. Otherwise falls back to self.postMessage (Worker context).
+ */
+function postToParent(msg: unknown): void {
+  if (_postMessageOverride) {
+    _postMessageOverride(msg);
+  } else if (typeof self !== "undefined" && typeof self.postMessage === "function") {
+    self.postMessage(msg);
+  }
+}
+
+/** Override for postToParent — used by unit tests. */
+let _postMessageOverride: ((msg: unknown) => void) | null = null;
+
+/**
+ * Set a custom postMessage function for testing.
+ * Returns a cleanup function that restores the original behavior.
+ */
+export function _setPostMessageForTest(fn: (msg: unknown) => void): () => void {
+  _postMessageOverride = fn;
+  return () => { _postMessageOverride = null; };
+}
+
+/**
+ * Wrapper around process.exit for testability.
+ * In tests, override via _setExitProcessForTest to prevent actual process termination.
+ */
+let _exitOverride: ((code: number) => void) | null = null;
+
+function _exitProcess(code: number): void {
+  if (_exitOverride) {
+    _exitOverride(code);
+  } else {
+    process.exit(code);
+  }
+}
+
+/**
+ * Override process.exit for testing.
+ * Returns a cleanup function that restores the original behavior.
+ */
+export function _setExitProcessForTest(fn: (code: number) => void): () => void {
+  _exitOverride = fn;
+  return () => { _exitOverride = null; };
 }
