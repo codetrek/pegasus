@@ -357,4 +357,230 @@ describe("Agent Worker — subagent mode", () => {
     const msg = await shutdownPromise;
     expect(msg.type).toBe("shutdown-complete");
   }, 15_000);
+
+  it("should only shutdown on initial task completion, not child task completion", async () => {
+    // This test verifies the fix for the premature shutdown bug:
+    // When SubAgent calls spawn_task, the child task completion should NOT
+    // trigger Worker shutdown. Only the initial (parent) task's completion
+    // should trigger shutdown.
+    //
+    // Flow:
+    // 1. Init subagent → auto-submit triggers llm_request (initial task reasoning)
+    // 2. Respond with spawn_task tool call → Agent intercepts, creates child task
+    // 3. Child task triggers its own llm_request → respond with text → child completes
+    //    → notifyCallback fires for child → should NOT shutdown
+    // 4. Parent task gets child result, triggers llm_request → respond with text
+    //    → parent completes → notifyCallback fires for initial task → SHOULD shutdown
+    // 5. Post-task reflection may trigger additional llm_request(s) — auto-respond to those
+
+    worker = new Worker(WORKER_URL);
+
+    const sessionPath = `${TEST_DIR}/session-spawn`;
+    mkdirSync(sessionPath, { recursive: true });
+
+    // Collect ALL messages from worker for inspection
+    const allMessages: Array<Record<string, unknown>> = [];
+
+    // Track which llm_request IDs we've already handled in the main flow
+    const handledRequestIds = new Set<string>();
+
+    // Auto-respond to any llm_request that we haven't explicitly handled
+    // (e.g., post-task reflection requests). This prevents agent.stop() from
+    // blocking indefinitely on pending LLM calls.
+    worker.addEventListener("message", (event: MessageEvent) => {
+      allMessages.push(event.data);
+      if (event.data.type === "llm_request") {
+        const reqId = event.data.requestId as string;
+        // If this is a request we haven't handled in the main flow, auto-respond
+        if (!handledRequestIds.has(reqId)) {
+          setTimeout(() => {
+            if (!handledRequestIds.has(reqId)) {
+              worker!.postMessage({
+                type: "llm_response",
+                requestId: reqId,
+                result: {
+                  text: "ok",
+                  finishReason: "stop",
+                  usage: { promptTokens: 10, completionTokens: 5 },
+                },
+              });
+            }
+          }, 200);
+        }
+      }
+    });
+
+    const readyPromise = waitForMessage(worker, "ready");
+    const firstLLMRequest = waitForMessage(worker, "llm_request");
+
+    worker.postMessage({
+      type: "init",
+      mode: "subagent",
+      config: {
+        input: "Run a child task to analyze data",
+        sessionPath,
+        channelType: "subagent",
+        channelId: "sa_spawn_test",
+        settings: makeTestSettings(sessionPath),
+      },
+    });
+
+    await readyPromise;
+
+    // Step 1: First LLM request — initial task reasoning.
+    // Respond with a spawn_task tool call.
+    const llm1 = await firstLLMRequest;
+    const requestId1 = llm1.requestId as string;
+    handledRequestIds.add(requestId1);
+
+    // Reply with spawn_task tool call
+    const secondLLMRequest = waitForMessage(worker, "llm_request");
+    worker.postMessage({
+      type: "llm_response",
+      requestId: requestId1,
+      result: {
+        text: "",
+        finishReason: "tool_calls",
+        toolCalls: [
+          {
+            id: "tc_spawn_1",
+            name: "spawn_task",
+            arguments: {
+              description: "Analyze data",
+              input: "Please analyze the test data and return results",
+              type: "general",
+            },
+          },
+        ],
+        usage: { promptTokens: 100, completionTokens: 50 },
+      },
+    });
+
+    // Step 2: Child task is created by Agent.submit() (spawn_task interception).
+    // Child task triggers its own llm_request for reasoning.
+    const llm2 = await secondLLMRequest;
+    const requestId2 = llm2.requestId as string;
+    handledRequestIds.add(requestId2);
+
+    // Before responding to child, verify no shutdown-complete yet
+    const shutdownMessages = allMessages.filter((m) => m.type === "shutdown-complete");
+    expect(shutdownMessages.length).toBe(0);
+
+    // Step 3: Respond to child task with a direct text response (no tool calls).
+    // This should complete the child task but NOT trigger Worker shutdown.
+    const thirdLLMRequest = waitForMessage(worker, "llm_request");
+    worker.postMessage({
+      type: "llm_response",
+      requestId: requestId2,
+      result: {
+        text: "Analysis complete: data looks good.",
+        finishReason: "stop",
+        usage: { promptTokens: 80, completionTokens: 30 },
+      },
+    });
+
+    // Step 4: After child completes, parent task resumes.
+    // The parent task enters a new reasoning cycle with the child result.
+    const llm3 = await thirdLLMRequest;
+    const requestId3 = llm3.requestId as string;
+    handledRequestIds.add(requestId3);
+
+    // CRITICAL CHECK: After child task completed, the Worker should NOT have shutdown.
+    const shutdownAfterChild = allMessages.filter((m) => m.type === "shutdown-complete");
+    expect(shutdownAfterChild.length).toBe(0);
+
+    // Also verify that child task completion notify was sent WITHOUT subagentDone metadata
+    const notifyWithSubagentDone = allMessages.filter(
+      (m) => m.type === "notify" &&
+        ((m.message as Record<string, unknown>)?.metadata as Record<string, unknown>)?.subagentDone != null
+    );
+    expect(notifyWithSubagentDone.length).toBe(0);
+
+    // Step 5: Respond to parent task's resumed reasoning with a final text response.
+    // This should complete the INITIAL task and trigger Worker shutdown.
+    // Note: Post-task reflection may trigger additional llm_request(s) which are
+    // auto-responded to by the message handler above.
+    const shutdownPromise = waitForMessage(worker, "shutdown-complete", 10_000);
+    worker.postMessage({
+      type: "llm_response",
+      requestId: requestId3,
+      result: {
+        text: "All analysis tasks completed successfully.",
+        finishReason: "stop",
+        usage: { promptTokens: 120, completionTokens: 40 },
+      },
+    });
+
+    // Wait for shutdown — this should happen because the initial task completed
+    const shutdownMsg = await shutdownPromise;
+    expect(shutdownMsg.type).toBe("shutdown-complete");
+
+    // Verify the final notify had subagentDone metadata
+    const finalNotifiesWithDone = allMessages.filter(
+      (m) => m.type === "notify" &&
+        ((m.message as Record<string, unknown>)?.metadata as Record<string, unknown>)?.subagentDone != null
+    );
+    expect(finalNotifiesWithDone.length).toBeGreaterThanOrEqual(1);
+    // The FIRST subagentDone notify should be for the initial task completion
+    const doneMetadata = ((finalNotifiesWithDone[0]!.message as Record<string, unknown>)?.metadata as Record<string, unknown>);
+    expect(doneMetadata?.subagentDone).toBe("completed");
+  }, 30_000);
+
+  it("should auto-shutdown on direct task completion with subagentDone metadata", async () => {
+    // Simpler test: subagent with a direct response (no spawn_task).
+    // The initial task should complete and trigger shutdown with subagentDone.
+    worker = new Worker(WORKER_URL);
+
+    const sessionPath = `${TEST_DIR}/session-direct`;
+    mkdirSync(sessionPath, { recursive: true });
+
+    const allMessages: Array<Record<string, unknown>> = [];
+    worker.addEventListener("message", (event: MessageEvent) => {
+      allMessages.push(event.data);
+    });
+
+    const readyPromise = waitForMessage(worker, "ready");
+    const llmRequestPromise = waitForMessage(worker, "llm_request");
+
+    worker.postMessage({
+      type: "init",
+      mode: "subagent",
+      config: {
+        input: "Say hello",
+        sessionPath,
+        channelType: "subagent",
+        channelId: "sa_direct_test",
+        settings: makeTestSettings(sessionPath),
+      },
+    });
+
+    await readyPromise;
+
+    const llmMsg = await llmRequestPromise;
+    const requestId = llmMsg.requestId as string;
+
+    // Respond with direct text — task should complete and trigger shutdown
+    const shutdownPromise = waitForMessage(worker, "shutdown-complete", 5_000);
+    worker.postMessage({
+      type: "llm_response",
+      requestId,
+      result: {
+        text: "Hello! How can I help you?",
+        finishReason: "stop",
+        usage: { promptTokens: 50, completionTokens: 20 },
+      },
+    });
+
+    const shutdownMsg = await shutdownPromise;
+    expect(shutdownMsg.type).toBe("shutdown-complete");
+
+    // Verify subagentDone metadata was sent
+    const notifiesWithDone = allMessages.filter(
+      (m) => m.type === "notify" &&
+        ((m.message as Record<string, unknown>)?.metadata as Record<string, unknown>)?.subagentDone != null
+    );
+    expect(notifiesWithDone.length).toBe(1);
+    const metadata = (notifiesWithDone[0]!.message as Record<string, unknown>)?.metadata as Record<string, unknown>;
+    expect(metadata?.subagentDone).toBe("completed");
+  }, 15_000);
 });
