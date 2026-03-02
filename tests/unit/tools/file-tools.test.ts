@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { read_file, write_file, list_files, edit_file, grep_files, glob_files } from "../../../src/tools/builtins/file-tools.ts";
+import { read_file, write_file, list_files, edit_file, grep_files, glob_files, _resetRgCache, isRgAvailable } from "../../../src/tools/builtins/file-tools.ts";
 import { rm, mkdir } from "node:fs/promises";
 
 const testDir = "/tmp/pegasus-test-files";
@@ -818,9 +818,10 @@ describe("file tools", () => {
       }, context);
 
       expect(result.success).toBe(true);
-      const r = result.result as { files: string[]; count: number };
-      expect(r.count).toBe(2);
-      expect(r.files.every(f => f.endsWith(".ts"))).toBe(true);
+      const output = result.result as string;
+      const lines = output.split("\n").filter(l => l !== "" && !l.startsWith("["));
+      expect(lines).toHaveLength(2);
+      expect(lines.every(f => f.endsWith(".ts"))).toBe(true);
     }, 10000);
 
     it("should match files recursively", async () => {
@@ -837,9 +838,10 @@ describe("file tools", () => {
       }, context);
 
       expect(result.success).toBe(true);
-      const r = result.result as { files: string[]; count: number };
-      expect(r.count).toBe(2);
-      expect(r.files.every(f => f.endsWith(".ts"))).toBe(true);
+      const output = result.result as string;
+      const lines = output.split("\n").filter(l => l !== "" && !l.startsWith("["));
+      expect(lines).toHaveLength(2);
+      expect(lines.every(f => f.endsWith(".ts"))).toBe(true);
     }, 10000);
 
     it("should return empty results for non-matching pattern", async () => {
@@ -852,9 +854,8 @@ describe("file tools", () => {
       }, context);
 
       expect(result.success).toBe(true);
-      const r = result.result as { files: string[]; count: number };
-      expect(r.count).toBe(0);
-      expect(r.files).toHaveLength(0);
+      const output = result.result as string;
+      expect(output).toBe("");
     }, 10000);
 
     it("should respect max_results limit", async () => {
@@ -871,9 +872,11 @@ describe("file tools", () => {
       }, context);
 
       expect(result.success).toBe(true);
-      const r = result.result as { files: string[]; count: number; truncated: boolean };
-      expect(r.count).toBe(3);
-      expect(r.truncated).toBe(true);
+      const output = result.result as string;
+      const fileLines = output.split("\n").filter(l => l !== "" && !l.startsWith("["));
+      expect(fileLines).toHaveLength(3);
+      // Should have truncation footer
+      expect(output).toContain("[showing 3 of");
     }, 10000);
 
     it("should sort by mtime (newest first)", async () => {
@@ -890,9 +893,10 @@ describe("file tools", () => {
       }, context);
 
       expect(result.success).toBe(true);
-      const r = result.result as { files: string[] };
-      expect(r.files[0]).toBe("new.ts");
-      expect(r.files[1]).toBe("old.ts");
+      const output = result.result as string;
+      const lines = output.split("\n").filter(l => l !== "");
+      expect(lines[0]).toBe("new.ts");
+      expect(lines[1]).toBe("old.ts");
     }, 10000);
 
     it("should reject unauthorized paths", async () => {
@@ -907,5 +911,267 @@ describe("file tools", () => {
       expect(result.success).toBe(false);
       expect(result.error).toContain("not in allowed paths");
     }, 10000);
+  });
+
+  // ── grep_files: JS fallback specific tests ──
+
+  describe("grep_files JS fallback", () => {
+    // Force JS fallback by disabling rg cache
+    let originalRgState: boolean;
+
+    beforeEach(() => {
+      originalRgState = isRgAvailable();
+      _resetRgCache(false); // force JS fallback
+    });
+
+    afterEach(() => {
+      _resetRgCache(originalRgState); // restore
+    });
+
+    it("should produce identical output format to rg for single file search", async () => {
+      const context = { taskId: "test-task-id" };
+      const filePath = `${testDir}/fallback-single.txt`;
+      await Bun.write(filePath, "first line\nsecond match here\nthird line\nfourth match here");
+
+      const result = await grep_files.execute({
+        pattern: "match",
+        path: filePath,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("=== ");
+      expect(output).toContain("fallback-single.txt ===");
+      expect(output).toContain("2:second match here");
+      expect(output).toContain("4:fourth match here");
+    });
+
+    it("should skip blacklisted directories", async () => {
+      const context = { taskId: "test-task-id" };
+      const nodeModules = `${testDir}/node_modules`;
+      const dist = `${testDir}/dist`;
+      const src = `${testDir}/src`;
+      await mkdir(nodeModules, { recursive: true });
+      await mkdir(dist, { recursive: true });
+      await mkdir(src, { recursive: true });
+      await Bun.write(`${nodeModules}/lib.js`, "findme_target");
+      await Bun.write(`${dist}/bundle.js`, "findme_target");
+      await Bun.write(`${src}/app.ts`, "findme_target");
+
+      const result = await grep_files.execute({
+        pattern: "findme_target",
+        path: testDir,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      // Should find in src but NOT in node_modules or dist
+      expect(output).toContain("app.ts");
+      expect(output).not.toContain("node_modules");
+      expect(output).not.toContain("dist");
+    });
+
+    it("should skip files larger than 1MB", async () => {
+      const context = { taskId: "test-task-id" };
+      const largeFile = `${testDir}/large.txt`;
+      const smallFile = `${testDir}/small.txt`;
+      // Create a file > 1MB
+      const bigContent = "findme_target\n" + "x".repeat(1_100_000);
+      await Bun.write(largeFile, bigContent);
+      await Bun.write(smallFile, "findme_target here");
+
+      const result = await grep_files.execute({
+        pattern: "findme_target",
+        path: testDir,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      // Should find in small file, skip large file
+      expect(output).toContain("small.txt");
+      expect(output).not.toContain("large.txt");
+    }, 10000);
+
+    it("should respect .gitignore patterns", async () => {
+      const context = { taskId: "test-task-id" };
+      const ignored = `${testDir}/ignored`;
+      const kept = `${testDir}/kept`;
+      await mkdir(ignored, { recursive: true });
+      await mkdir(kept, { recursive: true });
+      await Bun.write(`${testDir}/.gitignore`, "ignored/\n");
+      await Bun.write(`${ignored}/file.ts`, "gitignore_target");
+      await Bun.write(`${kept}/file.ts`, "gitignore_target");
+
+      const result = await grep_files.execute({
+        pattern: "gitignore_target",
+        path: testDir,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("kept");
+      expect(output).not.toContain("ignored");
+    });
+
+    it("should work with context_lines in fallback mode", async () => {
+      const context = { taskId: "test-task-id" };
+      const filePath = `${testDir}/fallback-context.txt`;
+      await Bun.write(filePath, "line1\nline2\nMATCH_HERE\nline4\nline5");
+
+      const result = await grep_files.execute({
+        pattern: "MATCH_HERE",
+        path: filePath,
+        context_lines: 1,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("=== ");
+      expect(output).toContain("-2-line2");
+      expect(output).toContain(":3:MATCH_HERE");
+      expect(output).toContain("-4-line4");
+    });
+
+    it("should handle files_with_matches mode in fallback", async () => {
+      const context = { taskId: "test-task-id" };
+      await Bun.write(`${testDir}/fb-a.txt`, "match_target");
+      await Bun.write(`${testDir}/fb-b.txt`, "no hit");
+
+      const result = await grep_files.execute({
+        pattern: "match_target",
+        path: testDir,
+        output_mode: "files_with_matches",
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("fb-a.txt");
+      expect(output).not.toContain("fb-b.txt");
+    });
+
+    it("should handle count mode in fallback", async () => {
+      const context = { taskId: "test-task-id" };
+      await Bun.write(`${testDir}/fb-count.txt`, "x\nx\nx");
+
+      const result = await grep_files.execute({
+        pattern: "x",
+        path: `${testDir}/fb-count.txt`,
+        output_mode: "count",
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain(":3");
+    });
+  });
+
+  // ── grep_files: rg-specific tests ──
+
+  describe("grep_files with rg", () => {
+    beforeEach(() => {
+      _resetRgCache(null); // re-detect rg
+    });
+
+    afterEach(() => {
+      _resetRgCache(null); // restore
+    });
+
+    it("should use rg when available and produce correct format", async () => {
+      // Skip if rg is not available
+      if (!isRgAvailable()) return;
+
+      const context = { taskId: "test-task-id" };
+      const filePath = `${testDir}/rg-test.txt`;
+      await Bun.write(filePath, "alpha\nbeta match_rg\ngamma\ndelta match_rg");
+
+      const result = await grep_files.execute({
+        pattern: "match_rg",
+        path: filePath,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("rg-test.txt ===");
+      expect(output).toContain("2:beta match_rg");
+      expect(output).toContain("4:delta match_rg");
+    });
+
+    it("should handle rg context mode correctly", async () => {
+      if (!isRgAvailable()) return;
+
+      const context = { taskId: "test-task-id" };
+      const filePath = `${testDir}/rg-context.txt`;
+      await Bun.write(filePath, "aa\nbb\ncc MATCH_RG\ndd\nee");
+
+      const result = await grep_files.execute({
+        pattern: "MATCH_RG",
+        path: filePath,
+        context_lines: 1,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("rg-context.txt ===");
+      expect(output).toContain("-2-bb");
+      expect(output).toContain(":3:cc MATCH_RG");
+      expect(output).toContain("-4-dd");
+    });
+
+    it("should handle rg files_with_matches mode", async () => {
+      if (!isRgAvailable()) return;
+
+      const context = { taskId: "test-task-id" };
+      await Bun.write(`${testDir}/rg-fwm-a.txt`, "rg_fwm_target");
+      await Bun.write(`${testDir}/rg-fwm-b.txt`, "nothing here");
+
+      const result = await grep_files.execute({
+        pattern: "rg_fwm_target",
+        path: testDir,
+        output_mode: "files_with_matches",
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("rg-fwm-a.txt");
+      expect(output).not.toContain("rg-fwm-b.txt");
+    });
+
+    it("should handle rg count mode", async () => {
+      if (!isRgAvailable()) return;
+
+      const context = { taskId: "test-task-id" };
+      await Bun.write(`${testDir}/rg-count.txt`, "x\nx\nx");
+
+      const result = await grep_files.execute({
+        pattern: "x",
+        path: `${testDir}/rg-count.txt`,
+        output_mode: "count",
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain(":3");
+    });
+  });
+
+  // ── isRgAvailable cache tests ──
+
+  describe("isRgAvailable", () => {
+    afterEach(() => {
+      _resetRgCache(null); // re-detect after test
+    });
+
+    it("should return a boolean", () => {
+      _resetRgCache(null);
+      const result = isRgAvailable();
+      expect(typeof result).toBe("boolean");
+    });
+
+    it("should cache the result", () => {
+      _resetRgCache(true);
+      expect(isRgAvailable()).toBe(true);
+      _resetRgCache(false);
+      expect(isRgAvailable()).toBe(false);
+    });
   });
 });

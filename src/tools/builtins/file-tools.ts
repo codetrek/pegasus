@@ -8,6 +8,31 @@ import type { Tool, ToolResult, ToolContext, ToolCategory } from "../types.ts";
 import { ToolPermissionError } from "../errors.ts";
 import path from "node:path";
 import { readdir, access, stat as fsStat } from "node:fs/promises";
+import ignore from "ignore";
+
+// ── rg availability check (cached at module load) ──
+
+let _rgAvailable: boolean | null = null;
+
+/** Check if ripgrep (rg) is available. Cached after first call. */
+export function isRgAvailable(): boolean {
+  if (_rgAvailable !== null) return _rgAvailable;
+  try {
+    const result = Bun.spawnSync(["which", "rg"]);
+    _rgAvailable = result.exitCode === 0;
+  } catch {
+    _rgAvailable = false;
+  }
+  return _rgAvailable;
+}
+
+// Eagerly probe on module load (non-blocking since spawnSync is sync)
+isRgAvailable();
+
+/** Reset rg availability cache (for testing). */
+export function _resetRgCache(value?: boolean | null): void {
+  _rgAvailable = value ?? null;
+}
 
 // ── read_file ──────────────────────────────────
 
@@ -436,6 +461,255 @@ interface ContextLine {
   isMatch?: boolean;
 }
 
+// ── JS fallback constants ──
+
+const SKIP_DIRS = new Set([
+  ".git", "node_modules", ".worktrees", "dist", "build",
+  ".next", "__pycache__", ".venv", "vendor", "coverage", ".nyc_output",
+]);
+
+const MAX_FILE_SIZE = 1_048_576; // 1MB
+
+/** Check if a buffer looks like binary (contains null bytes in first 8KB). Same heuristic as git/grep/rg. */
+function isBinaryBuffer(buffer: Uint8Array): boolean {
+  const checkLen = Math.min(buffer.length, 8192);
+  for (let i = 0; i < checkLen; i++) {
+    if (buffer[i] === 0) return true;
+  }
+  return false;
+}
+
+// ── rg helpers ──
+
+interface GrepParams {
+  pattern: string;
+  path: string;
+  include?: string;
+  max_results: number;
+  case_insensitive: boolean;
+  context_lines?: number;
+  output_mode: "content" | "files_with_matches" | "count";
+  multiline: boolean;
+}
+
+/** Build rg command arguments from grep params. */
+function buildRgArgs(params: GrepParams): string[] {
+  // --with-filename ensures rg always prints the filename header,
+  // even when searching a single file (by default rg omits it).
+  const args = ["--heading", "--line-number", "--no-column", "--color", "never", "--with-filename"];
+
+  if (params.case_insensitive) args.push("-i");
+  if (params.multiline) args.push("-U", "--multiline-dotall");
+  if (params.include) args.push("--glob", params.include);
+
+  if (params.output_mode === "files_with_matches") {
+    args.push("-l");
+  } else if (params.output_mode === "count") {
+    args.push("-c");
+  } else {
+    // content mode
+    if (params.context_lines !== undefined && params.context_lines > 0) {
+      args.push("-C", String(params.context_lines));
+    }
+  }
+
+  args.push("--", params.pattern, params.path);
+  return args;
+}
+
+/**
+ * Parse rg --heading output into our grouped format.
+ *
+ * rg --heading outputs:
+ *   filename          (bare line = file header)
+ *   42:match content  (match line)
+ *   41-context line   (context line)
+ *   --                (separator between non-contiguous blocks)
+ *
+ * We convert to our format:
+ *   === filename ===
+ *   42:match content   (no-context mode)
+ * or:
+ *   === filename ===
+ *   :42:match content  (context mode — leading colon)
+ *   -41-context line
+ *   --
+ */
+function parseRgContentOutput(raw: string, maxResults: number, hasContext: boolean): { lines: string[]; totalMatches: number; truncated: boolean } {
+  if (!raw.trim()) return { lines: [], totalMatches: 0, truncated: false };
+
+  const outputLines: string[] = [];
+  let totalMatches = 0;
+  let matchesSoFar = 0;
+  let currentFile: string | null = null;
+  let hitLimit = false;
+
+  const rawLines = raw.split("\n");
+
+  for (let i = 0; i < rawLines.length; i++) {
+    const line = rawLines[i]!;
+
+    // Empty line = file separator in --heading mode
+    if (line === "") {
+      continue;
+    }
+
+    // Block separator
+    if (line === "--") {
+      if (!hitLimit) outputLines.push("--");
+      continue;
+    }
+
+    // Match line: N:content (colon after line number)
+    const matchLineMatch = line.match(/^(\d+):(.*)$/);
+    if (matchLineMatch) {
+      totalMatches++;
+      matchesSoFar++;
+      if (matchesSoFar > maxResults) {
+        hitLimit = true;
+        continue; // keep counting totalMatches but don't emit
+      }
+
+      // Check if we need a file header — look backwards for the file header
+      const fileHeader = findFileHeaderForLine(rawLines, i);
+      if (fileHeader && fileHeader !== currentFile) {
+        if (currentFile !== null) outputLines.push(""); // blank line between files
+        outputLines.push(`=== ${fileHeader} ===`);
+        currentFile = fileHeader;
+      }
+      // In context mode, match lines use ":lineNum:content" format (leading colon)
+      // In no-context mode, match lines use "lineNum:content" format
+      if (hasContext) {
+        outputLines.push(`:${matchLineMatch[1]}:${matchLineMatch[2]}`);
+      } else {
+        outputLines.push(`${matchLineMatch[1]}:${matchLineMatch[2]}`);
+      }
+      continue;
+    }
+
+    // Context line: N-content (hyphen after line number)
+    const contextLineMatch = line.match(/^(\d+)-(.*)$/);
+    if (contextLineMatch) {
+      if (!hitLimit) {
+        const fileHeader = findFileHeaderForLine(rawLines, i);
+        if (fileHeader && fileHeader !== currentFile) {
+          if (currentFile !== null) outputLines.push("");
+          outputLines.push(`=== ${fileHeader} ===`);
+          currentFile = fileHeader;
+        }
+        outputLines.push(`-${contextLineMatch[1]}-${contextLineMatch[2]}`);
+      }
+      continue;
+    }
+
+    // Otherwise: it's a file header (bare filename)
+    // We handle file headers lazily when we encounter match/context lines
+  }
+
+  return { lines: outputLines, totalMatches, truncated: hitLimit };
+}
+
+/**
+ * Walk backwards from line index to find the nearest file header.
+ * In rg --heading, a file header is a bare line (no :N: or -N- prefix)
+ * that appears before the first match/context line of a file group.
+ */
+function findFileHeaderForLine(rawLines: string[], lineIdx: number): string | null {
+  for (let j = lineIdx - 1; j >= 0; j--) {
+    const l = rawLines[j]!;
+    if (l === "" || l === "--") continue;
+    if (/^\d+[:\-]/.test(l)) continue; // match/context line, keep searching
+    return l; // bare filename
+  }
+  // The file header might be at the start
+  if (lineIdx >= 0 && rawLines[0] && !/^\d+[:\-]/.test(rawLines[0]) && rawLines[0] !== "" && rawLines[0] !== "--") {
+    return rawLines[0];
+  }
+  return null;
+}
+
+/** Parse rg -c output (count mode): file:count per line → our format. */
+function parseRgCountOutput(raw: string, maxResults: number): string[] {
+  if (!raw.trim()) return [];
+  return raw.trim().split("\n").filter(l => l !== "").slice(0, maxResults);
+}
+
+/** Parse rg -l output (files_with_matches): one path per line → our format. */
+function parseRgFilesOutput(raw: string, maxResults: number): string[] {
+  if (!raw.trim()) return [];
+  return raw.trim().split("\n").filter(l => l !== "").slice(0, maxResults);
+}
+
+/** Execute grep via ripgrep. Returns formatted output string, or null if rg not suitable. */
+function executeWithRg(params: GrepParams): { output: string; truncated: boolean } | null {
+  const args = buildRgArgs(params);
+
+  const result = Bun.spawnSync(["rg", ...args], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+
+  const stdout = result.stdout.toString();
+  const stderr = result.stderr.toString();
+
+  // Exit code 1 = no matches, exit code 2 = error
+  if (result.exitCode === 2) {
+    // Check for regex error from rg
+    if (stderr.includes("regex")) {
+      throw new Error(`Invalid regex pattern: ${stderr.trim()}`);
+    }
+    // Other rg errors — fall back to JS
+    return null;
+  }
+
+  if (params.output_mode === "files_with_matches") {
+    const files = parseRgFilesOutput(stdout, params.max_results);
+    return { output: files.join("\n"), truncated: false };
+  }
+
+  if (params.output_mode === "count") {
+    const counts = parseRgCountOutput(stdout, params.max_results);
+    return { output: counts.join("\n"), truncated: false };
+  }
+
+  // content mode
+  const hasContext = params.context_lines !== undefined && params.context_lines > 0;
+  const { lines, totalMatches, truncated } = parseRgContentOutput(stdout, params.max_results, hasContext);
+  let output = lines.join("\n");
+  if (truncated) {
+    output += `\n\n[${totalMatches} total matches, showing first ${params.max_results}]`;
+  }
+  return { output, truncated };
+}
+
+// ── JS fallback helpers ──
+
+/** Load .gitignore patterns from the search root and its ancestors. */
+async function loadGitignore(searchRoot: string): Promise<ReturnType<typeof ignore> | null> {
+  const ig = ignore();
+  let loaded = false;
+
+  // Walk up from searchRoot to find .gitignore files
+  let dir = searchRoot;
+  const visited = new Set<string>();
+  while (dir && !visited.has(dir)) {
+    visited.add(dir);
+    try {
+      const gitignorePath = path.join(dir, ".gitignore");
+      const content = await Bun.file(gitignorePath).text();
+      ig.add(content);
+      loaded = true;
+    } catch {
+      // No .gitignore at this level
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+
+  return loaded ? ig : null;
+}
+
 export const grep_files: Tool = {
   name: "grep_files",
   description: "Search file contents using regex. Output grouped by file: "
@@ -486,19 +760,74 @@ export const grep_files: Tool = {
         }
       }
 
-      // Compile regex with appropriate flags
-      let regex: RegExp;
+      // Validate the regex pattern early (before attempting rg or JS fallback)
       try {
-        let flags = "g"; // global for counting all matches
+        let flags = "";
         if (case_insensitive) flags += "i";
-        if (multiline) flags += "s"; // dotAll: . matches newlines
-        regex = new RegExp(pattern, flags);
+        if (multiline) flags += "s";
+        new RegExp(pattern, flags);
       } catch (e) {
         throw new Error(`Invalid regex pattern: ${(e as Error).message}`);
       }
 
+      // Check that the path exists
+      let isDir = false;
+      try {
+        const stats = await fsStat(searchPath);
+        isDir = stats.isDirectory();
+      } catch {
+        throw new Error(`Path not found: ${searchPath}`);
+      }
+
+      const grepParams: GrepParams = {
+        pattern,
+        path: searchPath,
+        include,
+        max_results,
+        case_insensitive,
+        context_lines,
+        output_mode,
+        multiline,
+      };
+
+      // ── Tier 1: Try ripgrep ──
+      if (isRgAvailable()) {
+        try {
+          const rgResult = executeWithRg(grepParams);
+          if (rgResult !== null) {
+            return {
+              success: true,
+              result: rgResult.output,
+              startedAt,
+              completedAt: Date.now(),
+              durationMs: Date.now() - startedAt,
+            };
+          }
+        } catch (e) {
+          // If rg threw an error we recognize (e.g., invalid regex), rethrow
+          if (e instanceof Error && e.message.startsWith("Invalid regex")) {
+            throw e;
+          }
+          // Otherwise fall through to JS fallback
+        }
+      }
+
+      // ── Tier 2: JS fallback ──
+
+      // Compile regex with appropriate flags
+      let regex: RegExp;
+      {
+        let flags = "g";
+        if (case_insensitive) flags += "i";
+        if (multiline) flags += "s";
+        regex = new RegExp(pattern, flags);
+      }
+
       // Compile include filter
       const includeRegex = include ? globToRegex(include) : null;
+
+      // Load .gitignore for directory searches
+      const ig = isDir ? await loadGitignore(searchPath) : null;
 
       // Result accumulators based on output mode
       const contentMatches: Array<{
@@ -520,7 +849,6 @@ export const grep_files: Tool = {
           const start = Math.max(0, idx - ctxLines);
           const end = Math.min(totalLines - 1, idx + ctxLines);
           if (ranges.length > 0 && start <= ranges[ranges.length - 1]![1] + 1) {
-            // Merge with previous range
             ranges[ranges.length - 1]![1] = end;
           } else {
             ranges.push([start, end]);
@@ -532,16 +860,22 @@ export const grep_files: Tool = {
       // Search a single file (line-by-line mode)
       const searchFileLineByLine = async (filePath: string): Promise<boolean> => {
         try {
-          const fileContent = await Bun.file(filePath).text();
+          // Skip large files
+          const st = await fsStat(filePath);
+          if (st.size > MAX_FILE_SIZE) return false;
+
+          // Skip binary files (check first 8KB for null bytes)
+          const rawBytes = new Uint8Array(await Bun.file(filePath).arrayBuffer());
+          if (isBinaryBuffer(rawBytes)) return false;
+
+          const fileContent = new TextDecoder().decode(rawBytes);
           const lines = fileContent.split("\n");
 
-          // Use a non-global regex for line-by-line matching
           let lineRegex: RegExp;
           let flags = "";
           if (case_insensitive) flags += "i";
           lineRegex = new RegExp(pattern, flags);
 
-          // Find all matching line indices
           const matchLineIndices: number[] = [];
           for (let i = 0; i < lines.length; i++) {
             if (lineRegex.test(lines[i]!)) {
@@ -570,8 +904,6 @@ export const grep_files: Tool = {
 
           // output_mode === "content"
           if (context_lines !== undefined && context_lines > 0) {
-            // Context mode: one entry per merged range (like ripgrep -C).
-            // Overlapping matches are combined into a single context block.
             const ranges = buildContextRanges(matchLineIndices, lines.length, context_lines);
             const matchSet = new Set(matchLineIndices);
 
@@ -593,7 +925,6 @@ export const grep_files: Tool = {
               });
             }
           } else {
-            // No context: original behavior
             for (const idx of matchLineIndices) {
               if (contentMatches.length >= max_results) return true;
               const m = lines[idx]!.match(lineRegex);
@@ -608,7 +939,6 @@ export const grep_files: Tool = {
 
           return contentMatches.length >= max_results;
         } catch {
-          // Skip files that can't be read (binary, permission, etc.)
           return false;
         }
       };
@@ -616,9 +946,16 @@ export const grep_files: Tool = {
       // Search a single file (multiline mode)
       const searchFileMultiline = async (filePath: string): Promise<boolean> => {
         try {
-          const fileContent = await Bun.file(filePath).text();
+          // Skip large files
+          const st = await fsStat(filePath);
+          if (st.size > MAX_FILE_SIZE) return false;
 
-          // Reset lastIndex for global regex
+          // Skip binary files
+          const rawBytes = new Uint8Array(await Bun.file(filePath).arrayBuffer());
+          if (isBinaryBuffer(rawBytes)) return false;
+
+          const fileContent = new TextDecoder().decode(rawBytes);
+
           regex.lastIndex = 0;
           let m: RegExpExecArray | null;
           let fileMatchCount = 0;
@@ -628,7 +965,6 @@ export const grep_files: Tool = {
             totalMatches++;
 
             if (output_mode === "content" && contentMatches.length < max_results) {
-              // Find starting line number of the match
               const beforeMatch = fileContent.slice(0, m.index);
               const startLineNum = beforeMatch.split("\n").length;
 
@@ -640,7 +976,6 @@ export const grep_files: Tool = {
               });
             }
 
-            // Prevent infinite loop on zero-length matches
             if (m[0].length === 0) {
               regex.lastIndex++;
             }
@@ -670,20 +1005,10 @@ export const grep_files: Tool = {
 
       const searchFile = multiline ? searchFileMultiline : searchFileLineByLine;
 
-      // Check if path is a file or directory
-      let isDir = false;
-      try {
-        const stats = await fsStat(searchPath);
-        isDir = stats.isDirectory();
-      } catch {
-        throw new Error(`Path not found: ${searchPath}`);
-      }
-
       if (!isDir) {
-        // Single file search
         await searchFile(searchPath);
       } else {
-        // Recursive directory walk
+        // Recursive directory walk with .gitignore and blacklist support
         const walkDir = async (dirPath: string): Promise<boolean> => {
           let entries;
           try {
@@ -694,12 +1019,24 @@ export const grep_files: Tool = {
           for (const entry of entries) {
             const entryPath = path.join(dirPath, entry.name);
             if (entry.isDirectory()) {
+              // Blacklist check
+              if (SKIP_DIRS.has(entry.name)) continue;
+              // .gitignore check
+              if (ig) {
+                const relativePath = path.relative(searchPath, entryPath);
+                if (ig.ignores(relativePath + "/")) continue;
+              }
               const capped = await walkDir(entryPath);
               if (capped) return true;
             } else if (entry.isFile()) {
               // Apply include filter on filename
               if (includeRegex && !includeRegex.test(entry.name)) {
                 continue;
+              }
+              // .gitignore check for files
+              if (ig) {
+                const relativePath = path.relative(searchPath, entryPath);
+                if (ig.ignores(relativePath)) continue;
               }
               const capped = await searchFile(entryPath);
               if (capped) return true;
@@ -723,19 +1060,17 @@ export const grep_files: Tool = {
           outputLines.push(`${entry.file}:${entry.count}`);
         }
       } else {
-        // content mode — group by file, file name appears once as header
         let currentFile = "";
         for (let i = 0; i < contentMatches.length; i++) {
           const m = contentMatches[i]!;
 
           if (m.context) {
-            // Context mode
             if (m.file !== currentFile) {
-              if (currentFile !== "") outputLines.push(""); // blank line between files
+              if (currentFile !== "") outputLines.push("");
               outputLines.push(`=== ${m.file} ===`);
               currentFile = m.file!;
             } else {
-              outputLines.push("--"); // separator between blocks in same file
+              outputLines.push("--");
             }
             for (const ctx of m.context) {
               if (ctx.isMatch) {
@@ -745,9 +1080,8 @@ export const grep_files: Tool = {
               }
             }
           } else {
-            // No context mode
             if (m.file !== currentFile) {
-              if (currentFile !== "") outputLines.push(""); // blank line between files
+              if (currentFile !== "") outputLines.push("");
               outputLines.push(`=== ${m.file} ===`);
               currentFile = m.file!;
             }
@@ -850,14 +1184,15 @@ export const glob_files: Tool = {
       const truncated = filesWithMtime.length > max_results;
       const result = filesWithMtime.slice(0, max_results).map(f => f.path);
 
+      // Plain text output: one file per line
+      let output = result.join("\n");
+      if (truncated) {
+        output += `\n[showing ${max_results} of ${filesWithMtime.length}+ files]`;
+      }
+
       return {
         success: true,
-        result: {
-          files: result,
-          count: result.length,
-          truncated,
-          cwd: basePath,
-        },
+        result: output,
         startedAt,
         completedAt: Date.now(),
         durationMs: Date.now() - startedAt,
