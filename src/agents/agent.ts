@@ -72,11 +72,15 @@ export function context_pushToolResult(
     toolResult.completedAt ?? Date.now(),
     toolResult.durationMs,
   );
-  context.messages.push({
+  const msg: Message = {
     role: "tool",
     content: `${tsPrefix}\n${rawContent}`,
     toolCallId,
-  });
+  };
+  if (toolResult.images?.length) {
+    msg.images = toolResult.images;
+  }
+  context.messages.push(msg);
 }
 
 // ── Async Semaphore ──────────────────────────────────
@@ -596,7 +600,7 @@ export class Agent {
         const toolResult = await this.toolExecutor.execute(
           toolName,
           toolParams,
-          { taskId: task.context.id, memoryDir: path.join(this.settings.dataDir, "memory"), extractModel: this.extractModel ?? undefined, backgroundManager: this.backgroundTaskManager, browserManager: this.browserManager ?? undefined },
+          { taskId: task.context.id, memoryDir: path.join(this.settings.dataDir, "memory"), mediaDir: path.join(this.settings.dataDir, "media"), extractModel: this.extractModel ?? undefined, backgroundManager: this.backgroundTaskManager, browserManager: this.browserManager ?? undefined },
         );
 
         // Intercept spawn_task: create real task, wait for completion, return result

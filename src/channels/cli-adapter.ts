@@ -5,11 +5,15 @@
  * the ChannelAdapter interface for multi-channel routing.
  */
 import { createInterface, type Interface as ReadlineInterface } from "readline";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import type {
   ChannelAdapter,
   InboundMessage,
   OutboundMessage,
+  StoreImageFn,
 } from "./types.ts";
+import { extractImagePaths, removeImagePaths } from "./cli-image-detect.ts";
 
 /** Handle slash commands. Returns true if command was handled, "exit" to quit. */
 function handleCommand(input: string): boolean | "exit" {
@@ -37,10 +41,16 @@ export class CLIAdapter implements ChannelAdapter {
   private rl!: ReadlineInterface;
   private personaName: string;
   private onExit?: () => Promise<void>;
+  private storeImage?: StoreImageFn;
 
-  constructor(personaName: string, onExit?: () => Promise<void>) {
+  constructor(
+    personaName: string,
+    onExit?: () => Promise<void>,
+    storeImage?: StoreImageFn,
+  ) {
     this.personaName = personaName;
     this.onExit = onExit;
+    this.storeImage = storeImage;
   }
 
   async start(agent: { send(msg: InboundMessage): void }): Promise<void> {
@@ -76,9 +86,39 @@ export class CLIAdapter implements ChannelAdapter {
         // Not a recognized command — treat as regular input
       }
 
+      // Detect and process image @path references
+      const imagePaths = this.storeImage ? extractImagePaths(trimmed) : [];
+      const textContent =
+        imagePaths.length > 0 ? removeImagePaths(trimmed) : trimmed;
+      const images: Array<{ id: string; mimeType: string }> = [];
+
+      for (const imgPath of imagePaths) {
+        try {
+          const resolved = imgPath.startsWith("~")
+            ? imgPath.replace("~", process.env.HOME ?? "")
+            : path.resolve(imgPath);
+          const buffer = await readFile(resolved);
+          const ext = path.extname(resolved).slice(1).toLowerCase();
+          const mimeType =
+            ext === "png"
+              ? "image/png"
+              : ext === "webp"
+                ? "image/webp"
+                : ext === "gif"
+                  ? "image/gif"
+                  : "image/jpeg";
+          const ref = await this.storeImage!(buffer, mimeType, "cli");
+          images.push({ id: ref.id, mimeType: ref.mimeType });
+        } catch {
+          // Log warning but don't fail — just skip the image
+          console.error(`Failed to load image: ${imgPath}`);
+        }
+      }
+
       agent.send({
-        text: trimmed,
+        text: textContent,
         channel: { type: "cli", channelId: "main" },
+        ...(images.length > 0 ? { images } : {}),
       });
 
       this.rl.prompt();

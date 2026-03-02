@@ -46,10 +46,13 @@ export async function startCLI(): Promise<void> {
 
   const mainAgent = new MainAgent({ models, persona, settings });
 
+  // Get StoreImageFn for channel adapters (undefined when vision disabled)
+  const storeImageFn = mainAgent.getStoreImageFn();
+
   // Register CLI adapter
   const cliAdapter = new CLIAdapter(persona.name, async () => {
     await mainAgent.stop();
-  });
+  }, storeImageFn);
   mainAgent.registerAdapter(cliAdapter);
 
   await mainAgent.start();
@@ -57,7 +60,7 @@ export async function startCLI(): Promise<void> {
   // Start Telegram if configured
   const telegramConfig = settings.channels?.telegram;
   if (telegramConfig?.enabled && telegramConfig?.token) {
-    const telegramAdapter = new TelegramAdapter(telegramConfig.token);
+    const telegramAdapter = new TelegramAdapter(telegramConfig.token, storeImageFn);
     mainAgent.registerAdapter(telegramAdapter);
     await telegramAdapter.start({ send: (msg) => mainAgent.send(msg) });
     logger.info("telegram_adapter_started");

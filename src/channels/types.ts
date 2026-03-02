@@ -10,10 +10,18 @@ export interface ChannelInfo {
   replyTo?: string; // thread ID, conversation ID
 }
 
+/** Callback for storing images. Undefined when vision is disabled. */
+export type StoreImageFn = (
+  buffer: Buffer,
+  mimeType: string,
+  source: string,
+) => Promise<{ id: string; mimeType: string }>;
+
 /** Inbound message from any channel. */
 export interface InboundMessage {
   text: string;
   channel: ChannelInfo;
+  images?: Array<{ id: string; mimeType: string }>;
   metadata?: Record<string, unknown>;
 }
 

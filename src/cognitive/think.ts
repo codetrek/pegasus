@@ -53,6 +53,7 @@ export class Thinker {
     const messages: Message[] = context.messages.map((m) => ({
       role: m.role,
       content: m.content,
+      images: m.images,
       toolCallId: m.toolCallId,
       toolCalls: m.toolCalls,
     }));

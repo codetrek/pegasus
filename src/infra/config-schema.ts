@@ -159,6 +159,13 @@ export const SessionConfigSchema = z.object({
   compactThreshold: z.coerce.number().min(0.1).max(1.0).default(0.8),
 });
 
+export const VisionConfigSchema = z.object({
+  enabled: booleanFromString.default(true),
+  keepLastNTurns: z.coerce.number().int().positive().default(5),
+  maxDimensionPx: z.coerce.number().int().positive().default(1200),
+  maxImageBytes: z.coerce.number().int().positive().default(5 * 1024 * 1024),
+});
+
 export const TelegramConfigSchema = z.object({
   enabled: z.preprocess(
     (val) => {
@@ -181,6 +188,7 @@ export const ChannelsConfigSchema = z.object({
 });
 
 export type SessionConfig = z.infer<typeof SessionConfigSchema>;
+export type VisionConfig = z.infer<typeof VisionConfigSchema>;
 export type TelegramConfig = z.infer<typeof TelegramConfigSchema>;
 export type ChannelsConfig = z.infer<typeof ChannelsConfigSchema>;
 
@@ -191,6 +199,7 @@ export const SettingsSchema = z.object({
   identity: IdentityConfigSchema.default({}),
   tools: ToolsConfigSchema.default({}),
   session: SessionConfigSchema.default({}),
+  vision: VisionConfigSchema.default({}),
   channels: ChannelsConfigSchema.default({}),
   logLevel: z.string().default("info"),
   dataDir: z.string({ required_error: "dataDir is required — set system.dataDir in config.yml or PEGASUS_DATA_DIR env var" }),

@@ -44,6 +44,7 @@ function makeTestSettings(dataDir: string): Settings {
       mcpServers: [],
     },
     session: { compactThreshold: 0.8 },
+    vision: { enabled: true, keepLastNTurns: 5, maxDimensionPx: 1200, maxImageBytes: 5242880 },
     channels: { telegram: { enabled: false } },
     logLevel: "silent",
     dataDir,

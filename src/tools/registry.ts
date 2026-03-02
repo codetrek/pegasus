@@ -84,6 +84,7 @@ export class ToolRegistry {
       [ToolCategory.DATA]: 0,
       [ToolCategory.MEMORY]: 0,
       [ToolCategory.BROWSER]: 0,
+      [ToolCategory.MEDIA]: 0,
       [ToolCategory.CODE]: 0,
       [ToolCategory.MCP]: 0,
       [ToolCategory.CUSTOM]: 0,

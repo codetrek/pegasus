@@ -19,7 +19,9 @@ import { errorToString } from "../infra/errors.ts";
 import { getLogger } from "../infra/logger.ts";
 import { ToolRegistry } from "../tools/registry.ts";
 import { ToolExecutor } from "../tools/executor.ts";
-import type { InboundMessage, OutboundMessage, ChannelAdapter, ChannelInfo } from "../channels/types.ts";
+import type { InboundMessage, OutboundMessage, ChannelAdapter, ChannelInfo, StoreImageFn } from "../channels/types.ts";
+import { ImageManager } from "../media/image-manager.ts";
+import { hydrateImages } from "../media/image-prune.ts";
 import { SessionStore } from "../session/store.ts";
 import { Agent } from "./agent.ts";
 import type { TaskNotification } from "./agent.ts";
@@ -90,6 +92,8 @@ export class MainAgent {
   private projectManager: ProjectManager;
   private projectAdapter: ProjectAdapter;
   private subAgentManager: SubAgentManager | null = null;
+  private imageManager: ImageManager | null = null; // null when vision disabled
+  private imageReadCache: Map<string, { data: string; mimeType: string }> = new Map();
   private systemPrompt: string = "";
   private _codexCredPath: string;
   private _copilotCredPath: string;
@@ -128,6 +132,16 @@ export class MainAgent {
     const projectsDir = path.join(this.settings.dataDir, "projects");
     this.projectManager = new ProjectManager(projectsDir);
     this.projectAdapter = deps._projectAdapter ?? new ProjectAdapter();
+
+    // Vision: create ImageManager if enabled
+    const visionConfig = this.settings.vision;
+    if (visionConfig?.enabled !== false) {
+      const mediaDir = path.join(this.settings.dataDir, "media");
+      this.imageManager = new ImageManager(mediaDir, {
+        maxDimensionPx: visionConfig?.maxDimensionPx,
+        maxBytes: visionConfig?.maxImageBytes,
+      });
+    }
   }
 
   /** Start the Main Agent and underlying Task System. */
@@ -319,6 +333,13 @@ export class MainAgent {
     }
 
     await this.agent.stop();
+
+    // Close ImageManager
+    if (this.imageManager) {
+      this.imageManager.close();
+      this.imageManager = null;
+    }
+
     logger.info("main_agent_stopped");
   }
 
@@ -418,6 +439,10 @@ export class MainAgent {
     const now = formatTimestamp(Date.now());
     const channelMeta = `[${now} | channel: ${message.channel.type} | id: ${message.channel.channelId}${message.channel.replyTo ? ` | thread: ${message.channel.replyTo}` : ""}]`;
     const userMsg: Message = { role: "user", content: `${channelMeta}\n${text}` };
+    // Attach images from InboundMessage if present
+    if (message.images?.length) {
+      userMsg.images = message.images;
+    }
     this.sessionMessages.push(userMsg);
     await this.sessionStore.append(userMsg, { channel: message.channel });
 
@@ -479,12 +504,21 @@ export class MainAgent {
     // Check if compact is needed before LLM call
     await this._checkAndCompact();
 
+    // Hydrate images for recent turns (vision support)
+    const messages = this.imageManager
+      ? await hydrateImages(
+          this.sessionMessages,
+          this.settings.vision?.keepLastNTurns ?? 5,
+          this._cachedImageRead.bind(this),
+        )
+      : this.sessionMessages;
+
     const tools = this.toolRegistry.toLLMTools();
 
     const result = await generateText({
       model: this.models.getDefault(),
       system: this.systemPrompt,
-      messages: this.sessionMessages,
+      messages, // Use hydrated messages, NOT this.sessionMessages
       tools: tools.length ? tools : undefined,
       toolChoice: tools.length ? "auto" : undefined,
     });
@@ -586,6 +620,9 @@ export class MainAgent {
               memoryDir: `${this.settings.dataDir}/memory`,
               sessionDir: `${this.settings.dataDir}/main`,
               projectManager: this.projectManager,
+              mediaDir: this.imageManager
+                ? path.join(this.settings.dataDir, "media")
+                : undefined,
             },
           );
           const rawContent = toolResult.success
@@ -600,6 +637,10 @@ export class MainAgent {
             content: `${tsPrefix}\n${rawContent}`,
             toolCallId: tc.id,
           };
+          // Propagate images from tool result (e.g., image_read returns images)
+          if (toolResult.images?.length) {
+            toolMsg.images = toolResult.images;
+          }
           this.sessionMessages.push(toolMsg);
           await this.sessionStore.append(toolMsg);
 
@@ -641,6 +682,21 @@ export class MainAgent {
     this.sessionMessages.push(assistantMsg);
     await this.sessionStore.append(assistantMsg);
     // Done thinking for now. Next event will trigger new thinking.
+  }
+
+  // ── Vision support ──
+
+  /** Cached image reader — avoids re-reading files on every _think() call. */
+  private async _cachedImageRead(id: string): Promise<{ data: string; mimeType: string } | null> {
+    const cached = this.imageReadCache.get(id);
+    if (cached) return cached;
+
+    if (!this.imageManager) return null;
+    const result = await this.imageManager.read(id);
+    if (result) {
+      this.imageReadCache.set(id, result);
+    }
+    return result;
   }
 
   // ── Task spawning ──
@@ -822,6 +878,7 @@ export class MainAgent {
     const maxTokens = contextWindow * threshold;
 
     // Estimate current token usage
+    const keepLastNTurns = this.settings.vision?.keepLastNTurns ?? 5;
     let estimatedTokens: number;
     if (this.lastPromptTokens > 0) {
       // Use lastPromptTokens as base, but also estimate full session
@@ -829,6 +886,7 @@ export class MainAgent {
       const fullEstimate = await this.sessionStore.estimateTokens(
         this.sessionMessages,
         this.tokenCounter,
+        keepLastNTurns,
       );
       // Use the larger of: lastPromptTokens or full estimate
       estimatedTokens = Math.max(this.lastPromptTokens, fullEstimate);
@@ -837,6 +895,7 @@ export class MainAgent {
       estimatedTokens = await this.sessionStore.estimateTokens(
         this.sessionMessages,
         this.tokenCounter,
+        keepLastNTurns,
       );
     }
 
@@ -861,6 +920,7 @@ export class MainAgent {
     this.sessionMessages = await this.sessionStore.load();
     await this._injectMemoryIndex();
     this.lastPromptTokens = 0;
+    this.imageReadCache.clear();
 
     logger.info({ archiveName }, "compact_completed");
 
@@ -1387,5 +1447,18 @@ export class MainAgent {
   /** Expose SubAgentManager for testing. */
   get subAgents(): SubAgentManager | null {
     return this.subAgentManager;
+  }
+
+  /**
+   * Get a StoreImageFn callback for channel adapters.
+   * Returns undefined when vision is disabled (imageManager is null).
+   */
+  getStoreImageFn(): StoreImageFn | undefined {
+    if (!this.imageManager) return undefined;
+    const imgMgr = this.imageManager;
+    return async (buffer: Buffer, mimeType: string, source: string) => {
+      const ref = await imgMgr.store(buffer, mimeType, source);
+      return { id: ref.id, mimeType: ref.mimeType };
+    };
   }
 }

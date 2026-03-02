@@ -128,6 +128,14 @@ export const sessionTools: Tool[] = [
   session_archive_read,
 ];
 
+// Image tools (media)
+import * as imageToolsModule from "./image-tools.ts";
+const image_read = imageToolsModule.image_read;
+
+export { image_read };
+
+export const imageTools: Tool[] = [image_read];
+
 // Background tools (meta tools for background execution)
 import * as backgroundToolsModule from "./background-tools.ts";
 const bg_run = backgroundToolsModule.bg_run;
@@ -211,6 +219,7 @@ export const allTaskTools: Tool[] = [
   ...taskTools,
   ...backgroundTools,
   ..._browserTools,
+  ...imageTools,
   notify,
 ];
 
@@ -231,6 +240,7 @@ export const mainAgentTools: Tool[] = [
   task_list,
   task_replay,
   session_archive_read,
+  image_read,
   spawn_task,
   resume_task,
   spawn_subagent,

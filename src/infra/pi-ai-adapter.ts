@@ -18,6 +18,8 @@ import type {
   Api,
   Context,
   AssistantMessage,
+  TextContent,
+  ImageContent,
   Tool as PiAiTool,
 } from "@mariozechner/pi-ai";
 import type {
@@ -51,13 +53,28 @@ export function toPiAiContext(
         // System messages are folded into systemPrompt, handled below
         break;
 
-      case "user":
-        piMessages.push({
-          role: "user",
-          content: msg.content,
-          timestamp: now,
-        });
+      case "user": {
+        if (msg.images?.length) {
+          // Build content blocks: text + images
+          const blocks: (TextContent | ImageContent)[] = [];
+          if (msg.content) {
+            blocks.push({ type: "text", text: msg.content });
+          }
+          for (const img of msg.images) {
+            if (img.data) {
+              // Hydrated: send as image content block
+              blocks.push({ type: "image", data: img.data, mimeType: img.mimeType });
+            } else {
+              // Non-hydrated: text placeholder
+              blocks.push({ type: "text", text: `[img://${img.id} — use image_read tool to view this image]` });
+            }
+          }
+          piMessages.push({ role: "user", content: blocks, timestamp: now });
+        } else {
+          piMessages.push({ role: "user", content: msg.content, timestamp: now });
+        }
         break;
+      }
 
       case "assistant": {
         const content: AssistantMessage["content"] = [];
@@ -92,11 +109,21 @@ export function toPiAiContext(
       }
 
       case "tool": {
+        const content: (TextContent | ImageContent)[] = [{ type: "text", text: msg.content }];
+        if (msg.images?.length) {
+          for (const img of msg.images) {
+            if (img.data) {
+              content.push({ type: "image", data: img.data, mimeType: img.mimeType });
+            } else {
+              content.push({ type: "text", text: `[img://${img.id} — use image_read tool to view this image]` });
+            }
+          }
+        }
         piMessages.push({
           role: "toolResult",
           toolCallId: msg.toolCallId ?? "",
           toolName: "", // pi-ai doesn't require toolName for context
-          content: [{ type: "text", text: msg.content }],
+          content,
           isError: false,
           timestamp: now,
         });
@@ -218,7 +245,7 @@ export function createPiAiLanguageModel(config: PiAiAdapterConfig): LanguageMode
       provider: config.provider,
       baseUrl: config.baseURL || `https://api.openai.com/v1`,
       reasoning: false,
-      input: ["text"],
+      input: ["text", "image"],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       contextWindow: 128000,
       maxTokens: 4096,
