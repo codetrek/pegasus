@@ -637,6 +637,10 @@ export class MainAgent {
             content: `${tsPrefix}\n${rawContent}`,
             toolCallId: tc.id,
           };
+          // Propagate images from tool result (e.g., image_read returns images)
+          if (toolResult.images?.length) {
+            toolMsg.images = toolResult.images;
+          }
           this.sessionMessages.push(toolMsg);
           await this.sessionStore.append(toolMsg);
 
