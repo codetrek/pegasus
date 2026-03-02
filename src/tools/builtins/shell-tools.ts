@@ -56,11 +56,16 @@ export const shell_exec: Tool = {
 
       if (raceResult.kind === "timeout") {
         proc.kill();
-        // Drain stdout/stderr to prevent FD leaks from unconsumed pipes
+        // Drain stdout/stderr to prevent FD leaks from unconsumed pipes.
+        // Use a short timeout to avoid blocking on processes that don't exit quickly after kill.
+        const drainTimeout = new Promise((resolve) => setTimeout(resolve, 1000));
         try {
-          await Promise.all([
-            new Response(proc.stdout).text(),
-            new Response(proc.stderr).text(),
+          await Promise.race([
+            Promise.all([
+              new Response(proc.stdout).text(),
+              new Response(proc.stderr).text(),
+            ]),
+            drainTimeout,
           ]);
         } catch { /* ignore drain errors on killed process */ }
         const durationMs = Date.now() - startedAt;
