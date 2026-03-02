@@ -23,6 +23,7 @@ import type { Persona } from "../identity/persona.ts";
 import type { InboundMessage } from "../channels/types.ts";
 import { parseProjectFile } from "../projects/loader.ts";
 import { ProxyLanguageModel } from "../projects/proxy-language-model.ts";
+import { spawn_task } from "../tools/builtins/index.ts";
 
 // ── Types ────────────────────────────────────────────
 
@@ -263,11 +264,12 @@ async function initSubAgent(config: SubAgentConfig): Promise<void> {
   workerChannelType = channelType;
   workerChannelId = channelId;
 
-  // 6. Create Agent
+  // 6. Create Agent (with spawn_task so SubAgent can orchestrate AITasks)
   agent = new Agent({
     model: proxyModel,
     persona,
     settings: subAgentSettings,
+    additionalTools: [spawn_task],
   });
 
   // 7. Register notify callback → forward to main thread as InboundMessage

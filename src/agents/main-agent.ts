@@ -703,7 +703,9 @@ export class MainAgent {
       return;
     }
 
-    const subagentId = this.subAgentManager.spawn(description, input);
+    // Collect memory snapshot for the SubAgent
+    const memorySnapshot = await this._getMemorySnapshot();
+    const subagentId = this.subAgentManager.spawn(description, input, memorySnapshot);
 
     const toolMsg: Message = {
       role: "tool",
@@ -1197,6 +1199,59 @@ export class MainAgent {
   }
 
   // ── Memory index injection ──
+
+  /**
+   * Build a text snapshot of the memory index (facts + episode summaries)
+   * to pass to SubAgents so they have context from long-term memory.
+   * Returns undefined if memory is empty or unavailable.
+   */
+  private async _getMemorySnapshot(): Promise<string | undefined> {
+    try {
+      const memoryDir = path.join(this.settings.dataDir, "memory");
+      const listResult = await this.toolExecutor.execute(
+        "memory_list",
+        {},
+        { taskId: "main-agent", memoryDir },
+      );
+      if (!listResult.success || !Array.isArray(listResult.result) || listResult.result.length === 0) {
+        return undefined;
+      }
+
+      const entries = listResult.result as Array<{ path: string; summary: string; size: number }>;
+      const lines: string[] = ["[Memory snapshot from MainAgent]", ""];
+
+      // Facts: load full content
+      for (const e of entries.filter(e => e.path.startsWith("facts/"))) {
+        try {
+          const readResult = await this.toolExecutor.execute(
+            "memory_read",
+            { path: e.path },
+            { taskId: "main-agent", memoryDir },
+          );
+          if (readResult.success && typeof readResult.result === "string") {
+            lines.push(`### ${e.path}`, "", readResult.result as string, "");
+          }
+        } catch {
+          // Skip unreadable facts
+        }
+      }
+
+      // Episodes: summary only
+      const episodes = entries.filter(e => e.path.startsWith("episodes/"));
+      if (episodes.length > 0) {
+        lines.push("### Episodes", "");
+        for (const e of episodes) {
+          lines.push(`- ${e.path}: ${e.summary}`);
+        }
+        lines.push("");
+      }
+
+      const snapshot = lines.join("\n").trim();
+      return snapshot.length > 0 ? snapshot : undefined;
+    } catch {
+      return undefined;
+    }
+  }
 
   /**
    * Inject available memory files into the session so the LLM knows what
