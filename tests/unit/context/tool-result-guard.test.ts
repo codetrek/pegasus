@@ -35,6 +35,12 @@ describe("calculateMaxToolResultChars", () => {
     // 2_000_000 * 0.25 * 3.5 = 1_750_000 → capped at 400_000
     expect(result).toBe(HARD_MAX_TOOL_RESULT_CHARS);
   });
+
+  it("respects custom maxToolResultShare", () => {
+    // 128k * 0.1 * 3.5 = 44,800
+    const result = calculateMaxToolResultChars(128_000, 0.1);
+    expect(result).toBe(Math.floor(128_000 * 0.1 * 3.5));
+  });
 });
 
 // ── truncateToolResult ──
@@ -49,7 +55,8 @@ describe("truncateToolResult", () => {
   it("truncates long text with notice appended", () => {
     const text = "a".repeat(5000);
     const result = truncateToolResult(text, 3000);
-    expect(result.length).toBeLessThanOrEqual(3000 + TRUNCATION_NOTICE.length + 1);
+    // Body + notice should fit within maxChars
+    expect(result.length).toBeLessThanOrEqual(3000);
     expect(result).toContain(TRUNCATION_NOTICE);
   });
 

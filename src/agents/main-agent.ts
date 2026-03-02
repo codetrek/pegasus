@@ -703,7 +703,7 @@ export class MainAgent {
             modelId: this.models.getDefaultModelId(),
             configContextWindow: this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
           });
-          const maxToolChars = calculateMaxToolResultChars(toolBudget.contextWindow);
+          const maxToolChars = calculateMaxToolResultChars(toolBudget.contextWindow, this.settings.context?.maxToolResultShare);
           const safeContent = rawContent.length > maxToolChars
             ? truncateToolResult(rawContent, maxToolChars)
             : rawContent;

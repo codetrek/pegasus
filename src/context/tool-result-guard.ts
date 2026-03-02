@@ -28,10 +28,10 @@ export const TRUNCATION_NOTICE =
  */
 export function calculateMaxToolResultChars(
   contextWindowTokens: number,
+  maxToolResultShare?: number,
 ): number {
-  const raw = Math.floor(
-    contextWindowTokens * MAX_TOOL_RESULT_CONTEXT_SHARE * CHARS_PER_TOKEN,
-  );
+  const share = maxToolResultShare ?? MAX_TOOL_RESULT_CONTEXT_SHARE;
+  const raw = Math.floor(contextWindowTokens * share * CHARS_PER_TOKEN);
   return Math.min(raw, HARD_MAX_TOOL_RESULT_CHARS);
 }
 
@@ -45,14 +45,18 @@ export function calculateMaxToolResultChars(
 export function truncateToolResult(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;
 
-  // Ensure we keep at least the minimum
-  const keepChars = Math.max(maxChars, MIN_TOOL_RESULT_KEEP_CHARS);
+  // Subtract notice length so body + notice fits within maxChars,
+  // but always keep at least MIN_TOOL_RESULT_KEEP_CHARS of body.
+  const bodyBudget = Math.max(
+    MIN_TOOL_RESULT_KEEP_CHARS,
+    maxChars - TRUNCATION_NOTICE.length,
+  );
 
-  // Try to find a newline boundary within the keep range
-  let cutPoint = text.lastIndexOf("\n", keepChars);
+  // Try to find a newline boundary within the body budget
+  let cutPoint = text.lastIndexOf("\n", bodyBudget);
   if (cutPoint <= 0) {
-    // No newline found or at position 0 — just use keepChars
-    cutPoint = keepChars;
+    // No newline found or at position 0 — just use bodyBudget
+    cutPoint = bodyBudget;
   }
 
   return text.slice(0, cutPoint) + TRUNCATION_NOTICE;
