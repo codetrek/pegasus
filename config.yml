@@ -113,6 +113,9 @@ tools:
   # Relative paths are resolved against dataDir
   allowedPaths: ${TOOLS_ALLOWED_PATHS:-[]}
 
+  # Max file size for grep_files JS fallback (rg has no limit)
+  maxFileSize: ${TOOLS_MAX_FILE_SIZE:-52428800}  # 50MB
+
   # Web search configuration (optional)
   webSearch:
     provider: ${WEB_SEARCH_PROVIDER:-tavily}  # tavily (more providers planned)

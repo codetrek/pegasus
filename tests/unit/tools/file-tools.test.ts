@@ -3,8 +3,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { read_file, write_file, list_files, edit_file, grep_files, glob_files, _resetRgCache, isRgAvailable } from "../../../src/tools/builtins/file-tools.ts";
+import { read_file, write_file, list_files, edit_file, grep_files, glob_files, _resetRgCache, isRgAvailable, getMaxFileSize } from "../../../src/tools/builtins/file-tools.ts";
 import { rm, mkdir } from "node:fs/promises";
+import { SettingsSchema, setSettings, resetSettings } from "../../../src/infra/config.ts";
 
 const testDir = "/tmp/pegasus-test-files";
 
@@ -971,12 +972,16 @@ describe("file tools", () => {
       expect(output).not.toContain("dist");
     });
 
-    it("should skip files larger than 1MB", async () => {
+    it("should skip files larger than configured maxFileSize", async () => {
       const context = { taskId: "test-task-id" };
+      // Set a small maxFileSize for testing (500KB)
+      const settings = SettingsSchema.parse({ dataDir: "/tmp/test", authDir: "/tmp/test-auth", tools: { maxFileSize: 500_000 } });
+      setSettings(settings);
+
       const largeFile = `${testDir}/large.txt`;
       const smallFile = `${testDir}/small.txt`;
-      // Create a file > 1MB
-      const bigContent = "findme_target\n" + "x".repeat(1_100_000);
+      // Create a file > 500KB (the configured limit)
+      const bigContent = "findme_target\n" + "x".repeat(600_000);
       await Bun.write(largeFile, bigContent);
       await Bun.write(smallFile, "findme_target here");
 
@@ -990,6 +995,8 @@ describe("file tools", () => {
       // Should find in small file, skip large file
       expect(output).toContain("small.txt");
       expect(output).not.toContain("large.txt");
+
+      resetSettings();
     }, 10000);
 
     it("should respect .gitignore patterns", async () => {
@@ -1363,7 +1370,11 @@ describe("file tools", () => {
 
     it("should skip large files in multiline mode", async () => {
       const context = { taskId: "test-task-id" };
-      const bigContent = "ml_target\n" + "x".repeat(1_100_000);
+      // Set a small maxFileSize for testing (500KB)
+      const settings = SettingsSchema.parse({ dataDir: "/tmp/test", authDir: "/tmp/test-auth", tools: { maxFileSize: 500_000 } });
+      setSettings(settings);
+
+      const bigContent = "ml_target\n" + "x".repeat(600_000);
       await Bun.write(`${testDir}/ml-large.txt`, bigContent);
       await Bun.write(`${testDir}/ml-small.txt`, "ml_target\nhere");
 
@@ -1377,6 +1388,8 @@ describe("file tools", () => {
       const output = result.result as string;
       expect(output).toContain("ml-small.txt");
       expect(output).not.toContain("ml-large.txt");
+
+      resetSettings();
     }, 10000);
 
     it("should truncate long multiline matches at 200 chars", async () => {
@@ -1794,5 +1807,104 @@ describe("file tools", () => {
       expect(output).toContain("fb-ctx-a.txt ===");
       expect(output).toContain("fb-ctx-b.txt ===");
     });
+  });
+
+  describe("grep_files JS fallback — streaming and maxFileSize", () => {
+    let originalRgState: boolean;
+
+    beforeEach(() => {
+      originalRgState = isRgAvailable();
+      _resetRgCache(false);
+    });
+
+    afterEach(() => {
+      _resetRgCache(originalRgState);
+      resetSettings();
+    });
+
+    it("getMaxFileSize returns 50MB default when settings not initialized", () => {
+      resetSettings();
+      expect(getMaxFileSize()).toBe(52_428_800);
+    });
+
+    it("getMaxFileSize returns configured value from settings", () => {
+      const settings = SettingsSchema.parse({ dataDir: "/tmp/test", authDir: "/tmp/test-auth", tools: { maxFileSize: 10_000_000 } });
+      setSettings(settings);
+      expect(getMaxFileSize()).toBe(10_000_000);
+    });
+
+    it("should stream and find matches in files larger than 1MB", async () => {
+      const context = { taskId: "test-task-id" };
+      // Create a ~2MB file with a match near the end
+      const padding = "x".repeat(999) + "\n"; // 1000 bytes per line
+      const lineCount = 2000; // ~2MB total
+      let content = "";
+      for (let i = 0; i < lineCount; i++) {
+        content += padding;
+      }
+      content += "streaming_find_me_target\n";
+      await Bun.write(`${testDir}/streaming-large.txt`, content);
+
+      const result = await grep_files.execute({
+        pattern: "streaming_find_me_target",
+        path: testDir,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      // The ~2MB file should be searched (under 50MB default) and the match found
+      expect(output).toContain("streaming-large.txt");
+      expect(output).toContain("streaming_find_me_target");
+    }, 15000);
+
+    it("should stream with context_lines on files larger than 1MB", async () => {
+      const context = { taskId: "test-task-id" };
+      // Create a ~1.5MB file with match in the middle
+      const lines: string[] = [];
+      for (let i = 0; i < 1500; i++) {
+        lines.push("x".repeat(999));
+      }
+      lines.push("ctx_streaming_before");
+      lines.push("ctx_streaming_MATCH");
+      lines.push("ctx_streaming_after");
+      for (let i = 0; i < 100; i++) {
+        lines.push("x".repeat(999));
+      }
+      await Bun.write(`${testDir}/streaming-ctx.txt`, lines.join("\n"));
+
+      const result = await grep_files.execute({
+        pattern: "ctx_streaming_MATCH",
+        path: `${testDir}/streaming-ctx.txt`,
+        context_lines: 1,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("ctx_streaming_MATCH");
+      expect(output).toContain("ctx_streaming_before");
+      expect(output).toContain("ctx_streaming_after");
+    }, 15000);
+
+    it("should respect configured maxFileSize and skip files exceeding it", async () => {
+      const context = { taskId: "test-task-id" };
+      // Set maxFileSize to 100KB
+      const settings = SettingsSchema.parse({ dataDir: "/tmp/test", authDir: "/tmp/test-auth", tools: { maxFileSize: 100_000 } });
+      setSettings(settings);
+
+      // Create a file > 100KB
+      const bigContent = "maxsize_target\n" + "x".repeat(200_000);
+      await Bun.write(`${testDir}/over-limit.txt`, bigContent);
+      await Bun.write(`${testDir}/under-limit.txt`, "maxsize_target here");
+
+      const result = await grep_files.execute({
+        pattern: "maxsize_target",
+        path: testDir,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("under-limit.txt");
+      expect(output).not.toContain("over-limit.txt");
+    }, 10000);
   });
 });

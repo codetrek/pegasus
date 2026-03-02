@@ -9,6 +9,7 @@ import { ToolPermissionError } from "../errors.ts";
 import path from "node:path";
 import { readdir, access, stat as fsStat } from "node:fs/promises";
 import ignore from "ignore";
+import { getSettings } from "../../infra/config.ts";
 
 // ── rg availability check (cached at module load) ──
 
@@ -468,7 +469,14 @@ const SKIP_DIRS = new Set([
   ".next", "__pycache__", ".venv", "vendor", "coverage", ".nyc_output",
 ]);
 
-const MAX_FILE_SIZE = 1_048_576; // 1MB
+/** Get configured max file size for JS fallback grep. Falls back to 50MB if settings not initialized. */
+export function getMaxFileSize(): number {
+  try {
+    return getSettings().tools.maxFileSize;
+  } catch {
+    return 52_428_800; // 50MB fallback if settings not initialized
+  }
+}
 
 /** Check if a buffer looks like binary (contains null bytes in first 8KB). Same heuristic as git/grep/rg. */
 function isBinaryBuffer(buffer: Uint8Array): boolean {
@@ -852,25 +860,80 @@ export const grep_files: Tool = {
         return ranges;
       };
 
-      // Search a single file (line-by-line mode)
+      // Search a single file (line-by-line mode) using streaming
       const searchFileLineByLine = async (filePath: string): Promise<boolean> => {
         try {
-          // Skip large files
+          // Skip files exceeding configured max size
           const st = await fsStat(filePath);
-          if (st.size > MAX_FILE_SIZE) return false;
+          if (st.size > getMaxFileSize()) return false;
 
           // Skip binary files: read first 8KB and check for null bytes
           const file = Bun.file(filePath);
           const head = new Uint8Array(await file.slice(0, 8192).arrayBuffer());
           if (isBinaryBuffer(head)) return false;
 
-          const fileContent = await file.text();
-          const lines = fileContent.split("\n");
+          // Stream file line by line using Bun's reader
+          const stream = file.stream();
+          const reader = stream.getReader();
+          const decoder = new TextDecoder();
 
+          let lineBuffer = "";
+          let lineIndex = 0;
+
+          // With context: must store all lines + match indices for context building
+          // Without context: accumulate match results directly during streaming
+          const needContext = context_lines !== undefined && context_lines > 0;
           const matchLineIndices: number[] = [];
-          for (let i = 0; i < lines.length; i++) {
-            if (lineRegex.test(lines[i]!)) {
-              matchLineIndices.push(i);
+          const allLines: string[] = []; // Only populated when needContext
+          // Without context: store matches inline
+          const inlineMatches: Array<{ line: string; lineNumber: number; match: string }> = [];
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+              // Process remaining buffer as last line
+              if (lineBuffer) {
+                if (lineRegex.test(lineBuffer)) {
+                  matchLineIndices.push(lineIndex);
+                  if (!needContext) {
+                    const m = lineBuffer.match(lineRegex);
+                    inlineMatches.push({
+                      line: lineBuffer,
+                      lineNumber: lineIndex + 1,
+                      match: m ? m[0] : "",
+                    });
+                  }
+                }
+                if (needContext) {
+                  allLines.push(lineBuffer);
+                }
+                lineIndex++;
+              }
+              break;
+            }
+
+            lineBuffer += decoder.decode(value, { stream: true });
+
+            // Split buffer by newlines
+            const lines = lineBuffer.split("\n");
+            lineBuffer = lines.pop()!; // Last element is incomplete line
+
+            for (const line of lines) {
+              if (lineRegex.test(line)) {
+                matchLineIndices.push(lineIndex);
+                if (!needContext) {
+                  const m = line.match(lineRegex);
+                  inlineMatches.push({
+                    line,
+                    lineNumber: lineIndex + 1,
+                    match: m ? m[0] : "",
+                  });
+                }
+              }
+              if (needContext) {
+                allLines.push(line);
+              }
+              lineIndex++;
             }
           }
 
@@ -894,8 +957,8 @@ export const grep_files: Tool = {
           }
 
           // output_mode === "content"
-          if (context_lines !== undefined && context_lines > 0) {
-            const ranges = buildContextRanges(matchLineIndices, lines.length, context_lines);
+          if (needContext) {
+            const ranges = buildContextRanges(matchLineIndices, allLines.length, context_lines!);
             const matchSet = new Set(matchLineIndices);
 
             for (const [rangeStart, rangeEnd] of ranges) {
@@ -905,7 +968,7 @@ export const grep_files: Tool = {
               for (let j = rangeStart; j <= rangeEnd; j++) {
                 contextArr.push({
                   lineNumber: j + 1,
-                  line: lines[j]!,
+                  line: allLines[j]!,
                   ...(matchSet.has(j) ? { isMatch: true } : {}),
                 });
               }
@@ -916,14 +979,13 @@ export const grep_files: Tool = {
               });
             }
           } else {
-            for (const idx of matchLineIndices) {
+            for (const im of inlineMatches) {
               if (contentMatches.length >= max_results) return true;
-              const m = lines[idx]!.match(lineRegex);
               contentMatches.push({
                 file: filePath,
-                line: lines[idx]!,
-                lineNumber: idx + 1,
-                match: m ? m[0] : "",
+                line: im.line,
+                lineNumber: im.lineNumber,
+                match: im.match,
               });
             }
           }
@@ -937,9 +999,9 @@ export const grep_files: Tool = {
       // Search a single file (multiline mode)
       const searchFileMultiline = async (filePath: string): Promise<boolean> => {
         try {
-          // Skip large files
+          // Skip files exceeding configured max size
           const st = await fsStat(filePath);
-          if (st.size > MAX_FILE_SIZE) return false;
+          if (st.size > getMaxFileSize()) return false;
 
           // Skip binary files: read first 8KB and check for null bytes
           const file = Bun.file(filePath);

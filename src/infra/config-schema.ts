@@ -112,6 +112,7 @@ export const BrowserConfigSchema = z.object({
 export const ToolsConfigSchema = z.object({
   timeout: z.coerce.number().int().positive().default(30), // seconds, tool execution timeout
   allowedPaths: z.preprocess(coerceStringArray, z.array(z.string()).default([])),
+  maxFileSize: z.coerce.number().int().positive().default(52_428_800), // 50MB — max file size for grep_files JS fallback (rg has no limit)
   webSearch: z
     .object({
       provider: z

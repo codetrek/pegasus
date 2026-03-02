@@ -5,6 +5,7 @@ import {
   TiersConfigSchema,
   MemoryConfigSchema,
   AgentConfigSchema,
+  ToolsConfigSchema,
   getSettings,
   setSettings,
   resetSettings,
@@ -95,6 +96,23 @@ describe("Config schemas", () => {
     expect(() =>
       SettingsSchema.parse({ dataDir: "/tmp/pegasus-test", authDir: "/tmp/pegasus-test-auth", tools: { allowedPaths: "not-json" } }),
     ).toThrow();
+  });
+});
+
+describe("ToolsConfigSchema", () => {
+  test("applies maxFileSize default of 50MB", () => {
+    const config = ToolsConfigSchema.parse({});
+    expect(config.maxFileSize).toBe(52_428_800);
+  });
+
+  test("accepts custom maxFileSize", () => {
+    const config = ToolsConfigSchema.parse({ maxFileSize: 10_000_000 });
+    expect(config.maxFileSize).toBe(10_000_000);
+  });
+
+  test("coerces string maxFileSize", () => {
+    const config = ToolsConfigSchema.parse({ maxFileSize: "5242880" });
+    expect(config.maxFileSize).toBe(5_242_880);
   });
 });
 
