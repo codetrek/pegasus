@@ -6,6 +6,7 @@ import { z } from "zod";
 import path from "node:path";
 import type { LanguageModel } from "../infra/llm-types.ts";
 import type { BackgroundTaskManager } from "./background.ts";
+import type { ImageAttachment } from "../media/types.ts";
 
 // ── ToolCategory ─────────────────────────────────────
 
@@ -19,6 +20,7 @@ export enum ToolCategory {
   DATA = "data",
   MEMORY = "memory", // M2: long-term memory
   BROWSER = "browser", // Browser automation (Playwright)
+  MEDIA = "media", // V1: image/vision tools
   CODE = "code", // Future extension
   MCP = "mcp", // Future extension
   CUSTOM = "custom", // Future extension
@@ -49,6 +51,7 @@ export interface ToolResult {
   success: boolean;
   result?: unknown;
   error?: string;
+  images?: ImageAttachment[];
   startedAt: number;
   completedAt?: number;
   durationMs?: number;
@@ -69,6 +72,7 @@ export interface ToolContext {
   browserManager?: unknown; // BrowserManager — used by browser tools (loosely typed to avoid circular imports)
   extractModel?: LanguageModel; // Small model for content extraction (web_fetch)
   backgroundManager?: BackgroundTaskManager; // Background task execution manager (bg_run/bg_output/bg_stop)
+  mediaDir?: string; // Directory for media storage (images, etc.)
 }
 
 // ── ToolStats ─────────────────────────────────
