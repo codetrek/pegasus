@@ -69,6 +69,7 @@ export interface ToolContext {
   memoryDir?: string;
   sessionDir?: string;
   tasksDir?: string;
+  taskRegistry?: unknown; // TaskRegistry — used by task_status tool (loosely typed to avoid circular imports)
   projectManager?: unknown; // ProjectManager — used by project tools (loosely typed to avoid circular imports)
   browserManager?: unknown; // BrowserManager — used by browser tools (loosely typed to avoid circular imports)
   extractModel?: LanguageModel; // Small model for content extraction (web_fetch)

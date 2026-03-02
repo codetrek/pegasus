@@ -21,7 +21,7 @@ function extToMime(ext: string): string {
 export const image_read: Tool = {
   name: "image_read",
   description:
-    "Read a previously seen image by its ID. Returns the image for visual analysis. Use when you see [img://ID] references in conversation history.",
+    "Read a previously seen image by its ID. ONLY use this when you see an explicit [img://ID] text placeholder in the conversation — these appear for older images outside the recent window. If the image is already displayed inline (you can see it directly), do NOT call this tool. The ID must be copied exactly from the [img://ID] reference.",
   category: ToolCategory.MEDIA,
   parameters: z.object({
     id: z.string().describe("Image ID (12-character hex string, e.g. 'a1b2c3d4e5f6')"),

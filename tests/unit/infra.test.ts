@@ -58,7 +58,7 @@ describe("Config schemas", () => {
     const config = AgentConfigSchema.parse({});
     expect(config.maxActiveTasks).toBe(5);
     expect(config.maxConcurrentTools).toBe(3);
-    expect(config.maxCognitiveIterations).toBe(10);
+    expect(config.maxCognitiveIterations).toBe(100);
     expect(config.heartbeatInterval).toBe(60);
     expect(config.taskTimeout).toBe(120);
   });
@@ -231,7 +231,7 @@ describe("getSettings / setSettings", () => {
     expect(s.llm.timeout).toBe(120);
     expect(s.agent.maxActiveTasks).toBe(5);
     expect(s.agent.maxConcurrentTools).toBe(3);
-    expect(s.agent.maxCognitiveIterations).toBe(10);
+    expect(s.agent.maxCognitiveIterations).toBe(100);
     expect(s.agent.heartbeatInterval).toBe(60);
   });
 });

@@ -483,14 +483,19 @@ export class Agent {
         "max_cognitive_iterations_exceeded",
       );
       task.context.error = `Max cognitive iterations exceeded (${this.settings.agent.maxCognitiveIterations})`;
-      await this.eventBus.emit(
-        createEvent(EventType.TASK_FAILED, {
-          source: "agent",
-          taskId: task.taskId,
-          payload: { error: task.context.error },
-          parentEventId: trigger.id,
-        }),
-      );
+      // Directly transition + dispatch (same pattern as _spawn catch handler)
+      const failEvent = createEvent(EventType.TASK_FAILED, {
+        source: "agent",
+        taskId: task.taskId,
+        payload: { error: task.context.error },
+        parentEventId: trigger.id,
+      });
+      try {
+        task.transition(failEvent);
+        await this._dispatchCognitiveStage(task, TaskState.FAILED, failEvent);
+      } catch (transitionErr) {
+        logger.error({ taskId: task.taskId, error: transitionErr }, "failed_to_transition_task");
+      }
       return;
     }
     // Fetch memory index ONLY on first injection (not re-injected on resume)
@@ -612,7 +617,7 @@ export class Agent {
         const toolResult = await this.toolExecutor.execute(
           toolName,
           toolParams,
-          { taskId: task.context.id, tasksDir: this.storePaths.tasks, ...(this.storePaths.memory && { memoryDir: this.storePaths.memory }), mediaDir: `${this.settings.dataDir}/media`, extractModel: this.extractModel ?? undefined, backgroundManager: this.backgroundTaskManager, browserManager: this.browserManager ?? undefined },
+          { taskId: task.context.id, tasksDir: this.storePaths.tasks, taskRegistry: this.taskRegistry, ...(this.storePaths.memory && { memoryDir: this.storePaths.memory }), mediaDir: `${this.settings.dataDir}/media`, extractModel: this.extractModel ?? undefined, backgroundManager: this.backgroundTaskManager, browserManager: this.browserManager ?? undefined },
         );
 
         // Intercept spawn_task: create real task, wait for completion, return result

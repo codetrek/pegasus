@@ -626,6 +626,7 @@ export class MainAgent {
               memoryDir: this.mainStorePaths.memory!,
               sessionDir: this.mainStorePaths.session,
               tasksDir: this.mainStorePaths.tasks,
+              taskRegistry: this.agent.taskRegistry,
               projectManager: this.projectManager,
               mediaDir: this.imageManager
                 ? path.join(this.settings.dataDir, "media")
