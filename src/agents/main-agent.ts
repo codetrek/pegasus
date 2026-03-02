@@ -101,8 +101,10 @@ export class MainAgent {
   private _codexCredPath: string;
   private _copilotCredPath: string;
   private _mcpAuthDir: string;
-  private _tickTimer: ReturnType<typeof setInterval> | null = null;
-  private _tickIntervalMs = 10_000; // 10 seconds
+  private _tickTimer: ReturnType<typeof setTimeout> | null = null;
+  private _tickIntervalMs = 10_000; // starts at 10s, doubles each tick, max 60s
+  private _tickMaxIntervalMs = 60_000;
+  private _tickCurrentInterval = 10_000;
 
   constructor(deps: MainAgentDeps) {
     this.models = deps.models;
@@ -753,6 +755,7 @@ export class MainAgent {
       await this.sessionStore.append(toolMsg);
 
       logger.info({ taskId: task_id, input }, "task_resumed");
+      this._startTick();
       return false; // No follow-up needed — notification arrives via onNotify
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
@@ -837,6 +840,7 @@ export class MainAgent {
       await this.sessionStore.append(toolMsg);
 
       logger.info({ subagentId: subagent_id }, "subagent_resumed");
+      this._startTick();
       return false; // No follow-up needed — SubAgent notifications arrive via send()
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
@@ -887,20 +891,28 @@ export class MainAgent {
 
   /**
    * Start periodic tick when tasks/subagents are active.
+   * Uses exponential backoff: 10s → 20s → 40s → 60s (capped).
    * Injects a status summary into the session so the LLM can decide
    * whether to update the user on progress. Prevents silent waiting.
    */
   private _startTick(): void {
     if (this._tickTimer) return; // Already ticking
-    this._tickTimer = setInterval(() => this._onTick(), this._tickIntervalMs);
-    logger.info({ intervalMs: this._tickIntervalMs }, "tick_started");
+    this._tickCurrentInterval = this._tickIntervalMs; // Reset to initial interval
+    this._scheduleTick();
+    logger.info({ intervalMs: this._tickCurrentInterval }, "tick_started");
+  }
+
+  /** Schedule the next tick with current interval. */
+  private _scheduleTick(): void {
+    this._tickTimer = setTimeout(() => this._onTick(), this._tickCurrentInterval);
   }
 
   /** Stop the tick timer when no active work remains. */
   private _stopTick(): void {
     if (!this._tickTimer) return;
-    clearInterval(this._tickTimer);
+    clearTimeout(this._tickTimer);
     this._tickTimer = null;
+    this._tickCurrentInterval = this._tickIntervalMs; // Reset for next start
     logger.info("tick_stopped");
   }
 
@@ -915,11 +927,19 @@ export class MainAgent {
 
   /** Tick handler — inject status summary and trigger a think cycle. */
   private _onTick(): void {
+    this._tickTimer = null; // Timer fired, clear reference
+
     const activeTasks = this.agent.taskRegistry.activeCount;
     const activeSubAgents = this.subAgentManager?.activeCount ?? 0;
 
     if (activeTasks === 0 && activeSubAgents === 0) {
       this._stopTick();
+      return;
+    }
+
+    // Skip if queue already has pending work (avoid stale status before real results)
+    if (this.queue.length > 0) {
+      this._scheduleTick();
       return;
     }
 
@@ -938,6 +958,13 @@ export class MainAgent {
       this.queue.push({ kind: "think", channel: lastChannel });
       this._processQueue();
     }
+
+    // Exponential backoff: double interval, cap at max
+    this._tickCurrentInterval = Math.min(
+      this._tickCurrentInterval * 2,
+      this._tickMaxIntervalMs,
+    );
+    this._scheduleTick();
   }
 
   // ── Compact ──
