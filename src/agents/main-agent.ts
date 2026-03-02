@@ -262,15 +262,17 @@ export class MainAgent {
       if (channelType === "subagent" && this.subAgentManager) {
         const entry = this.subAgentManager.get(channelId);
         if (entry && entry.status === "active") {
-          // Worker closed while still active — mark as completed.
-          // complete() calls stopWorker which is a no-op since Worker already closed.
-          this.subAgentManager.complete(channelId).catch((err) => {
+          // Worker closed while still active and not marked done — this is a crash.
+          // Normal completion path: Worker sends completion notify → _handleMessage
+          // calls markDone() → Worker auto-shuts down → this handler sees non-active status.
+          this.subAgentManager.fail(channelId).catch((err) => {
             logger.warn(
               { subagentId: channelId, error: errorToString(err) },
-              "subagent_auto_complete_failed",
+              "subagent_crash_fail_failed",
             );
           });
         }
+        // If already completed/failed via markDone(), the close is expected — no action.
       }
     });
 
@@ -391,6 +393,20 @@ export class MainAgent {
     this.lastChannel = message.channel;
 
     const text = sanitizeForPrompt(message.text.trim());
+
+    // Detect SubAgent completion/failure from tagged notify messages.
+    // agent-worker.ts tags the final notify with metadata.subagentDone
+    // before auto-shutting down. We call markDone() here so the
+    // onWorkerClose handler knows this is a normal exit (not a crash).
+    if (
+      message.channel.type === "subagent" &&
+      this.subAgentManager &&
+      message.metadata?.subagentDone
+    ) {
+      const channelId = message.channel.channelId;
+      const status = message.metadata.subagentDone as "completed" | "failed";
+      this.subAgentManager.markDone(channelId, status);
+    }
 
     // Check for /skill command
     if (text.startsWith("/")) {

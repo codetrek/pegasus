@@ -264,6 +264,72 @@ describe("Agent Worker — subagent mode", () => {
     expect(msg.message).toContain("Settings not initialized");
   }, 10_000);
 
+  it("should prepend memorySnapshot to input when provided", async () => {
+    worker = new Worker(WORKER_URL);
+
+    const sessionPath = `${TEST_DIR}/session-memory`;
+    mkdirSync(sessionPath, { recursive: true });
+
+    const readyPromise = waitForMessage(worker, "ready");
+    const llmRequestPromise = waitForMessage(worker, "llm_request");
+
+    worker.postMessage({
+      type: "init",
+      mode: "subagent",
+      config: {
+        input: "Do the analysis",
+        sessionPath,
+        channelType: "subagent",
+        channelId: "sa_mem_test",
+        memorySnapshot: "User prefers concise responses.",
+        settings: makeTestSettings(sessionPath),
+      },
+    });
+
+    await readyPromise;
+
+    // The LLM request should contain the memory snapshot prepended to input
+    const llmMsg = await llmRequestPromise;
+    const options = llmMsg.options as { messages: Array<{ role: string; content: string }> };
+    const userMessages = options.messages.filter((m: { role: string }) => m.role === "user");
+
+    // The submitted input should contain both the memory snapshot and the original input
+    const combinedText = userMessages.map((m: { content: string }) => m.content).join("\n");
+    expect(combinedText).toContain("[Available Memory]");
+    expect(combinedText).toContain("User prefers concise responses.");
+    expect(combinedText).toContain("Do the analysis");
+  }, 15_000);
+
+  it("should NOT include memorySnapshot prefix when not provided", async () => {
+    worker = new Worker(WORKER_URL);
+
+    const sessionPath = `${TEST_DIR}/session-no-memory`;
+    mkdirSync(sessionPath, { recursive: true });
+
+    const readyPromise = waitForMessage(worker, "ready");
+    const llmRequestPromise = waitForMessage(worker, "llm_request");
+
+    worker.postMessage({
+      type: "init",
+      mode: "subagent",
+      config: {
+        input: "Simple task",
+        sessionPath,
+        channelType: "subagent",
+        channelId: "sa_nomem_test",
+        settings: makeTestSettings(sessionPath),
+      },
+    });
+
+    await readyPromise;
+
+    const llmMsg = await llmRequestPromise;
+    const options = llmMsg.options as { messages: Array<{ role: string; content: string }> };
+    const allContent = options.messages.map((m: { content: string }) => m.content).join("\n");
+    expect(allContent).not.toContain("[Available Memory]");
+    expect(allContent).toContain("Simple task");
+  }, 15_000);
+
   it("should handle shutdown gracefully in subagent mode", async () => {
     worker = new Worker(WORKER_URL);
 
