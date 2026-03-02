@@ -1,235 +1,157 @@
 /**
- * ProjectAdapter — ChannelAdapter that multiplexes multiple Worker threads.
+ * ProjectAdapter — ChannelAdapter that delegates Worker management to WorkerAdapter.
  *
- * Each Project runs in a Bun Worker thread. The ProjectAdapter manages
- * Worker lifecycle and routes messages by channelId (projectId).
- * LLM requests from Workers are proxied back to the main thread via
- * ModelRegistry.
+ * This is a thin wrapper around WorkerAdapter that:
+ *   - Implements the ChannelAdapter interface (same public API as before)
+ *   - Delegates Worker lifecycle to WorkerAdapter internally
+ *   - Maps project-specific calls (startProject/stopProject) to WorkerAdapter's generic API
+ *   - Tracks project IDs locally for has() and activeCount
+ *
+ * Why delegate instead of managing Workers directly?
+ *   WorkerAdapter centralizes Worker lifecycle, LLM proxying, and error handling.
+ *   Both ProjectAdapter and SubAgentManager share the same WorkerAdapter instance,
+ *   so LLM proxy logic and shutdown coordination live in one place.
  */
 import { getLogger } from "../infra/logger.ts";
-import { errorToString } from "../infra/errors.ts";
-import type { ModelRegistry } from "../infra/model-registry.ts";
+import { getSettings } from "../infra/config.ts";
 import type {
   ChannelAdapter,
   InboundMessage,
   OutboundMessage,
 } from "../channels/types.ts";
-import type { LLMProxyRequest } from "./proxy-language-model.ts";
+import { WorkerAdapter } from "../workers/worker-adapter.ts";
 
 const logger = getLogger("project_adapter");
 
-/** Messages sent from Worker → Main thread. */
-type WorkerOutbound =
-  | { type: "notify"; message: InboundMessage }
-  | LLMProxyRequest;
-
-/** Messages sent from Main thread → Worker. */
-type WorkerInbound =
-  | { type: "init"; projectPath: string; contextWindow?: number }
-  | { type: "message"; message: OutboundMessage }
-  | { type: "shutdown" }
-  | { type: "llm_response"; requestId: string; result: unknown }
-  | { type: "llm_error"; requestId: string; error: string };
-
-const WORKER_URL = new URL("./project-worker.ts", import.meta.url).href;
-
 export class ProjectAdapter implements ChannelAdapter {
   readonly type = "project";
-  /** Timeout (ms) for graceful Worker shutdown before force-terminate. */
-  shutdownTimeoutMs = 30_000;
-  private workers = new Map<string, Worker>();
-  private agentSend: ((msg: InboundMessage) => void) | null = null;
-  private models: ModelRegistry | null = null;
 
-  /** Number of running Workers. */
+  private readonly workerAdapter: WorkerAdapter;
+  /** Track project IDs locally so activeCount/has only count projects, not all Workers. */
+  private readonly projectIds = new Set<string>();
+  /** Whether start() has been called (callbacks wired). */
+  private started = false;
+
+  /**
+   * @param workerAdapter — shared WorkerAdapter instance. If not provided,
+   *                        a default WorkerAdapter is created (backward compat).
+   */
+  constructor(workerAdapter?: WorkerAdapter) {
+    this.workerAdapter = workerAdapter ?? new WorkerAdapter();
+  }
+
+  /** Number of running project Workers. */
   get activeCount(): number {
-    return this.workers.size;
+    return this.projectIds.size;
   }
 
   /** Check if a Worker exists for the given projectId. */
   has(projectId: string): boolean {
-    return this.workers.has(projectId);
+    return this.projectIds.has(projectId);
   }
 
-  /** Set ModelRegistry for LLM proxy handling. */
-  setModelRegistry(models: ModelRegistry): void {
-    this.models = models;
+  /** Set ModelRegistry for LLM proxy handling — delegates to WorkerAdapter. */
+  setModelRegistry(models: import("../infra/model-registry.ts").ModelRegistry): void {
+    this.workerAdapter.setModelRegistry(models);
   }
 
-  /** ChannelAdapter.start — store the agent.send callback. */
+  /**
+   * ChannelAdapter.start — wire up WorkerAdapter callbacks to forward
+   * notify messages and close events to the agent.
+   */
   async start(agent: { send(msg: InboundMessage): void }): Promise<void> {
-    this.agentSend = agent.send;
+    this.workerAdapter.setOnNotify((message) => {
+      agent.send(message);
+    });
+
+    this.workerAdapter.setOnWorkerClose((channelType, channelId) => {
+      if (channelType === "project") {
+        this.projectIds.delete(channelId);
+        logger.info({ projectId: channelId }, "project_worker_closed");
+
+        // Notify MainAgent that the project Worker has terminated
+        agent.send({
+          text: `[system] Project "${channelId}" Worker has terminated.`,
+          channel: { type: "project", channelId },
+          metadata: { system: true, event: "worker_closed" },
+        });
+      }
+    });
+
+    this.started = true;
     logger.info("project_adapter_started");
   }
 
   /** ChannelAdapter.deliver — route outbound message to Worker by channelId. */
   async deliver(message: OutboundMessage): Promise<void> {
     const projectId = message.channel.channelId;
-    const worker = this.workers.get(projectId);
-    if (!worker) {
+    if (!this.projectIds.has(projectId)) {
       logger.warn({ projectId }, "deliver_to_unknown_project");
       return;
     }
 
-    const msg: WorkerInbound = { type: "message", message };
-    worker.postMessage(msg);
+    this.workerAdapter.deliver("project", projectId, message);
   }
 
   /**
-   * Spawn a Worker for a project.
+   * Spawn a Worker for a project — delegates to WorkerAdapter.
    *
-   * Sets up message handlers for "notify" (→ agent.send) and "llm_request"
-   * (→ _handleLLMRequest). Sends `{ type: "init", projectPath }` to the Worker.
+   * Passes serialized Settings in the config so the Worker thread can
+   * initialize its own settings singleton (Workers don't share module state).
    *
-   * @throws if adapter not started or Worker already exists
+   * @throws if adapter not started (no onNotify configured) or Worker already exists
    */
   startProject(projectId: string, projectPath: string): void {
-    if (!this.agentSend) {
+    if (!this.started) {
       throw new Error("ProjectAdapter not started — call start() first");
     }
-    if (this.workers.has(projectId)) {
+    if (this.projectIds.has(projectId)) {
       throw new Error(`Worker already exists for project "${projectId}"`);
     }
 
-    const worker = new Worker(WORKER_URL);
+    // Serialize current settings for the Worker thread
+    let settings: Record<string, unknown> = {};
+    try {
+      settings = getSettings() as unknown as Record<string, unknown>;
+    } catch {
+      // Settings not initialized (e.g. in tests) — Worker will use defaults
+    }
 
-    worker.onmessage = (event: MessageEvent<WorkerOutbound>) => {
-      const data = event.data;
-
-      switch (data.type) {
-        case "notify":
-          this.agentSend!(data.message);
-          break;
-        case "llm_request":
-          this._handleLLMRequest(projectId, data).catch((err) => {
-            logger.error({ projectId, error: String(err) }, "llm_proxy_error");
-          });
-          break;
-        default:
-          logger.warn({ projectId, data }, "unknown_worker_message");
-      }
-    };
-
-    worker.onerror = (event: ErrorEvent) => {
-      logger.error(
-        { projectId, error: event.message },
-        "worker_error",
-      );
-    };
-
-    // Handle Worker close — cleanup and notify MainAgent
-    worker.addEventListener("close", () => {
-      this.workers.delete(projectId);
-      logger.info({ projectId }, "worker_closed");
-
-      // Notify MainAgent that the project Worker has terminated
-      if (this.agentSend) {
-        this.agentSend({
-          text: `[system] Project "${projectId}" Worker has terminated.`,
-          channel: { type: "project", channelId: projectId },
-          metadata: { system: true, event: "worker_closed" },
-        });
-      }
+    this.workerAdapter.startWorker("project", projectId, "project", {
+      projectPath,
+      settings,
     });
 
-    this.workers.set(projectId, worker);
-
-    // Initialize the Worker with the project path and resolved contextWindow
-    const contextWindow = this.models?.getContextWindowForTier("balanced");
-    const initMsg: WorkerInbound = {
-      type: "init",
-      projectPath,
-      ...(contextWindow != null && { contextWindow }),
-    };
-    worker.postMessage(initMsg);
-
-    logger.info({ projectId, projectPath }, "worker_started");
+    this.projectIds.add(projectId);
+    logger.info({ projectId, projectPath }, "project_started");
   }
 
   /**
-   * Stop a project Worker gracefully.
+   * Stop a project Worker gracefully — delegates to WorkerAdapter.
    *
-   * Sends "shutdown" message, waits up to 30s for the Worker to close,
-   * then force-terminates if still running.
+   * WorkerAdapter handles the shutdown signal + timeout + force-terminate.
+   * The onWorkerClose callback removes projectId from our local Set.
    */
   async stopProject(projectId: string): Promise<void> {
-    const worker = this.workers.get(projectId);
-    if (!worker) {
+    if (!this.projectIds.has(projectId)) {
       logger.warn({ projectId }, "stop_unknown_project");
       return;
     }
 
-    // Send shutdown signal
-    const shutdownMsg: WorkerInbound = { type: "shutdown" };
-    worker.postMessage(shutdownMsg);
-
-    // Wait for close with timeout
-    const closed = await Promise.race([
-      new Promise<boolean>((resolve) => {
-        worker.addEventListener("close", () => resolve(true));
-      }),
-      new Promise<boolean>((resolve) =>
-        setTimeout(() => resolve(false), this.shutdownTimeoutMs),
-      ),
-    ]);
-
-    if (!closed) {
-      logger.warn({ projectId }, "worker_shutdown_timeout_force_terminate");
-      worker.terminate();
-      this.workers.delete(projectId);
-    }
+    await this.workerAdapter.stopWorker("project", projectId);
+    // Clean up in case the close callback didn't fire (force-terminate path)
+    this.projectIds.delete(projectId);
   }
 
-  /** ChannelAdapter.stop — stop all Workers. */
+  /** ChannelAdapter.stop — stop all project Workers. */
   async stop(): Promise<void> {
-    const projectIds = [...this.workers.keys()];
+    const projectIds = [...this.projectIds];
     await Promise.all(projectIds.map((id) => this.stopProject(id)));
     logger.info("project_adapter_stopped");
   }
 
-  /**
-   * Handle an LLM proxy request from a Worker.
-   *
-   * Uses ModelRegistry to call the LLM, then sends the result back to
-   * the Worker as llm_response or llm_error.
-   */
-  async _handleLLMRequest(
-    projectId: string,
-    request: LLMProxyRequest,
-  ): Promise<void> {
-    const worker = this.workers.get(projectId);
-    if (!worker) {
-      logger.warn({ projectId, requestId: request.requestId }, "llm_request_for_unknown_project");
-      return;
-    }
-
-    if (!this.models) {
-      const errorMsg: WorkerInbound = {
-        type: "llm_error",
-        requestId: request.requestId,
-        error: "ModelRegistry not configured",
-      };
-      worker.postMessage(errorMsg);
-      return;
-    }
-
-    try {
-      const model = this.models.getForTier("balanced");
-      const result = await model.generate(request.options);
-
-      const responseMsg: WorkerInbound = {
-        type: "llm_response",
-        requestId: request.requestId,
-        result,
-      };
-      worker.postMessage(responseMsg);
-    } catch (err) {
-      const errorMsg: WorkerInbound = {
-        type: "llm_error",
-        requestId: request.requestId,
-        error: errorToString(err),
-      };
-      worker.postMessage(errorMsg);
-    }
+  /** Expose the underlying WorkerAdapter (for shared use by SubAgentManager). */
+  getWorkerAdapter(): WorkerAdapter {
+    return this.workerAdapter;
   }
 }
