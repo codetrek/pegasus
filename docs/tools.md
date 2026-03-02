@@ -152,11 +152,9 @@ interface ToolStats {
 | `read_file` | Read file content | `{ path, encoding?, offset?, limit? }` | `{ content, size, totalLines }` |
 | `write_file` | Write/overwrite a file | `{ path, content, encoding? }` | `{ bytesWritten }` |
 | `list_files` | List directory entries | `{ path, recursive?, pattern? }` | `{ files: FileInfo[] }` |
-| `delete_file` | Delete a file | `{ path }` | `{ deleted: boolean }` |
-| `move_file` | Move or rename a file | `{ from, to }` | `{ success: boolean }` |
-| `get_file_info` | File metadata | `{ path }` | `{ exists, size, modified }` |
 | `edit_file` | Apply targeted edits to a file | `{ path, edits }` | `{ applied }` |
 | `grep_files` | Search file contents by pattern | `{ pattern, path?, ... }` | `{ matches }` |
+| `glob_files` | Find files matching a glob pattern | `{ pattern, cwd?, max_results? }` | `{ files }` |
 
 ### Network Tools (NETWORK)
 
@@ -230,7 +228,7 @@ Different subsystems receive different tool subsets via pre-built arrays:
 | Collection | Contents | Used By |
 |------------|----------|---------|
 | `allTaskTools` | systemTools + fileTools + networkTools + dataTools + memoryTools + taskTools + `notify` | Task System — `general` type (default) |
-| `exploreTools` | Read-only subset: `current_time`, `get_env`, `read_file`, `list_files`, `get_file_info`, `grep_files`, `http_get`, `web_search`, `json_parse`, `base64_decode`, `memory_list`, `memory_read`, `task_list`, `task_replay`, `notify` | Task System — `explore` type |
+| `exploreTools` | Read-only subset: `current_time`, `get_env`, `read_file`, `list_files`, `glob_files`, `grep_files`, `http_get`, `web_search`, `json_parse`, `base64_decode`, `memory_list`, `memory_read`, `task_list`, `task_replay`, `notify` | Task System — `explore` type |
 | `planTools` | exploreTools + `memory_write`, `memory_append` | Task System — `plan` type |
 | `mainAgentTools` | `current_time`, `memory_list`, `memory_read`, `memory_write`, `memory_patch`, `memory_append`, `task_list`, `task_replay`, `session_archive_read`, `spawn_task`, `resume_task`, `reply`, `use_skill` | Main Agent |
 | `reflectionTools` | `memory_read`, `memory_write`, `memory_patch`, `memory_append` | PostTaskReflector |

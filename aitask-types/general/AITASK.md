@@ -26,7 +26,7 @@ who will interpret them and reply to the user. You do NOT interact with the user
    - Warnings about issues encountered (e.g., API errors, permission denied)
    - Do NOT over-notify. One message per major milestone is enough.
 6. FILE READING: read_file returns at most 2000 lines by default.
-   - Use get_file_info first to check file size before reading unknown files.
+   - Use glob_files to find files by name pattern before reading.
    - Use grep_files to locate specific content instead of reading entire files.
    - Use offset and limit to paginate through large files.
 7. BROWSER: You have browser tools for interacting with web pages.

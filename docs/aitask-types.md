@@ -50,7 +50,7 @@ Today, every spawned task gets the full `allTaskTools` array (26+ tools) and a g
 
 1. **Tool overload**: LLM sees 26 tools and sometimes picks wrong ones (e.g., writing files when asked to "explore" a topic)
 2. **No specialization**: The system prompt says "you are a background task worker" for every task, no matter the intent
-3. **Safety gap**: An "explore" task has write_file/delete_file — unnecessary risk
+3. **Safety gap**: An "explore" task has write_file — unnecessary risk
 4. **Skill integration gap**: `SkillDefinition.agent` field exists but is unused — designed for routing skills to specific task types
 
 ## Task Types
@@ -65,7 +65,7 @@ Today, every spawned task gets the full `allTaskTools` array (26+ tools) and a g
 
 **general** (default — all task tools, unchanged):
 - system: current_time, sleep, get_env, set_env
-- file: read_file, write_file, list_files, delete_file, move_file, get_file_info, edit_file, grep_files
+- file: read_file, write_file, list_files, edit_file, grep_files, glob_files
 - network: http_get, http_post, http_request, web_search
 - data: json_parse, json_stringify, base64_encode, base64_decode
 - memory: memory_list, memory_read, memory_write, memory_patch, memory_append
@@ -74,7 +74,7 @@ Today, every spawned task gets the full `allTaskTools` array (26+ tools) and a g
 
 **explore** (read-only — no write, no mutation):
 - system: current_time, get_env
-- file: read_file, list_files, get_file_info, grep_files
+- file: read_file, list_files, glob_files, grep_files
 - network: http_get, web_search
 - data: json_parse, base64_decode
 - memory: memory_list, memory_read
@@ -83,7 +83,7 @@ Today, every spawned task gets the full `allTaskTools` array (26+ tools) and a g
 
 **plan** (read-only + write to memory):
 - system: current_time, get_env
-- file: read_file, list_files, get_file_info, grep_files
+- file: read_file, list_files, glob_files, grep_files
 - network: http_get, web_search
 - data: json_parse, base64_decode
 - memory: memory_list, memory_read, memory_write, memory_append

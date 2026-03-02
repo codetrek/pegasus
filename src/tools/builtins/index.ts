@@ -24,13 +24,11 @@ import * as fileToolsModule from "./file-tools.ts";
 const read_file = fileToolsModule.read_file;
 const write_file = fileToolsModule.write_file;
 const list_files = fileToolsModule.list_files;
-const delete_file = fileToolsModule.delete_file;
-const move_file = fileToolsModule.move_file;
-const get_file_info = fileToolsModule.get_file_info;
 const edit_file = fileToolsModule.edit_file;
 const grep_files = fileToolsModule.grep_files;
+const glob_files = fileToolsModule.glob_files;
 
-export { read_file, write_file, list_files, delete_file, move_file, get_file_info, edit_file, grep_files };
+export { read_file, write_file, list_files, edit_file, grep_files, glob_files };
 
 // Network tools
 import * as networkToolsModule from "./network-tools.ts";
@@ -169,11 +167,9 @@ export const fileTools: Tool[] = [
   read_file,
   write_file,
   list_files,
-  delete_file,
-  move_file,
-  get_file_info,
   edit_file,
   grep_files,
+  glob_files,
 ];
 
 export const networkTools: Tool[] = [
