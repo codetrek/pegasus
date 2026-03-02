@@ -2,7 +2,7 @@
  * Tests for ProxyLanguageModel — Worker↔Main thread LLM bridge.
  */
 import { describe, it, expect } from "bun:test";
-import { ProxyLanguageModel } from "@pegasus/projects/proxy-language-model.ts";
+import { ProxyLanguageModel, DEFAULT_PROXY_TIMEOUT_MS } from "@pegasus/projects/proxy-language-model.ts";
 import type { LLMProxyRequest } from "@pegasus/projects/proxy-language-model.ts";
 import type { GenerateTextResult, LanguageModel } from "@pegasus/infra/llm-types.ts";
 
@@ -20,6 +20,17 @@ describe("ProxyLanguageModel", () => {
     expect(model.provider).toBe("openai");
     expect(model.modelId).toBe("gpt-4o");
     expect(typeof model.generate).toBe("function");
+  });
+
+  it("should use default timeout of 5 minutes", () => {
+    const model = new ProxyLanguageModel("openai", "gpt-4o", () => {});
+    expect(model.timeoutMs).toBe(DEFAULT_PROXY_TIMEOUT_MS);
+    expect(model.timeoutMs).toBe(300_000);
+  });
+
+  it("should accept custom timeout via constructor", () => {
+    const model = new ProxyLanguageModel("openai", "gpt-4o", () => {}, 60_000);
+    expect(model.timeoutMs).toBe(60_000);
   });
 
   it("should send request via postFn and resolve when response arrives", async () => {
@@ -100,4 +111,117 @@ describe("ProxyLanguageModel", () => {
     // Should not throw
     expect(() => model.resolveRequest("nonexistent-id", makeResult("nope"))).not.toThrow();
   });
+
+  // ── Timeout tests ──────────────────────────────────
+
+  it("should reject after timeout if no response arrives", async () => {
+    const model = new ProxyLanguageModel("openai", "gpt-4o", () => {}, 100); // 100ms timeout
+
+    const promise = model.generate({
+      messages: [{ role: "user", content: "slow request" }],
+    });
+
+    await expect(promise).rejects.toThrow("timed out after 100ms");
+  }, 5_000);
+
+  it("should clean up pending entry after timeout", async () => {
+    const model = new ProxyLanguageModel("openai", "gpt-4o", () => {}, 50);
+
+    expect(model.pendingCount).toBe(0);
+
+    const promise = model.generate({
+      messages: [{ role: "user", content: "test" }],
+    });
+
+    expect(model.pendingCount).toBe(1);
+
+    // Wait for timeout
+    await promise.catch(() => {});
+
+    expect(model.pendingCount).toBe(0);
+  }, 5_000);
+
+  it("should clear timeout when resolved normally (no double-resolve)", async () => {
+    const posted: LLMProxyRequest[] = [];
+    const model = new ProxyLanguageModel("openai", "gpt-4o", (data) => {
+      posted.push(data as LLMProxyRequest);
+    }, 200); // 200ms timeout
+
+    const promise = model.generate({
+      messages: [{ role: "user", content: "fast" }],
+    });
+
+    // Resolve immediately — timeout should be cleared
+    model.resolveRequest(posted[0]!.requestId, makeResult("quick response"));
+
+    const result = await promise;
+    expect(result.text).toBe("quick response");
+
+    // After timeout period, pending should still be empty (no stale timeout firing)
+    await new Promise((r) => setTimeout(r, 250));
+    expect(model.pendingCount).toBe(0);
+  }, 5_000);
+
+  it("should clear timeout when rejected via rejectRequest", async () => {
+    const posted: LLMProxyRequest[] = [];
+    const model = new ProxyLanguageModel("openai", "gpt-4o", (data) => {
+      posted.push(data as LLMProxyRequest);
+    }, 200);
+
+    const promise = model.generate({
+      messages: [{ role: "user", content: "error" }],
+    });
+
+    // Reject immediately — timeout should be cleared
+    model.rejectRequest(posted[0]!.requestId, new Error("API error"));
+
+    await expect(promise).rejects.toThrow("API error");
+
+    // After timeout period, pending should still be empty
+    await new Promise((r) => setTimeout(r, 250));
+    expect(model.pendingCount).toBe(0);
+  }, 5_000);
+
+  // ── cancelAll tests ────────────────────────────────
+
+  it("cancelAll should reject all pending requests", async () => {
+    const model = new ProxyLanguageModel("openai", "gpt-4o", () => {}, 60_000);
+
+    const p1 = model.generate({ messages: [{ role: "user", content: "a" }] });
+    const p2 = model.generate({ messages: [{ role: "user", content: "b" }] });
+    const p3 = model.generate({ messages: [{ role: "user", content: "c" }] });
+
+    expect(model.pendingCount).toBe(3);
+
+    model.cancelAll("Worker shutting down");
+
+    expect(model.pendingCount).toBe(0);
+
+    await expect(p1).rejects.toThrow("Worker shutting down");
+    await expect(p2).rejects.toThrow("Worker shutting down");
+    await expect(p3).rejects.toThrow("Worker shutting down");
+  });
+
+  it("cancelAll on empty pending map should be a no-op", () => {
+    const model = new ProxyLanguageModel("openai", "gpt-4o", () => {});
+    expect(() => model.cancelAll("reason")).not.toThrow();
+    expect(model.pendingCount).toBe(0);
+  });
+
+  it("cancelAll should clear timeouts (no late timeout fires)", async () => {
+    const model = new ProxyLanguageModel("openai", "gpt-4o", () => {}, 100);
+
+    const promise = model.generate({
+      messages: [{ role: "user", content: "test" }],
+    });
+
+    // Cancel immediately (before the 100ms timeout fires)
+    model.cancelAll("shutdown");
+
+    await expect(promise).rejects.toThrow("shutdown");
+
+    // Wait past the original timeout — no additional errors should surface
+    await new Promise((r) => setTimeout(r, 150));
+    expect(model.pendingCount).toBe(0);
+  }, 5_000);
 });
