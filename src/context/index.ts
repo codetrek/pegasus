@@ -14,3 +14,4 @@ export {
 } from "./tool-result-guard.ts";
 export { chunkMessagesByTokenBudget, serializeMessagesForSummary, summarizeMessages } from "./summarizer.ts";
 export type { SummarizeOptions } from "./summarizer.ts";
+export { isContextOverflowError } from "./overflow.ts";
