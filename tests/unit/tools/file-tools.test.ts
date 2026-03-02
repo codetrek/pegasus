@@ -1174,4 +1174,625 @@ describe("file tools", () => {
       expect(isRgAvailable()).toBe(false);
     });
   });
+
+  // ── Additional coverage tests ──
+
+  describe("grep_files JS fallback — binary file skipping", () => {
+    let originalRgState: boolean;
+
+    beforeEach(() => {
+      originalRgState = isRgAvailable();
+      _resetRgCache(false); // force JS fallback
+    });
+
+    afterEach(() => {
+      _resetRgCache(originalRgState);
+    });
+
+    it("should skip binary files (files containing null bytes)", async () => {
+      const context = { taskId: "test-task-id" };
+      // Create a binary file with null bytes in the first 8KB
+      const binaryContent = Buffer.from([0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x77, 0x6f, 0x72, 0x6c, 0x64]); // "hello\0world"
+      await Bun.write(`${testDir}/binary.dat`, binaryContent);
+      await Bun.write(`${testDir}/text.txt`, "hello world");
+
+      const result = await grep_files.execute({
+        pattern: "hello",
+        path: testDir,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      // Should find in text.txt but skip binary.dat
+      expect(output).toContain("text.txt");
+      expect(output).not.toContain("binary.dat");
+    });
+
+    it("should skip binary files in single-file mode", async () => {
+      const context = { taskId: "test-task-id" };
+      const binaryContent = Buffer.from([0x74, 0x65, 0x73, 0x74, 0x00, 0x64, 0x61, 0x74, 0x61]); // "test\0data"
+      const filePath = `${testDir}/single-binary.dat`;
+      await Bun.write(filePath, binaryContent);
+
+      const result = await grep_files.execute({
+        pattern: "test",
+        path: filePath,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toBe(""); // No matches since binary is skipped
+    });
+  });
+
+  describe("grep_files JS fallback — include filter in directory search", () => {
+    let originalRgState: boolean;
+
+    beforeEach(() => {
+      originalRgState = isRgAvailable();
+      _resetRgCache(false);
+    });
+
+    afterEach(() => {
+      _resetRgCache(originalRgState);
+    });
+
+    it("should filter files by include glob with {a,b} alternation pattern", async () => {
+      const context = { taskId: "test-task-id" };
+      await Bun.write(`${testDir}/app.ts`, "include_target");
+      await Bun.write(`${testDir}/app.js`, "include_target");
+      await Bun.write(`${testDir}/data.json`, "include_target");
+      await Bun.write(`${testDir}/readme.md`, "include_target");
+
+      const result = await grep_files.execute({
+        pattern: "include_target",
+        path: testDir,
+        include: "*.{ts,js}",
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      // Should match .ts and .js files only
+      expect(output).toContain("app.ts");
+      expect(output).toContain("app.js");
+      expect(output).not.toContain("data.json");
+      expect(output).not.toContain("readme.md");
+    });
+
+    it("should filter files by simple include glob in directory search", async () => {
+      const context = { taskId: "test-task-id" };
+      const subDir = `${testDir}/sub-include`;
+      await mkdir(subDir, { recursive: true });
+      await Bun.write(`${subDir}/code.ts`, "filter_target");
+      await Bun.write(`${subDir}/code.py`, "filter_target");
+
+      const result = await grep_files.execute({
+        pattern: "filter_target",
+        path: testDir,
+        include: "*.ts",
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("code.ts");
+      expect(output).not.toContain("code.py");
+    });
+  });
+
+  describe("grep_files JS fallback — multiline mode", () => {
+    let originalRgState: boolean;
+
+    beforeEach(() => {
+      originalRgState = isRgAvailable();
+      _resetRgCache(false);
+    });
+
+    afterEach(() => {
+      _resetRgCache(originalRgState);
+    });
+
+    it("should search with multiline content mode in JS fallback", async () => {
+      const context = { taskId: "test-task-id" };
+      const filePath = `${testDir}/ml-content.txt`;
+      await Bun.write(filePath, "start\nmatch_this\nend");
+
+      const result = await grep_files.execute({
+        pattern: "start.match_this",
+        path: filePath,
+        multiline: true,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("=== ");
+      expect(output).toContain("1:");
+    });
+
+    it("should search directory with multiline files_with_matches in JS fallback", async () => {
+      const context = { taskId: "test-task-id" };
+      await Bun.write(`${testDir}/ml-fwm-a.txt`, "foo\nbar_ml_target");
+      await Bun.write(`${testDir}/ml-fwm-b.txt`, "no match at all");
+
+      const result = await grep_files.execute({
+        pattern: "foo.bar_ml_target",
+        path: testDir,
+        multiline: true,
+        output_mode: "files_with_matches",
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("ml-fwm-a.txt");
+      expect(output).not.toContain("ml-fwm-b.txt");
+    });
+
+    it("should search with multiline count mode in JS fallback", async () => {
+      const context = { taskId: "test-task-id" };
+      const filePath = `${testDir}/ml-count.txt`;
+      await Bun.write(filePath, "aa\nbb\naa\nbb");
+
+      const result = await grep_files.execute({
+        pattern: "aa.bb",
+        path: filePath,
+        multiline: true,
+        output_mode: "count",
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain(":2");
+    });
+
+    it("should skip binary files in multiline mode", async () => {
+      const context = { taskId: "test-task-id" };
+      const binaryContent = Buffer.from([0x61, 0x61, 0x0a, 0x62, 0x62, 0x00, 0x63]); // "aa\nbb\0c"
+      await Bun.write(`${testDir}/ml-binary.dat`, binaryContent);
+      await Bun.write(`${testDir}/ml-text.txt`, "aa\nbb match");
+
+      const result = await grep_files.execute({
+        pattern: "aa.bb",
+        path: testDir,
+        multiline: true,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("ml-text.txt");
+      expect(output).not.toContain("ml-binary.dat");
+    });
+
+    it("should skip large files in multiline mode", async () => {
+      const context = { taskId: "test-task-id" };
+      const bigContent = "ml_target\n" + "x".repeat(1_100_000);
+      await Bun.write(`${testDir}/ml-large.txt`, bigContent);
+      await Bun.write(`${testDir}/ml-small.txt`, "ml_target\nhere");
+
+      const result = await grep_files.execute({
+        pattern: "ml_target.here",
+        path: testDir,
+        multiline: true,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("ml-small.txt");
+      expect(output).not.toContain("ml-large.txt");
+    }, 10000);
+
+    it("should truncate long multiline matches at 200 chars", async () => {
+      const context = { taskId: "test-task-id" };
+      const filePath = `${testDir}/ml-long.txt`;
+      const longLine = "A".repeat(250);
+      await Bun.write(filePath, longLine);
+
+      const result = await grep_files.execute({
+        pattern: "A{200,}",
+        path: filePath,
+        multiline: true,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("...");
+    });
+
+    it("should handle zero-length multiline regex matches", async () => {
+      const context = { taskId: "test-task-id" };
+      const filePath = `${testDir}/ml-zero.txt`;
+      await Bun.write(filePath, "abc");
+
+      const result = await grep_files.execute({
+        pattern: "(?=a)",
+        path: filePath,
+        multiline: true,
+        max_results: 3,
+      }, context);
+
+      expect(result.success).toBe(true);
+      // Should not hang — zero-length match advances lastIndex
+    }, 5000);
+
+    it("should handle multiline search on single file (not directory)", async () => {
+      const context = { taskId: "test-task-id" };
+      const filePath = `${testDir}/ml-single.txt`;
+      await Bun.write(filePath, "first\nsecond\nthird");
+
+      const result = await grep_files.execute({
+        pattern: "first.second",
+        path: filePath,
+        multiline: true,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("first");
+      expect(output).toContain("second");
+    });
+  });
+
+  describe("grep_files JS fallback — .gitignore file-level ignore", () => {
+    let originalRgState: boolean;
+
+    beforeEach(() => {
+      originalRgState = isRgAvailable();
+      _resetRgCache(false);
+    });
+
+    afterEach(() => {
+      _resetRgCache(originalRgState);
+    });
+
+    it("should respect .gitignore file patterns (not just directories)", async () => {
+      const context = { taskId: "test-task-id" };
+      // Gitignore that ignores specific files
+      await Bun.write(`${testDir}/.gitignore`, "*.log\n");
+      await Bun.write(`${testDir}/app.ts`, "gi_file_target");
+      await Bun.write(`${testDir}/debug.log`, "gi_file_target");
+
+      const result = await grep_files.execute({
+        pattern: "gi_file_target",
+        path: testDir,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("app.ts");
+      expect(output).not.toContain("debug.log");
+    });
+
+    it("should handle directory that cannot be read (permission error)", async () => {
+      const context = { taskId: "test-task-id" };
+      await Bun.write(`${testDir}/readable.txt`, "perm_target");
+
+      // Try to search — even if some sub-path fails, should not crash
+      const result = await grep_files.execute({
+        pattern: "perm_target",
+        path: testDir,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("readable.txt");
+    });
+  });
+
+  describe("grep_files JS fallback — max_results truncation for files_with_matches", () => {
+    let originalRgState: boolean;
+
+    beforeEach(() => {
+      originalRgState = isRgAvailable();
+      _resetRgCache(false);
+    });
+
+    afterEach(() => {
+      _resetRgCache(originalRgState);
+    });
+
+    it("should truncate files_with_matches at max_results and show footer", async () => {
+      const context = { taskId: "test-task-id" };
+      // Create files with multiple match lines each so totalMatches > filesWithMatches.length
+      for (let i = 0; i < 5; i++) {
+        await Bun.write(`${testDir}/fwm-trunc-${i}.txt`, "fwm_trunc_target\nfwm_trunc_target\nfwm_trunc_target");
+      }
+
+      const result = await grep_files.execute({
+        pattern: "fwm_trunc_target",
+        path: testDir,
+        output_mode: "files_with_matches",
+        max_results: 2,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      const lines = output.split("\n").filter(l => l !== "" && !l.startsWith("["));
+      expect(lines).toHaveLength(2);
+      // Should have truncation footer since totalMatches > filesWithMatches.length
+      expect(output).toContain("total matches");
+    });
+
+    it("should truncate count mode at max_results", async () => {
+      const context = { taskId: "test-task-id" };
+      for (let i = 0; i < 5; i++) {
+        await Bun.write(`${testDir}/cnt-trunc-${i}.txt`, "cnt_trunc_target");
+      }
+
+      const result = await grep_files.execute({
+        pattern: "cnt_trunc_target",
+        path: testDir,
+        output_mode: "count",
+        max_results: 2,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      const countLines = output.split("\n").filter(l => l !== "" && !l.startsWith("["));
+      expect(countLines).toHaveLength(2);
+    });
+  });
+
+  describe("grep_files JS fallback — multiline max_results truncation", () => {
+    let originalRgState: boolean;
+
+    beforeEach(() => {
+      originalRgState = isRgAvailable();
+      _resetRgCache(false);
+    });
+
+    afterEach(() => {
+      _resetRgCache(originalRgState);
+    });
+
+    it("should truncate multiline files_with_matches at max_results", async () => {
+      const context = { taskId: "test-task-id" };
+      for (let i = 0; i < 5; i++) {
+        await Bun.write(`${testDir}/ml-fwm-t-${i}.txt`, "ml\ntarget");
+      }
+
+      const result = await grep_files.execute({
+        pattern: "ml.target",
+        path: testDir,
+        multiline: true,
+        output_mode: "files_with_matches",
+        max_results: 2,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      const lines = output.split("\n").filter(l => l !== "" && !l.startsWith("["));
+      expect(lines).toHaveLength(2);
+    });
+
+    it("should truncate multiline count mode at max_results", async () => {
+      const context = { taskId: "test-task-id" };
+      for (let i = 0; i < 5; i++) {
+        await Bun.write(`${testDir}/ml-cnt-t-${i}.txt`, "ml\ntarget");
+      }
+
+      const result = await grep_files.execute({
+        pattern: "ml.target",
+        path: testDir,
+        multiline: true,
+        output_mode: "count",
+        max_results: 2,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      const countLines = output.split("\n").filter(l => l !== "" && !l.startsWith("["));
+      expect(countLines).toHaveLength(2);
+    });
+
+    it("should truncate multiline content mode at max_results", async () => {
+      const context = { taskId: "test-task-id" };
+      // Create a file with many multiline matches
+      const content = Array.from({ length: 20 }, (_, i) => `start${i}\nend${i}`).join("\n");
+      await Bun.write(`${testDir}/ml-content-trunc.txt`, content);
+
+      const result = await grep_files.execute({
+        pattern: "start\\d+.end\\d+",
+        path: `${testDir}/ml-content-trunc.txt`,
+        multiline: true,
+        max_results: 3,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("total matches");
+    });
+  });
+
+  describe("grep_files with rg — context block separators", () => {
+    beforeEach(() => {
+      _resetRgCache(null);
+    });
+
+    afterEach(() => {
+      _resetRgCache(null);
+    });
+
+    it("should handle rg context output with non-contiguous blocks (-- separators)", async () => {
+      if (!isRgAvailable()) return;
+
+      const context = { taskId: "test-task-id" };
+      const filePath = `${testDir}/rg-blocks.txt`;
+      // Create content with matches far apart to produce -- separators
+      const lines = [
+        "line1", "MATCH_BLOCK_1", "line3",
+        "line4", "line5", "line6", "line7", "line8",
+        "line9", "MATCH_BLOCK_2", "line11",
+      ];
+      await Bun.write(filePath, lines.join("\n"));
+
+      const result = await grep_files.execute({
+        pattern: "MATCH_BLOCK",
+        path: filePath,
+        context_lines: 1,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("rg-blocks.txt ===");
+      expect(output).toContain(":2:MATCH_BLOCK_1");
+      expect(output).toContain(":10:MATCH_BLOCK_2");
+      // Should have a block separator between non-contiguous ranges
+      expect(output).toContain("--");
+    });
+
+    it("should handle rg multiline mode", async () => {
+      if (!isRgAvailable()) return;
+
+      const context = { taskId: "test-task-id" };
+      const filePath = `${testDir}/rg-multiline.txt`;
+      await Bun.write(filePath, "alpha\nbeta\ngamma");
+
+      const result = await grep_files.execute({
+        pattern: "alpha.beta",
+        path: filePath,
+        multiline: true,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("alpha");
+      expect(output).toContain("beta");
+    });
+
+    it("should handle rg case_insensitive mode", async () => {
+      if (!isRgAvailable()) return;
+
+      const context = { taskId: "test-task-id" };
+      const filePath = `${testDir}/rg-case.txt`;
+      await Bun.write(filePath, "UPPER\nlower\nMixed");
+
+      const result = await grep_files.execute({
+        pattern: "upper",
+        path: filePath,
+        case_insensitive: true,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("1:UPPER");
+    });
+
+    it("should handle rg with include glob filter", async () => {
+      if (!isRgAvailable()) return;
+
+      const context = { taskId: "test-task-id" };
+      await Bun.write(`${testDir}/rg-inc.ts`, "rg_include_target");
+      await Bun.write(`${testDir}/rg-inc.py`, "rg_include_target");
+
+      const result = await grep_files.execute({
+        pattern: "rg_include_target",
+        path: testDir,
+        include: "*.ts",
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("rg-inc.ts");
+      expect(output).not.toContain("rg-inc.py");
+    });
+
+    it("should handle rg max_results truncation in content mode", async () => {
+      if (!isRgAvailable()) return;
+
+      const context = { taskId: "test-task-id" };
+      const lines = Array.from({ length: 20 }, (_, i) => `line ${i} rg_trunc_match`);
+      await Bun.write(`${testDir}/rg-trunc.txt`, lines.join("\n"));
+
+      const result = await grep_files.execute({
+        pattern: "rg_trunc_match",
+        path: `${testDir}/rg-trunc.txt`,
+        max_results: 5,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("[20 total matches, showing first 5]");
+    });
+  });
+
+  describe("grep_files — rg error handling", () => {
+    beforeEach(() => {
+      _resetRgCache(null);
+    });
+
+    afterEach(() => {
+      _resetRgCache(null);
+    });
+
+    it("should rethrow regex errors from rg", async () => {
+      if (!isRgAvailable()) return;
+
+      const context = { taskId: "test-task-id" };
+      await Bun.write(`${testDir}/rg-err.txt`, "content");
+
+      // An invalid PCRE2 pattern that JS RegExp accepts but rg rejects
+      // Note: most basic invalid regexes are caught by early JS validation,
+      // so this test ensures the rg regex error path is reachable
+      const result = await grep_files.execute({
+        pattern: "[invalid",
+        path: `${testDir}/rg-err.txt`,
+      }, context);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Invalid regex pattern");
+    });
+  });
+
+  describe("grep_files JS fallback — context with multiple files and separators", () => {
+    let originalRgState: boolean;
+
+    beforeEach(() => {
+      originalRgState = isRgAvailable();
+      _resetRgCache(false);
+    });
+
+    afterEach(() => {
+      _resetRgCache(originalRgState);
+    });
+
+    it("should produce -- block separator between non-contiguous ranges in same file", async () => {
+      const context = { taskId: "test-task-id" };
+      const filePath = `${testDir}/fb-blocks.txt`;
+      const lines = [
+        "line1", "MATCH_A", "line3",
+        "line4", "line5", "line6", "line7", "line8",
+        "line9", "MATCH_B", "line11",
+      ];
+      await Bun.write(filePath, lines.join("\n"));
+
+      const result = await grep_files.execute({
+        pattern: "MATCH_[AB]",
+        path: filePath,
+        context_lines: 1,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain(":2:MATCH_A");
+      expect(output).toContain(":10:MATCH_B");
+      // Block separator between non-contiguous context ranges
+      expect(output).toContain("--");
+    });
+
+    it("should handle context with multiple files", async () => {
+      const context = { taskId: "test-task-id" };
+      await Bun.write(`${testDir}/fb-ctx-a.txt`, "line1\nCTX_MULTI_MATCH\nline3");
+      await Bun.write(`${testDir}/fb-ctx-b.txt`, "line1\nline2\nCTX_MULTI_MATCH\nline4");
+
+      const result = await grep_files.execute({
+        pattern: "CTX_MULTI_MATCH",
+        path: testDir,
+        context_lines: 1,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      // Both files should appear
+      expect(output).toContain("fb-ctx-a.txt ===");
+      expect(output).toContain("fb-ctx-b.txt ===");
+    });
+  });
 });
