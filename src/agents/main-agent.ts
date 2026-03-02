@@ -102,9 +102,9 @@ export class MainAgent {
   private _copilotCredPath: string;
   private _mcpAuthDir: string;
   private _tickTimer: ReturnType<typeof setTimeout> | null = null;
-  private _tickIntervalMs = 10_000; // starts at 10s, doubles each tick, max 60s
-  private _tickMaxIntervalMs = 60_000;
-  private _tickCurrentInterval = 10_000;
+  private _tickFirstIntervalMs = 30_000; // first tick after 30s
+  private _tickIntervalMs = 60_000; // subsequent ticks every 60s
+  private _tickIsFirst = true;
 
   constructor(deps: MainAgentDeps) {
     this.models = deps.models;
@@ -891,20 +891,21 @@ export class MainAgent {
 
   /**
    * Start periodic tick when tasks/subagents are active.
-   * Uses exponential backoff: 10s → 20s → 40s → 60s (capped).
+   * First tick after 30s, then every 60s.
    * Injects a status summary into the session so the LLM can decide
    * whether to update the user on progress. Prevents silent waiting.
    */
   private _startTick(): void {
     if (this._tickTimer) return; // Already ticking
-    this._tickCurrentInterval = this._tickIntervalMs; // Reset to initial interval
+    this._tickIsFirst = true;
     this._scheduleTick();
-    logger.info({ intervalMs: this._tickCurrentInterval }, "tick_started");
+    logger.info("tick_started");
   }
 
-  /** Schedule the next tick with current interval. */
+  /** Schedule the next tick. */
   private _scheduleTick(): void {
-    this._tickTimer = setTimeout(() => this._onTick(), this._tickCurrentInterval);
+    const delay = this._tickIsFirst ? this._tickFirstIntervalMs : this._tickIntervalMs;
+    this._tickTimer = setTimeout(() => this._onTick(), delay);
   }
 
   /** Stop the tick timer when no active work remains. */
@@ -912,7 +913,7 @@ export class MainAgent {
     if (!this._tickTimer) return;
     clearTimeout(this._tickTimer);
     this._tickTimer = null;
-    this._tickCurrentInterval = this._tickIntervalMs; // Reset for next start
+    this._tickIsFirst = true;
     logger.info("tick_stopped");
   }
 
@@ -959,11 +960,8 @@ export class MainAgent {
       this._processQueue();
     }
 
-    // Exponential backoff: double interval, cap at max
-    this._tickCurrentInterval = Math.min(
-      this._tickCurrentInterval * 2,
-      this._tickMaxIntervalMs,
-    );
+    // Schedule next tick (switch to regular interval after first)
+    this._tickIsFirst = false;
     this._scheduleTick();
   }
 
