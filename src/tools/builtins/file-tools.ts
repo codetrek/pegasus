@@ -438,20 +438,21 @@ interface ContextLine {
 
 export const grep_files: Tool = {
   name: "grep_files",
-  description: "Search file contents using a regular expression pattern. "
-    + "Returns matching lines with file paths and line numbers. "
-    + "Supports case-insensitive search, context lines, multiline matching, and multiple output modes.",
+  description: "Search file contents using regex. Returns ripgrep-style output: "
+    + "'file:line:content' for matches, 'file-line-content' for context lines, '--' between blocks. "
+    + "Use output_mode='files_with_matches' to get just file paths. "
+    + "Prefer grep_files over shell_exec grep/rg for structured, token-efficient search.",
   category: "file" as ToolCategory,
   parameters: z.object({
-    pattern: z.string().min(1).describe("Regex pattern to search for"),
+    pattern: z.string().min(1).describe("Regex pattern to search for (e.g. 'function\\s+\\w+', 'TODO')"),
     path: z.string().default(".").describe("Directory or file to search in"),
-    include: z.string().optional().describe("File name glob pattern (e.g. '*.ts', '*.{ts,js}')"),
-    max_results: z.coerce.number().int().positive().optional().default(50).describe("Maximum matches to return"),
+    include: z.string().optional().describe("File name glob filter (e.g. '*.ts', '*.{ts,js}')"),
+    max_results: z.coerce.number().int().positive().optional().default(50).describe("Maximum matches to return (default 50)"),
     case_insensitive: z.boolean().optional().default(false).describe("Case-insensitive matching"),
-    context_lines: z.coerce.number().int().min(0).max(10).optional().describe("Number of context lines before and after each match"),
+    context_lines: z.coerce.number().int().min(0).max(10).optional().describe("Lines of context before and after each match (like grep -C)"),
     output_mode: z.enum(["content", "files_with_matches", "count"]).optional().default("content")
-      .describe("Output mode: content (matching lines), files_with_matches (file paths only), count (match counts per file)"),
-    multiline: z.boolean().optional().default(false).describe("Enable multiline matching where . matches newlines"),
+      .describe("content: matching lines (default); files_with_matches: file paths only; count: match counts per file"),
+    multiline: z.boolean().optional().default(false).describe("Enable multiline matching where . matches newlines (like grep -z)"),
   }),
   async execute(params: unknown, context: ToolContext): Promise<ToolResult> {
     const startedAt = Date.now();
@@ -710,31 +711,54 @@ export const grep_files: Tool = {
         await walkDir(searchPath);
       }
 
-      // Build result based on output mode
-      let resultData: Record<string, unknown>;
+      // Build ripgrep-style text output
+      const outputLines: string[] = [];
+
       if (output_mode === "files_with_matches") {
-        resultData = {
-          files: filesWithMatches,
-          totalMatches,
-          truncated: filesWithMatches.length >= max_results && totalMatches > filesWithMatches.length,
-        };
+        for (const f of filesWithMatches) {
+          outputLines.push(f);
+        }
       } else if (output_mode === "count") {
-        resultData = {
-          counts: countPerFile,
-          totalMatches,
-          truncated: countPerFile.length >= max_results,
-        };
+        for (const entry of countPerFile) {
+          outputLines.push(`${entry.file}:${entry.count}`);
+        }
       } else {
-        resultData = {
-          matches: contentMatches,
-          totalMatches,
-          truncated: totalMatches > contentMatches.length,
-        };
+        // content mode — ripgrep style
+        for (let i = 0; i < contentMatches.length; i++) {
+          const m = contentMatches[i]!;
+          if (i > 0) outputLines.push("--"); // separator between blocks
+
+          if (m.context) {
+            // Context mode: file:lineNum:line for matches, file-lineNum-line for context
+            for (const ctx of m.context) {
+              if (ctx.isMatch) {
+                outputLines.push(`${m.file}:${ctx.lineNumber}:${ctx.line}`);
+              } else {
+                outputLines.push(`${m.file}-${ctx.lineNumber}-${ctx.line}`);
+              }
+            }
+          } else {
+            // No context: file:lineNum:line
+            outputLines.push(`${m.file}:${m.lineNumber}:${m.line}`);
+          }
+        }
+      }
+
+      // Append summary footer
+      const truncated =
+        output_mode === "files_with_matches"
+          ? filesWithMatches.length >= max_results && totalMatches > filesWithMatches.length
+          : output_mode === "count"
+            ? countPerFile.length >= max_results
+            : totalMatches > contentMatches.length;
+
+      if (truncated) {
+        outputLines.push(`\n[${totalMatches} total matches, showing first ${max_results}]`);
       }
 
       return {
         success: true,
-        result: resultData,
+        result: outputLines.join("\n"),
         startedAt,
         completedAt: Date.now(),
         durationMs: Date.now() - startedAt,
@@ -755,10 +779,12 @@ export const grep_files: Tool = {
 
 export const glob_files: Tool = {
   name: "glob_files",
-  description: "Find files matching a glob pattern. Returns file paths sorted by modification time (newest first).",
+  description: "Find files by name pattern. Use this when you need to locate files (e.g. '**/*.ts', 'src/**/*.test.ts'). "
+    + "Returns file paths sorted by modification time (newest first). "
+    + "Prefer glob_files over list_files when searching by extension or name pattern across directories.",
   category: "file" as ToolCategory,
   parameters: z.object({
-    pattern: z.string().describe("Glob pattern (e.g. '**/*.ts', 'src/**/*.test.ts')"),
+    pattern: z.string().describe("Glob pattern (e.g. '**/*.ts', 'src/components/**/*.tsx', '*.config.{js,ts}')"),
     cwd: z.string().optional().describe("Base directory (defaults to process.cwd())"),
     max_results: z.coerce.number().int().positive().optional().default(100).describe("Maximum files to return"),
   }),
