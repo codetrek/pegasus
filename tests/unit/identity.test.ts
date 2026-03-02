@@ -255,14 +255,22 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("## Delegation");
   });
 
-  test("delegation section has table with all delegation tools", () => {
+  test("delegation section has sub-sections with examples and flowchart", () => {
     const prompt = buildSystemPrompt({ mode: "main", persona });
-    expect(prompt).toContain("reply()");
-    expect(prompt).toContain("spawn_task");
-    expect(prompt).toContain("spawn_subagent");
-    expect(prompt).toContain("create_project");
-    expect(prompt).toContain("explore (read-only)");
-    expect(prompt).toContain("SubAgent is autonomous");
+    // Sub-section headers
+    expect(prompt).toContain("### reply() — Handle It Yourself");
+    expect(prompt).toContain("### spawn_task() — Single Atomic Task");
+    expect(prompt).toContain("### spawn_subagent() — Complex Multi-Step Work");
+    expect(prompt).toContain("### create_project() — Long-Lived Effort");
+    // Decision Flowchart
+    expect(prompt).toContain("### Decision Flowchart");
+    // After Delegation
+    expect(prompt).toContain("### After Delegation");
+    // Concrete examples
+    expect(prompt).toContain("Search the web for X");
+    expect(prompt).toContain("Research top 5 frameworks");
+    // Key differences
+    expect(prompt).toContain('spawn_task = "do this one thing"');
   });
 
   test("does NOT include Delegation in task mode", () => {
