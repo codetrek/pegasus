@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { MainAgent } from "@pegasus/agents/main-agent.ts";
 import type {
   LanguageModel,
@@ -16,7 +16,8 @@ import { ProjectAdapter } from "@pegasus/projects/project-adapter.ts";
 import { WorkerAdapter } from "@pegasus/workers/worker-adapter.ts";
 import { mock } from "bun:test";
 
-const testDataDir = "/tmp/pegasus-test-main-agent";
+let testSeq = 0;
+let testDataDir = "/tmp/pegasus-test-main-agent";
 
 const testPersona: Persona = {
   name: "TestBot",
@@ -121,6 +122,10 @@ function testSettings() {
 }
 
 describe("MainAgent", () => {
+  beforeEach(() => {
+    testSeq++;
+    testDataDir = `/tmp/pegasus-test-main-agent-${process.pid}-${testSeq}`;
+  });
   afterEach(async () => {
     await rm(testDataDir, { recursive: true, force: true }).catch(() => {});
   });
