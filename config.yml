@@ -157,6 +157,13 @@ session:
   # Fraction of context window that triggers compact (0.1-1.0)
   compactThreshold: ${SESSION_COMPACT_THRESHOLD:-0.8}
 
+# Vision (image processing)
+vision:
+  enabled: true
+  keepLastNTurns: 5       # how many recent turns keep images hydrated
+  maxDimensionPx: 1200    # max image side after resize
+  maxImageBytes: 5242880  # 5MB per image (API limit)
+
 channels:
   telegram:
     enabled: ${TELEGRAM_ENABLED:-false}

@@ -72,11 +72,15 @@ export function context_pushToolResult(
     toolResult.completedAt ?? Date.now(),
     toolResult.durationMs,
   );
-  context.messages.push({
+  const msg: Message = {
     role: "tool",
     content: `${tsPrefix}\n${rawContent}`,
     toolCallId,
-  });
+  };
+  if (toolResult.images?.length) {
+    msg.images = toolResult.images;
+  }
+  context.messages.push(msg);
 }
 
 // ── Async Semaphore ──────────────────────────────────
