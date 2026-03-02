@@ -28,6 +28,7 @@ Tracked features, improvements, and ideas — what's done and what's next.
 - [x] P0 — Prompt Mode (full/minimal) + per-tool descriptions
 - [x] P1 — Safety guardrails + tool call style guidance + input sanitization
 - [x] P2 — Section modularization: `buildXxxSection()` composable functions
+- [x] Runtime metadata: one-line runtime info in system prompt (host, OS, model, timezone, workspace)
 
 ### Project System
 - [x] PROJECT.md format: frontmatter (name, status, model, workdir, timestamps) + markdown body
@@ -42,8 +43,10 @@ Tracked features, improvements, and ideas — what's done and what's next.
 - [x] Project Agent spawn_subagent for sub-tasks
 
 ### Multi-Model & LLM Providers
-- [x] Per-role model config: default, subAgent, compact, reflection
-- [x] Per-role context window and API type override
+- [x] Tier-based model selection: fast, balanced, powerful tiers (replaces per-role system)
+- [x] Per-tier context window and API type override
+- [x] SUBAGENT.md `model` field: declare tier or specific model per subagent type
+- [x] pi-ai LLM layer: unified multi-provider abstraction (replaced custom clients)
 - [x] OpenAI Codex integration (Responses API + device code OAuth)
 - [x] GitHub Copilot integration (OpenAI-compatible + device code OAuth)
 - [x] Provider auto-detection + explicit type override
@@ -56,11 +59,20 @@ Tracked features, improvements, and ideas — what's done and what's next.
 
 ### Tool System
 - [x] MCP server integration: connect external tool services via standard protocol
+- [x] MCP OAuth authentication: Client Credentials + Device Code flows
+- [x] web_search: Tavily API integration for real-time web searches
+- [x] web_fetch: AI-powered web content extraction with LLM summarization
+- [x] Background tool execution: bg_run, bg_output, bg_stop for long-running commands
+- [x] Large file context protection: automatic truncation and guidance for oversized reads
+
+### Memory System
+- [x] Memory injection: load facts fully + episodes summary into session on start and after compact
+- [x] PostTaskReflector: async memory extraction after task completion (facts + episodes)
+- [x] MainAgent reflection: extract facts/episodes during session compact (fire-and-forget)
 
 ## Planned
 
 ### System Prompt — Remaining
-- [x] Runtime metadata: one-line runtime info in system prompt (host, OS, model, timezone, workspace)
 - [ ] SUBAGENT.md verification: confirm explore/plan/general prompts match design constraints
 
 ### Skill System — Remaining
@@ -73,10 +85,6 @@ Tracked features, improvements, and ideas — what's done and what's next.
 - [ ] Heartbeat system: periodic poll to check if anything needs attention
 - [ ] Cron/scheduled tasks: time-based task triggers (reminders, periodic checks)
 - [ ] Wake events: external triggers (file system changes, webhook callbacks)
-
-### MainAgent Reflection
-- [ ] Reflection during session compact: extract facts/episodes while summarizing
-- [ ] MainAgent sees user preferences, identity info — most valuable facts come from here
 
 ### Multi-User Identity & Permissions
 - [ ] Owner ID hashing: HMAC-SHA256 hashes instead of raw IDs in system prompt

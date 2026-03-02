@@ -43,7 +43,9 @@ import { ProjectManager } from "../projects/manager.ts";
 import { ProjectAdapter } from "../projects/project-adapter.ts";
 
 // Main Agent's curated tool set
-import { mainAgentTools } from "../tools/builtins/index.ts";
+import { mainAgentTools, reflectionTools } from "../tools/builtins/index.ts";
+import { PostTaskReflector } from "../cognitive/reflect.ts";
+import { createTaskContext } from "../task/context.ts";
 import { MCPManager, wrapMCPTools } from "../mcp/index.ts";
 import type { MCPServerConfig } from "../mcp/index.ts";
 import { TokenRefreshMonitor } from "../mcp/auth/refresh-monitor.ts";
@@ -701,6 +703,9 @@ export class MainAgent {
       "compact_triggered",
     );
 
+    // Save pre-compact messages for reflection BEFORE archiving
+    const preCompactMessages = [...this.sessionMessages];
+
     // 1. Generate summary via independent LLM call
     const summary = await this._generateSummary();
 
@@ -713,7 +718,124 @@ export class MainAgent {
     this.lastPromptTokens = 0;
 
     logger.info({ archiveName }, "compact_completed");
+
+    // 4. Fire-and-forget reflection on the archived session
+    if (this._shouldReflectOnSession(preCompactMessages)) {
+      this._runMainReflection(preCompactMessages).catch((err) => {
+        logger.warn({ error: err instanceof Error ? err.message : String(err) }, "main_reflection_failed");
+      });
+    }
+
     return true;
+  }
+
+  // ── Main Reflection ──
+
+  /**
+   * Gate: should we reflect on this session?
+   * Skip trivial sessions (e.g., just a summary message after restart).
+   */
+  _shouldReflectOnSession(messages: Message[]): boolean {
+    // Skip very short sessions
+    if (messages.length < 6) return false;
+
+    // Count user messages — these contain the valuable info
+    const userMessages = messages.filter((m) => m.role === "user").length;
+    if (userMessages < 2) return false;
+
+    return true;
+  }
+
+  /**
+   * Run PostTaskReflector on the archived session messages to extract
+   * facts/episodes for long-term memory. Fire-and-forget.
+   */
+  async _runMainReflection(sessionMessages: Message[]): Promise<void> {
+    logger.info({ messageCount: sessionMessages.length }, "main_reflection_start");
+
+    // 1. Build a TaskContext from session messages
+    const context = createTaskContext({
+      id: `main-reflection-${Date.now()}`,
+      inputText: "MainAgent conversation session (compact triggered)",
+      source: "main-agent",
+      taskType: "main-reflection",
+    });
+    context.messages = sessionMessages;
+    context.iteration = sessionMessages.length; // rough proxy
+
+    // 2. Pre-load existing facts (full content) and episode index
+    //    Same pattern as Agent._runPostReflection (agent.ts lines 638-677)
+    const memoryDir = path.join(this.settings.dataDir, "memory");
+    const existingFacts: Array<{ path: string; content: string }> = [];
+    const episodeIndex: Array<{ path: string; summary: string }> = [];
+
+    try {
+      const listResult = await this.toolExecutor.execute(
+        "memory_list",
+        {},
+        { taskId: context.id, memoryDir },
+      );
+      if (listResult.success && Array.isArray(listResult.result)) {
+        const entries = listResult.result as Array<{ path: string; summary: string; size: number }>;
+
+        for (const entry of entries) {
+          if (entry.path.startsWith("facts/")) {
+            const readResult = await this.toolExecutor.execute(
+              "memory_read",
+              { path: entry.path },
+              { taskId: context.id, memoryDir },
+            );
+            if (readResult.success && typeof readResult.result === "string") {
+              existingFacts.push({ path: entry.path, content: readResult.result });
+            }
+          } else if (entry.path.startsWith("episodes/")) {
+            episodeIndex.push({ path: entry.path, summary: entry.summary });
+          }
+        }
+
+        // Trim episodes to ~10K chars, most recent first
+        let totalChars = 0;
+        const trimmedEpisodes: typeof episodeIndex = [];
+        for (const ep of [...episodeIndex].reverse()) {
+          const lineLen = ep.path.length + ep.summary.length + 4;
+          if (totalChars + lineLen > 10_000) break;
+          totalChars += lineLen;
+          trimmedEpisodes.push(ep);
+        }
+        episodeIndex.length = 0;
+        episodeIndex.push(...trimmedEpisodes);
+      }
+    } catch {
+      // Memory unavailable — continue without existing memory
+    }
+
+    // 3. Create reflection-specific ToolRegistry (memory tools only, no memory_list)
+    const reflectionToolRegistry = new ToolRegistry();
+    reflectionToolRegistry.registerMany(reflectionTools);
+
+    // 4. Resolve reflection model (fast tier)
+    const reflectionModel = this.models.getForTier("fast");
+
+    // 5. Create PostTaskReflector instance
+    const reflector = new PostTaskReflector({
+      model: reflectionModel,
+      persona: this.persona,
+      toolRegistry: reflectionToolRegistry,
+      toolExecutor: this.toolExecutor,
+      memoryDir,
+      contextWindowSize: getContextWindowSize(
+        reflectionModel.modelId,
+        this.models.getContextWindowForTier("fast") ?? this.settings.llm.contextWindow,
+      ),
+    });
+
+    // 6. Run reflection
+    const reflection = await reflector.run(context, existingFacts, episodeIndex);
+
+    logger.info(
+      { toolCalls: reflection.toolCallsCount, assessment: reflection.assessment },
+      "main_reflection_complete",
+    );
   }
 
   /**
