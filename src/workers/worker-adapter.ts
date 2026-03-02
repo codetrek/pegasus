@@ -89,9 +89,28 @@ export class WorkerAdapter {
     this.onNotify = callback;
   }
 
-  /** Set callback for Worker close events. */
+  /** Set callback for Worker close events (replaces existing callback). */
   setOnWorkerClose(callback: OnWorkerCloseCallback): void {
     this.onWorkerClose = callback;
+  }
+
+  /**
+   * Add an additional Worker close callback (composes with existing).
+   *
+   * Unlike setOnWorkerClose which replaces, this appends a second callback
+   * that fires after the existing one. Used by MainAgent to handle SubAgent
+   * cleanup without overwriting ProjectAdapter's close handler.
+   */
+  addOnWorkerClose(callback: OnWorkerCloseCallback): void {
+    const existing = this.onWorkerClose;
+    if (existing) {
+      this.onWorkerClose = (channelType, channelId) => {
+        existing(channelType, channelId);
+        callback(channelType, channelId);
+      };
+    } else {
+      this.onWorkerClose = callback;
+    }
   }
 
   /**
