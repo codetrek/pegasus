@@ -13,6 +13,12 @@ const set_env = systemToolsModule.set_env;
 
 export { current_time, sleep, get_env, set_env };
 
+// Shell tools
+import * as shellToolsModule from "./shell-tools.ts";
+const shell_exec = shellToolsModule.shell_exec;
+
+export { shell_exec };
+
 // File tools
 import * as fileToolsModule from "./file-tools.ts";
 const read_file = fileToolsModule.read_file;
@@ -130,6 +136,7 @@ export const systemTools: Tool[] = [
   sleep,
   get_env,
   set_env,
+  shell_exec,
 ];
 
 export const fileTools: Tool[] = [
