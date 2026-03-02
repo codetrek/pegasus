@@ -1,5 +1,5 @@
 /**
- * Tests for SubagentLoader — SUBAGENT.md parsing and directory scanning.
+ * Tests for AITaskTypeLoader — AITASK.md parsing and directory scanning.
  *
  * Covers frontmatter parsing, model field extraction, name validation,
  * tool parsing, and multi-directory scanning with source tagging.
@@ -8,25 +8,25 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
 import path from "node:path";
 import { tmpdir } from "os";
-import { parseSubagentFile, scanSubagentDir, loadAllSubagents } from "@pegasus/subagents/loader.ts";
+import { parseAITaskTypeFile, scanAITaskTypeDir, loadAITaskTypeDefinitions } from "@pegasus/aitask-types/loader.ts";
 
 function makeTmpDir(): string {
-  return mkdtempSync(path.join(tmpdir(), "subagent-loader-test-"));
+  return mkdtempSync(path.join(tmpdir(), "aitask-type-loader-test-"));
 }
 
-function writeSubagentMd(dir: string, name: string, content: string): string {
+function writeAITaskMd(dir: string, name: string, content: string): string {
   const subDir = path.join(dir, name);
   mkdirSync(subDir, { recursive: true });
-  const filePath = path.join(subDir, "SUBAGENT.md");
+  const filePath = path.join(subDir, "AITASK.md");
   writeFileSync(filePath, content, "utf-8");
   return filePath;
 }
 
-describe("parseSubagentFile", () => {
+describe("parseAITaskTypeFile", () => {
   test("parses basic frontmatter fields", () => {
     const tmp = makeTmpDir();
     try {
-      const filePath = writeSubagentMd(tmp, "test-agent", `---
+      const filePath = writeAITaskMd(tmp, "test-agent", `---
 name: test-agent
 description: "A test agent"
 tools: "read_file, grep_files"
@@ -34,7 +34,7 @@ tools: "read_file, grep_files"
 
 You are a test agent.
 `);
-      const def = parseSubagentFile(filePath, "test-agent", "builtin");
+      const def = parseAITaskTypeFile(filePath, "test-agent", "builtin");
       expect(def).not.toBeNull();
       expect(def!.name).toBe("test-agent");
       expect(def!.description).toBe("A test agent");
@@ -49,7 +49,7 @@ You are a test agent.
   test("model field is parsed from frontmatter (tier name)", () => {
     const tmp = makeTmpDir();
     try {
-      const filePath = writeSubagentMd(tmp, "explore", `---
+      const filePath = writeAITaskMd(tmp, "explore", `---
 name: explore
 description: "Explorer agent"
 tools: "*"
@@ -58,7 +58,7 @@ model: fast
 
 Explore things.
 `);
-      const def = parseSubagentFile(filePath, "explore", "builtin");
+      const def = parseAITaskTypeFile(filePath, "explore", "builtin");
       expect(def).not.toBeNull();
       expect(def!.model).toBe("fast");
     } finally {
@@ -69,7 +69,7 @@ Explore things.
   test("model field is parsed from frontmatter (specific model spec)", () => {
     const tmp = makeTmpDir();
     try {
-      const filePath = writeSubagentMd(tmp, "custom", `---
+      const filePath = writeAITaskMd(tmp, "custom", `---
 name: custom
 description: "Custom agent"
 tools: "*"
@@ -78,7 +78,7 @@ model: openai/gpt-4o-mini
 
 Custom prompt.
 `);
-      const def = parseSubagentFile(filePath, "custom", "user");
+      const def = parseAITaskTypeFile(filePath, "custom", "user");
       expect(def).not.toBeNull();
       expect(def!.model).toBe("openai/gpt-4o-mini");
     } finally {
@@ -89,7 +89,7 @@ Custom prompt.
   test("model field is undefined when not specified", () => {
     const tmp = makeTmpDir();
     try {
-      const filePath = writeSubagentMd(tmp, "no-model", `---
+      const filePath = writeAITaskMd(tmp, "no-model", `---
 name: no-model
 description: "Agent without model"
 tools: "*"
@@ -97,7 +97,7 @@ tools: "*"
 
 No model specified.
 `);
-      const def = parseSubagentFile(filePath, "no-model", "builtin");
+      const def = parseAITaskTypeFile(filePath, "no-model", "builtin");
       expect(def).not.toBeNull();
       expect(def!.model).toBeUndefined();
     } finally {
@@ -109,7 +109,7 @@ No model specified.
     const tmp = makeTmpDir();
     try {
       for (const tier of ["fast", "balanced", "powerful"]) {
-        const filePath = writeSubagentMd(tmp, `agent-${tier}`, `---
+        const filePath = writeAITaskMd(tmp, `agent-${tier}`, `---
 name: agent-${tier}
 description: "Agent with ${tier} tier"
 tools: "*"
@@ -118,7 +118,7 @@ model: ${tier}
 
 Prompt.
 `);
-        const def = parseSubagentFile(filePath, `agent-${tier}`, "builtin");
+        const def = parseAITaskTypeFile(filePath, `agent-${tier}`, "builtin");
         expect(def).not.toBeNull();
         expect(def!.model).toBe(tier);
       }
@@ -133,7 +133,7 @@ Prompt.
       const specs = ["openai/gpt-4o", "anthropic/claude-sonnet-4", "openai/gpt-4o-mini"];
       for (const spec of specs) {
         const safeName = spec.replace(/\//g, "-");
-        const filePath = writeSubagentMd(tmp, safeName, `---
+        const filePath = writeAITaskMd(tmp, safeName, `---
 name: ${safeName}
 description: "Agent with ${spec}"
 tools: "*"
@@ -142,7 +142,7 @@ model: ${spec}
 
 Prompt.
 `);
-        const def = parseSubagentFile(filePath, safeName, "user");
+        const def = parseAITaskTypeFile(filePath, safeName, "user");
         expect(def).not.toBeNull();
         expect(def!.model).toBe(spec);
       }
@@ -154,14 +154,14 @@ Prompt.
   test("uses dirName as name when frontmatter name is missing", () => {
     const tmp = makeTmpDir();
     try {
-      const filePath = writeSubagentMd(tmp, "fallback-name", `---
+      const filePath = writeAITaskMd(tmp, "fallback-name", `---
 description: "No name field"
 tools: "*"
 ---
 
 Body.
 `);
-      const def = parseSubagentFile(filePath, "fallback-name", "builtin");
+      const def = parseAITaskTypeFile(filePath, "fallback-name", "builtin");
       expect(def).not.toBeNull();
       expect(def!.name).toBe("fallback-name");
     } finally {
@@ -172,7 +172,7 @@ Body.
   test("tools '*' expands to wildcard array", () => {
     const tmp = makeTmpDir();
     try {
-      const filePath = writeSubagentMd(tmp, "wildcard", `---
+      const filePath = writeAITaskMd(tmp, "wildcard", `---
 name: wildcard
 description: "Wildcard tools"
 tools: "*"
@@ -180,7 +180,7 @@ tools: "*"
 
 Body.
 `);
-      const def = parseSubagentFile(filePath, "wildcard", "builtin");
+      const def = parseAITaskTypeFile(filePath, "wildcard", "builtin");
       expect(def).not.toBeNull();
       expect(def!.tools).toEqual(["*"]);
     } finally {
@@ -191,7 +191,7 @@ Body.
   test("returns null for invalid name", () => {
     const tmp = makeTmpDir();
     try {
-      const filePath = writeSubagentMd(tmp, "INVALID_NAME", `---
+      const filePath = writeAITaskMd(tmp, "INVALID_NAME", `---
 name: INVALID_NAME
 description: "Bad name"
 tools: "*"
@@ -199,7 +199,7 @@ tools: "*"
 
 Body.
 `);
-      const def = parseSubagentFile(filePath, "INVALID_NAME", "builtin");
+      const def = parseAITaskTypeFile(filePath, "INVALID_NAME", "builtin");
       expect(def).toBeNull();
     } finally {
       rmSync(tmp, { recursive: true, force: true });
@@ -209,8 +209,8 @@ Body.
   test("handles missing frontmatter gracefully", () => {
     const tmp = makeTmpDir();
     try {
-      const filePath = writeSubagentMd(tmp, "no-fm", "Just a markdown body.");
-      const def = parseSubagentFile(filePath, "no-fm", "builtin");
+      const filePath = writeAITaskMd(tmp, "no-fm", "Just a markdown body.");
+      const def = parseAITaskTypeFile(filePath, "no-fm", "builtin");
       expect(def).not.toBeNull();
       expect(def!.name).toBe("no-fm");
       expect(def!.tools).toEqual(["*"]);
@@ -221,11 +221,11 @@ Body.
   });
 });
 
-describe("scanSubagentDir", () => {
-  test("discovers subagents in directory", () => {
+describe("scanAITaskTypeDir", () => {
+  test("discovers AI task types in directory", () => {
     const tmp = makeTmpDir();
     try {
-      writeSubagentMd(tmp, "agent-a", `---
+      writeAITaskMd(tmp, "agent-a", `---
 name: agent-a
 description: "Agent A"
 tools: "*"
@@ -234,7 +234,7 @@ model: fast
 
 A prompt.
 `);
-      writeSubagentMd(tmp, "agent-b", `---
+      writeAITaskMd(tmp, "agent-b", `---
 name: agent-b
 description: "Agent B"
 tools: "*"
@@ -242,15 +242,15 @@ tools: "*"
 
 B prompt.
 `);
-      const defs = scanSubagentDir(tmp, "builtin");
+      const defs = scanAITaskTypeDir(tmp, "builtin");
       expect(defs.length).toBe(2);
-      const names = defs.map(d => d.name).sort();
+      const names = defs.map((d) => d.name).sort();
       expect(names).toEqual(["agent-a", "agent-b"]);
 
-      const agentA = defs.find(d => d.name === "agent-a");
+      const agentA = defs.find((d) => d.name === "agent-a");
       expect(agentA!.model).toBe("fast");
 
-      const agentB = defs.find(d => d.name === "agent-b");
+      const agentB = defs.find((d) => d.name === "agent-b");
       expect(agentB!.model).toBeUndefined();
     } finally {
       rmSync(tmp, { recursive: true, force: true });
@@ -258,17 +258,17 @@ B prompt.
   });
 
   test("returns empty array for nonexistent directory", () => {
-    const defs = scanSubagentDir("/nonexistent/path/xyz", "user");
+    const defs = scanAITaskTypeDir("/nonexistent/path/xyz", "user");
     expect(defs).toEqual([]);
   });
 });
 
-describe("loadAllSubagents", () => {
-  test("merges builtin and user subagents", () => {
+describe("loadAITaskTypeDefinitions", () => {
+  test("merges builtin and user AI task types", () => {
     const builtinDir = makeTmpDir();
     const userDir = makeTmpDir();
     try {
-      writeSubagentMd(builtinDir, "explore", `---
+      writeAITaskMd(builtinDir, "explore", `---
 name: explore
 description: "Built-in explore"
 tools: "*"
@@ -277,7 +277,7 @@ model: fast
 
 Explore.
 `);
-      writeSubagentMd(userDir, "custom", `---
+      writeAITaskMd(userDir, "custom", `---
 name: custom
 description: "User custom"
 tools: "*"
@@ -286,14 +286,14 @@ model: openai/gpt-4o-mini
 
 Custom.
 `);
-      const all = loadAllSubagents(builtinDir, userDir);
+      const all = loadAITaskTypeDefinitions(builtinDir, userDir);
       expect(all.length).toBe(2);
 
-      const explore = all.find(d => d.name === "explore");
+      const explore = all.find((d) => d.name === "explore");
       expect(explore!.source).toBe("builtin");
       expect(explore!.model).toBe("fast");
 
-      const custom = all.find(d => d.name === "custom");
+      const custom = all.find((d) => d.name === "custom");
       expect(custom!.source).toBe("user");
       expect(custom!.model).toBe("openai/gpt-4o-mini");
     } finally {

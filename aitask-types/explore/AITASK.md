@@ -1,6 +1,6 @@
 ---
 name: explore
-description: "Fast, read-only research agent. Use when you need to search the web, read files, gather information, or answer questions — without modifying anything. Safest subagent type."
+description: "Fast, read-only research agent. Use when you need to search the web, read files, gather information, or answer questions — without modifying anything. Safest task type."
 tools: "current_time, get_env, read_file, list_files, get_file_info, grep_files, web_fetch, web_search, json_parse, base64_decode, memory_list, memory_read, task_list, task_replay, notify"
 model: fast
 ---

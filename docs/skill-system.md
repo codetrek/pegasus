@@ -49,7 +49,7 @@ Review the code changes focusing on...
 | `disable-model-invocation` | No | `false` | `true` = only user can invoke via `/name` |
 | `user-invocable` | No | `true` | `false` = hidden from `/` menu, only LLM can invoke |
 | `allowed-tools` | No | all tools | Comma-separated list of tools available when skill is active |
-| `context` | No | `inline` | `inline` = execute in current context; `fork` = spawn_subagent |
+| `context` | No | `inline` | `inline` = execute in current context; `fork` = spawn_task |
 | `agent` | No | `general` | Task type when `context: fork` (future: explore, plan, deepresearch) |
 | `model` | No | `default` | ModelRegistry role or `provider/model` spec |
 | `argument-hint` | No | none | Autocomplete hint, e.g. `[issue-number]` |
@@ -169,7 +169,7 @@ Task Agent executes skill content as task input
    - Task completes → onNotify → MainAgent receives result
 ```
 
-This reuses the existing `spawn_subagent` / `onNotify` infrastructure. The only difference from a normal `spawn_subagent` is that the task input comes from skill content instead of user text.
+This reuses the existing `spawn_task` / `onNotify` infrastructure. The only difference from a normal `spawn_task` is that the task input comes from skill content instead of user text.
 
 ## Architecture Components
 
@@ -263,7 +263,7 @@ const use_skill: Tool = {
 | `src/tools/builtins/skill-tool.ts` | New: `use_skill` tool |
 | `src/tools/builtins/index.ts` | Add `use_skill` to `mainAgentTools` |
 | `src/agents/main-agent.ts` | Inject skill metadata into system prompt; handle `/` commands in `send()` |
-| `src/agents/agent.ts` | Minor: accept skill-spawned tasks (no change needed — spawn_subagent already works) |
+| `src/agents/agent.ts` | Minor: accept skill-spawned tasks (no change needed — spawn_task already works) |
 | `src/identity/prompt.ts` | Add skill metadata section to `buildSystemPrompt` |
 
 ### What Does NOT Change

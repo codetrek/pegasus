@@ -3,7 +3,7 @@
  *
  * Supports two modes:
  * - "main": Full prompt for MainAgent (inner monologue, tools, channels, skills, etc.)
- * - "task": Minimal prompt for Task Agent (identity + safety + subagent instructions)
+ * - "task": Minimal prompt for Task Agent (identity + safety + AI task type instructions)
  *
  * Default mode is "task" for backward compatibility with Thinker callers.
  */
@@ -28,10 +28,10 @@ export type PromptMode = "main" | "task";
 export interface PromptOptions {
   mode?: PromptMode;
   persona: Persona;
-  /** Task mode: subagent-specific prompt from SUBAGENT.md body */
-  subagentPrompt?: string;
-  /** Main mode: subagent type metadata from SubagentRegistry */
-  subagentMetadata?: string;
+  /** Task mode: AI task type-specific prompt from AITASK.md body */
+  aiTaskPrompt?: string;
+  /** Main mode: AI task type metadata from AITaskTypeRegistry */
+  aiTaskMetadata?: string;
   /** Main mode: skill metadata from SkillRegistry */
   skillMetadata?: string;
   /** Main mode: active/suspended project metadata */
@@ -103,7 +103,7 @@ export function buildToolsSection(): string[] {
     "",
     "### Communication",
     "- reply(text, channelId, replyTo?): The ONLY way the user hears you. Always pass back channel metadata.",
-    "- spawn_subagent(description, input, type?): Delegate work to a background subagent. Types: general (full access), explore (read-only), plan (analysis).",
+    "- spawn_task(description, input, type?): Delegate work to a background task. Types: general (full access), explore (read-only), plan (analysis).",
     "- use_skill(skill, args?): Invoke a registered skill by name.",
     "",
     "### Memory (long-term knowledge)",
@@ -143,12 +143,12 @@ export function buildReplyVsSpawnSection(): string[] {
     "- You can answer from session context or memory",
     "- A quick tool call is enough (time, memory lookup)",
     "",
-    "Spawn a subagent when:",
+    "Spawn a task when:",
     "- You need file I/O, shell commands, or web requests",
     "- The work requires multiple steps",
     "- You're unsure — err on the side of spawning",
     "",
-    "After calling spawn_subagent, the subagent runs in the background.",
+    "After calling spawn_task, the task runs in the background.",
     "You will receive the result automatically when it completes.",
     "Do NOT poll with task_replay — just wait for the result to arrive.",
     "",
@@ -220,8 +220,8 @@ export function buildSystemPrompt(options: PromptOptions): string {
     lines.push("", ...buildThinkingStyleSection());
     lines.push("", ...buildReplyVsSpawnSection());
 
-    if (options.subagentMetadata) {
-      lines.push("", options.subagentMetadata);
+    if (options.aiTaskMetadata) {
+      lines.push("", options.aiTaskMetadata);
     }
 
     if (options.projectMetadata) {
@@ -235,9 +235,9 @@ export function buildSystemPrompt(options: PromptOptions): string {
       lines.push("", options.skillMetadata);
     }
   } else {
-    // Task Agent: append subagent-specific prompt
-    if (options.subagentPrompt) {
-      lines.push("", options.subagentPrompt);
+    // Task Agent: append AI task type-specific prompt
+    if (options.aiTaskPrompt) {
+      lines.push("", options.aiTaskPrompt);
     }
   }
 

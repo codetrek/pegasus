@@ -1,24 +1,24 @@
-# Task Types (Subagent Specialization)
+# AITask Types (Task Specialization)
 
-> Source code: `src/subagents/`, `subagents/*/SUBAGENT.md`
+> Source code: `src/aitask-types/`, `aitask-types/*/AITASK.md`
 
 ## Core Idea
 
-Not every background task needs the same tools or instructions. A web search should not have write_file. A planning task should not be calling web_search. Task Types let the MainAgent spawn **specialized subagents** with per-type tool sets and system prompts.
+Not every background task needs the same tools or instructions. A web search should not have write_file. A planning task should not be calling web_search. AITask Types let the MainAgent spawn **specialized tasks** with per-type tool sets and system prompts.
 
-Subagent types are defined as **files** (SUBAGENT.md), not hardcoded. Users can add custom subagent types by creating files in `data/subagents/`.
+AITask types are defined as **files** (AITASK.md), not hardcoded. Users can add custom task types by creating files in `data/aitask-types/`.
 
 ## File Format
 
-Each subagent type is a directory containing `SUBAGENT.md` with YAML frontmatter + markdown body:
+Each task type is a directory containing `AITASK.md` with YAML frontmatter + markdown body:
 
 ```
-subagents/
-  general/SUBAGENT.md    # builtin, git tracked
-  explore/SUBAGENT.md
-  plan/SUBAGENT.md
-data/subagents/           # user-created, runtime (overrides builtin)
-  deepresearch/SUBAGENT.md
+aitask-types/
+  general/AITASK.md    # builtin, git tracked
+  explore/AITASK.md
+  plan/AITASK.md
+data/aitask-types/           # user-created, runtime (overrides builtin)
+  deepresearch/AITASK.md
 ```
 
 ```yaml
@@ -37,12 +37,12 @@ You are a research assistant...
 ```
 
 Frontmatter fields:
-- `name`: subagent type name (must match directory name)
+- `name`: task type name (must match directory name)
 - `description`: injected into MainAgent system prompt to help LLM choose the right type
 - `tools`: comma-separated tool names, or `"*"` for all task tools
 - `model`: _(optional)_ tier name (`fast`, `balanced`, `powerful`) or direct model spec (`openai/gpt-4o`). Resolved via `ModelRegistry.resolve()`. If omitted, the subagent uses the Agent's default model.
 
-Body: the system prompt appended to the base persona prompt when this subagent type runs.
+Body: the system prompt appended to the base persona prompt when this task type runs.
 
 ## Why
 
@@ -143,21 +143,21 @@ Your results will be returned to a main agent. You do NOT interact with the user
 
 ## Design Decisions
 
-### 1. `spawn_subagent` gets a `type` parameter
+### 1. `spawn_task` gets a `type` parameter
 
-MainAgent's LLM uses `spawn_subagent(type, description, input)` to specify the task type. The type defaults to `"general"` for backward compatibility.
+MainAgent's LLM uses `spawn_task(type, description, input)` to specify the task type. The type defaults to `"general"` for backward compatibility.
 
 The MainAgent system prompt explains when to use each type:
 ```
-- spawn_subagent(type: "explore"): research, web search, code reading, information gathering (read-only)
-- spawn_subagent(type: "plan"): analyze a problem, produce a structured plan (read + write plans)
-- spawn_subagent(type: "general"): full capabilities — file I/O, code changes, multi-step work
+- spawn_task(type: "explore"): research, web search, code reading, information gathering (read-only)
+- spawn_task(type: "plan"): analyze a problem, produce a structured plan (read + write plans)
+- spawn_task(type: "general"): full capabilities — file I/O, code changes, multi-step work
 ```
 
 ### 2. Type stored in TaskContext, flows through events
 
 `TaskContext` gets a `taskType` field. The type flows:
-- `spawn_subagent(type)` → `Agent.submit(text, source, type)` → `MESSAGE_RECEIVED` event payload → `TaskFSM.fromEvent()` → `context.taskType`
+- `spawn_task(type)` → `Agent.submit(text, source, type)` → `MESSAGE_RECEIVED` event payload → `TaskFSM.fromEvent()` → `context.taskType`
 - Agent reads `context.taskType` to select tools and system prompt at each cognitive iteration
 
 On resume, `taskType` is preserved (not cleared by `prepareContextForResume`).
@@ -191,7 +191,7 @@ Thinker's `run()` method accepts an optional `toolRegistry` parameter that overr
 ```
 User: "search for the latest AI papers"
   ↓
-MainAgent LLM decides: spawn_subagent(type="explore", input="...")
+MainAgent LLM decides: spawn_task(type="explore", input="...")
   ↓
 MainAgent extracts type, calls agent.submit(input, source, type="explore")
   ↓

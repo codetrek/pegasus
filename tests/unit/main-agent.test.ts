@@ -356,7 +356,7 @@ describe("MainAgent", () => {
     await agent.stop();
   }, 10_000);
 
-  it("should handle spawn_subagent tool call and task completion", async () => {
+  it("should handle spawn_task tool call and task completion", async () => {
     let mainCallCount = 0;
     const model: LanguageModel = {
       provider: "test",
@@ -371,14 +371,14 @@ describe("MainAgent", () => {
         if (isMainAgent) {
           mainCallCount++;
           if (mainCallCount === 1) {
-            // First MainAgent call: LLM requests spawn_subagent
+            // First MainAgent call: LLM requests spawn_task
             return {
               text: "I need to spawn a task for this.",
               finishReason: "tool_calls",
               toolCalls: [
                 {
                   id: "tc-spawn",
-                  name: "spawn_subagent",
+                  name: "spawn_task",
                   arguments: {
                     description: "Do a complex search",
                     input: "search for weather",
@@ -431,7 +431,7 @@ describe("MainAgent", () => {
       channel: { type: "cli", channelId: "test" },
     });
 
-    // Wait for spawn_subagent to process — the underlying Agent will run the
+    // Wait for spawn_task to process — the underlying Agent will run the
     // task asynchronously, and when it completes, MainAgent receives
     // the result via _onTaskResult → _handleTaskResult → onReply
     await Bun.sleep(3000);
@@ -654,7 +654,7 @@ describe("MainAgent", () => {
               toolCalls: [
                 {
                   id: "tc-spawn",
-                  name: "spawn_subagent",
+                  name: "spawn_task",
                   arguments: { description: "Do work", input: "initial work" },
                 },
               ],

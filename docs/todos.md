@@ -8,13 +8,13 @@ Tracked features, improvements, and ideas — what's done and what's next.
 - [x] Skill framework: SkillLoader, SkillRegistry, SKILL.md format (YAML frontmatter + markdown body)
 - [x] Skill storage: `skills/` (builtin, git tracked) + `data/skills/` (user/LLM created, runtime)
 - [x] Skill triggering: LLM-driven (description in context) + user `/` command
-- [x] Skill injection: inline (MainAgent/TaskAgent context) + fork (spawn_subagent)
+- [x] Skill injection: inline (MainAgent/TaskAgent context) + fork (spawn_task)
 
-### Task Types (Subagent Specialization)
+### AITask Types (Task Specialization)
 - [x] Task type system: explore, plan, general
 - [x] Per-type tool sets: explore (read-only), plan (read-only + write plans), general (all tools)
 - [x] Per-type system prompts: specialized instructions for each type
-- [x] `spawn_subagent` type parameter: MainAgent specifies task type when spawning
+- [x] `spawn_task` type parameter: MainAgent specifies task type when spawning
 - [x] Skill `agent` field maps to task type
 - [x] Two-layer tool restriction: LLM visibility + execution validation
 - [x] Persistence backward compatibility (old JSONL defaults to "general")
@@ -40,7 +40,7 @@ Tracked features, improvements, and ideas — what's done and what's next.
 - [x] MainAgent project tools: create/list/suspend/resume/complete/archive
 - [x] Project memory isolation: scoped memory per project
 - [x] Project skill loading: global + project-specific skills
-- [x] Project Agent spawn_subagent for sub-tasks
+- [x] Project Agent spawn_task for sub-tasks
 
 ### Multi-Model & LLM Providers
 - [x] Tier-based model selection: fast, balanced, powerful tiers (replaces per-role system)
@@ -73,7 +73,7 @@ Tracked features, improvements, and ideas — what's done and what's next.
 ## Planned
 
 ### System Prompt — Remaining
-- [ ] SUBAGENT.md verification: confirm explore/plan/general prompts match design constraints
+- [ ] AITASK.md verification: confirm explore/plan/general prompts match design constraints
 
 ### Skill System — Remaining
 - [ ] LLM-created skills: PostTaskReflector creates new skills from repeated patterns

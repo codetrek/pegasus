@@ -1,22 +1,22 @@
 /**
- * SubagentLoader — scan directories and parse SUBAGENT.md files.
+ * AITaskTypeLoader — scan directories and parse AITASK.md files.
  *
- * Discovers subagent types from:
- *   subagents/       (builtin, git tracked)
- *   data/subagents/  (user-created, runtime)
+ * Discovers AI task types from:
+ *   aitask-types/       (builtin, git tracked)
+ *   data/aitask-types/  (user-created, runtime)
  *
- * Each subagent is a directory containing SUBAGENT.md with YAML frontmatter + markdown body.
+ * Each AI task type is a directory containing AITASK.md with YAML frontmatter + markdown body.
  */
 import { existsSync, readdirSync, readFileSync } from "fs";
 import path from "node:path";
 import yaml from "js-yaml";
 import { getLogger } from "../infra/logger.ts";
 import { errorToString } from "../infra/errors.ts";
-import type { SubagentDefinition, SubagentFrontmatter } from "./types.ts";
+import type { AITaskTypeDefinition, AITaskTypeFrontmatter } from "./types.ts";
 
-const logger = getLogger("subagent_loader");
+const logger = getLogger("aitask_type_loader");
 
-const SUBAGENT_FILE = "SUBAGENT.md";
+const AITASK_FILE = "AITASK.md";
 
 /** Split YAML frontmatter from markdown body. */
 function splitFrontmatter(content: string): { frontmatter: string | null; body: string } {
@@ -27,23 +27,23 @@ function splitFrontmatter(content: string): { frontmatter: string | null; body: 
   return { frontmatter: null, body: content.trim() };
 }
 
-/** Parse a SUBAGENT.md file into a SubagentDefinition. */
-export function parseSubagentFile(
+/** Parse an AITASK.md file into an AITaskTypeDefinition. */
+export function parseAITaskTypeFile(
   filePath: string,
   dirName: string,
   source: "builtin" | "user",
-): SubagentDefinition | null {
+): AITaskTypeDefinition | null {
   try {
     const content = readFileSync(filePath, "utf-8");
     const { frontmatter, body } = splitFrontmatter(content);
 
-    const fm = (frontmatter ? yaml.load(frontmatter) : {}) as SubagentFrontmatter;
+    const fm = (frontmatter ? yaml.load(frontmatter) : {}) as AITaskTypeFrontmatter;
 
     const name = fm.name ?? dirName;
 
     // Validate name: lowercase letters, numbers, hyphens, max 64 chars
     if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(name)) {
-      logger.warn({ name, filePath }, "invalid_subagent_name");
+      logger.warn({ name, filePath }, "invalid_aitask_type_name");
       return null;
     }
 
@@ -56,7 +56,7 @@ export function parseSubagentFile(
     }
 
     if (!fm.description) {
-      logger.warn({ name, filePath }, "subagent_missing_description");
+      logger.warn({ name, filePath }, "aitask_type_missing_description");
     }
 
     // optional: can be tier name ("fast") or model spec ("openai/gpt-4o")
@@ -71,41 +71,41 @@ export function parseSubagentFile(
       model,
     };
   } catch (err) {
-    logger.warn({ filePath, error: errorToString(err) }, "subagent_parse_error");
+    logger.warn({ filePath, error: errorToString(err) }, "aitask_type_parse_error");
     return null;
   }
 }
 
-/** Scan a directory for subagent subdirectories containing SUBAGENT.md. */
-export function scanSubagentDir(
+/** Scan a directory for AI task type subdirectories containing AITASK.md. */
+export function scanAITaskTypeDir(
   dir: string,
   source: "builtin" | "user",
-): SubagentDefinition[] {
+): AITaskTypeDefinition[] {
   if (!existsSync(dir)) return [];
 
-  const defs: SubagentDefinition[] = [];
+  const defs: AITaskTypeDefinition[] = [];
   try {
     const entries = readdirSync(dir, { withFileTypes: true });
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      const filePath = path.join(dir, entry.name, SUBAGENT_FILE);
+      const filePath = path.join(dir, entry.name, AITASK_FILE);
       if (existsSync(filePath)) {
-        const def = parseSubagentFile(filePath, entry.name, source);
+        const def = parseAITaskTypeFile(filePath, entry.name, source);
         if (def) {
           defs.push(def);
-          logger.info({ name: def.name, source }, "subagent_discovered");
+          logger.info({ name: def.name, source }, "aitask_type_discovered");
         }
       }
     }
   } catch (err) {
-    logger.warn({ dir, error: errorToString(err) }, "subagent_dir_scan_error");
+    logger.warn({ dir, error: errorToString(err) }, "aitask_type_dir_scan_error");
   }
   return defs;
 }
 
-/** Load all subagents from builtin and user directories. */
-export function loadAllSubagents(builtinDir: string, userDir: string): SubagentDefinition[] {
-  const builtin = scanSubagentDir(builtinDir, "builtin");
-  const user = scanSubagentDir(userDir, "user");
+/** Load all AI task types from builtin and user directories. */
+export function loadAITaskTypeDefinitions(builtinDir: string, userDir: string): AITaskTypeDefinition[] {
+  const builtin = scanAITaskTypeDir(builtinDir, "builtin");
+  const user = scanAITaskTypeDir(userDir, "user");
   return [...builtin, ...user];
 }

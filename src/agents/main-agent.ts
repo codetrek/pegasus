@@ -4,7 +4,7 @@
  * Sits between channel adapters and the Task System. Receives messages via
  * send(), processes them through an internal queue with LLM calls, and
  * replies via onReply() callback. Has curated simple tools and delegates
- * complex work to the existing Task System via spawn_subagent.
+ * complex work to the existing Task System via spawn_task.
  */
 
 import type { Message } from "../infra/llm-types.ts";
@@ -29,7 +29,7 @@ import { getContextWindowSize } from "../session/context-windows.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import path from "node:path";
 import { SkillRegistry, loadAllSkills } from "../skills/index.ts";
-import { SubagentRegistry, loadAllSubagents } from "../subagents/index.ts";
+import { AITaskTypeRegistry, loadAITaskTypeDefinitions } from "../aitask-types/index.ts";
 import {
   refreshOpenAICodexToken,
   loginGitHubCopilot,
@@ -83,7 +83,7 @@ export class MainAgent {
   private lastPromptTokens = 0;
   private tokenCounter = new EstimateCounter();
   private skillRegistry: SkillRegistry;
-  private subagentRegistry: SubagentRegistry;
+  private aiTaskTypeRegistry: AITaskTypeRegistry;
   private projectManager: ProjectManager;
   private projectAdapter: ProjectAdapter;
   private systemPrompt: string = "";
@@ -118,7 +118,7 @@ export class MainAgent {
 
     // Skill system
     this.skillRegistry = new SkillRegistry();
-    this.subagentRegistry = new SubagentRegistry();
+    this.aiTaskTypeRegistry = new AITaskTypeRegistry();
 
     // Projects
     const projectsDir = path.join(this.settings.dataDir, "projects");
@@ -224,12 +224,12 @@ export class MainAgent {
     this.skillRegistry.registerMany(loadAllSkills(builtinSkillDir, userSkillDir));
     logger.info({ skillCount: this.skillRegistry.listAll().length }, "skills_loaded");
 
-    // Load subagent definitions from builtin and user directories
-    const builtinSubagentDir = path.join(process.cwd(), "subagents");
-    const userSubagentDir = path.join(this.settings.dataDir, "subagents");
-    this.subagentRegistry.registerMany(loadAllSubagents(builtinSubagentDir, userSubagentDir));
-    this.agent.setSubagentRegistry(this.subagentRegistry);
-    logger.info({ subagentCount: this.subagentRegistry.listAll().length }, "subagents_loaded");
+    // Load AI task type definitions from builtin and user directories
+    const builtinAITaskTypeDir = path.join(process.cwd(), "aitask-types");
+    const userAITaskTypeDir = path.join(this.settings.dataDir, "aitask-types");
+    this.aiTaskTypeRegistry.registerMany(loadAITaskTypeDefinitions(builtinAITaskTypeDir, userAITaskTypeDir));
+    this.agent.setAITaskTypeRegistry(this.aiTaskTypeRegistry);
+    logger.info({ aiTaskTypeCount: this.aiTaskTypeRegistry.listAll().length }, "aitask_types_loaded");
 
     // Load projects
     this.projectManager.loadAll();
@@ -470,8 +470,8 @@ export class MainAgent {
               channel: { type: channelType ?? channel.type, channelId, replyTo },
             });
           }
-        } else if (tc.name === "spawn_subagent") {
-          await this._handleSpawnSubagent(tc);
+        } else if (tc.name === "spawn_task") {
+          await this._handleSpawnTask(tc);
         } else if (tc.name === "resume_task") {
           const resumeNeedsFollowUp = await this._handleResumeTask(tc);
           if (resumeNeedsFollowUp) needsFollowUp = true;
@@ -566,7 +566,7 @@ export class MainAgent {
       }
 
       // Only queue another think if there are tool results the LLM needs to process.
-      // reply() and spawn_subagent() are terminal actions — their results don't need follow-up.
+      // reply() and spawn_task() are terminal actions — their results don't need follow-up.
       if (needsFollowUp) {
         this.queue.push({ kind: "think", channel });
       }
@@ -583,7 +583,7 @@ export class MainAgent {
 
   // ── Task spawning ──
 
-  private async _handleSpawnSubagent(tc: ToolCall): Promise<void> {
+  private async _handleSpawnTask(tc: ToolCall): Promise<void> {
     const { description, input, type } = tc.arguments as { description: string; input: string; type?: string };
     const taskType = type ?? "general";
     const taskId = await this.agent.submit(input, "main-agent", taskType, description);
@@ -597,7 +597,7 @@ export class MainAgent {
     await this.sessionStore.append(toolMsg);
 
     // No per-task callback — Agent calls onNotify automatically
-    logger.info({ taskId, input, taskType }, "subagent_spawned");
+    logger.info({ taskId, input, taskType }, "task_spawned");
   }
 
   // ── Task resuming ──
@@ -1126,8 +1126,8 @@ export class MainAgent {
   // ── System prompt ──
 
   private _buildSystemPrompt(): string {
-    // Get subagent metadata for prompt
-    const subagentMetadata = this.subagentRegistry.getMetadataForPrompt();
+    // Get AI task type metadata for prompt
+    const aiTaskMetadata = this.aiTaskTypeRegistry.getMetadataForPrompt();
 
     // Build project metadata for prompt
     const projectMetadata = this._buildProjectMetadata();
@@ -1143,7 +1143,7 @@ export class MainAgent {
     return buildSystemPrompt({
       mode: "main",
       persona: this.persona,
-      subagentMetadata: subagentMetadata || undefined,
+      aiTaskMetadata: aiTaskMetadata || undefined,
       skillMetadata: skillMetadata || undefined,
       projectMetadata: projectMetadata || undefined,
     });

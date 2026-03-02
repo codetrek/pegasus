@@ -202,7 +202,7 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("memory_write");
     expect(prompt).toContain("memory_patch");
     expect(prompt).toContain("memory_append");
-    expect(prompt).toContain("spawn_subagent");
+    expect(prompt).toContain("spawn_task");
     expect(prompt).toContain("current_time");
     expect(prompt).toContain("session_archive_read");
   });
@@ -252,33 +252,33 @@ describe("buildSystemPrompt", () => {
     expect(prompt).not.toContain("## Session History");
   });
 
-  // Task-only: subagent prompt
-  test("appends subagent prompt in task mode", () => {
+  // Task-only: AI task type prompt
+  test("appends AI task prompt in task mode", () => {
     const prompt = buildSystemPrompt({
       mode: "task",
       persona,
-      subagentPrompt: "## Your Role\nYou are a research assistant.",
+      aiTaskPrompt: "## Your Role\nYou are a research assistant.",
     });
     expect(prompt).toContain("research assistant");
   });
 
-  test("does NOT append subagent prompt in main mode even if provided", () => {
+  test("does NOT append AI task prompt in main mode even if provided", () => {
     const prompt = buildSystemPrompt({
       mode: "main",
       persona,
-      subagentPrompt: "## Your Role\nYou are a research assistant.",
+      aiTaskPrompt: "## Your Role\nYou are a research assistant.",
     });
     expect(prompt).not.toContain("research assistant");
   });
 
-  // Subagent metadata (main only)
-  test("includes subagent metadata in main mode when provided", () => {
+  // AI task type metadata (main only)
+  test("includes AI task type metadata in main mode when provided", () => {
     const prompt = buildSystemPrompt({
       mode: "main",
       persona,
-      subagentMetadata: "## Available Subagent Types\n- explore: read-only research",
+      aiTaskMetadata: "## Available AI Task Types\n- explore: read-only research",
     });
-    expect(prompt).toContain("Available Subagent Types");
+    expect(prompt).toContain("Available AI Task Types");
   });
 
   // Skill metadata (main only)
@@ -331,7 +331,7 @@ describe("buildSystemPrompt - prompt structure", () => {
     const prompt = buildSystemPrompt({
       mode: "main",
       persona,
-      subagentMetadata: "## Available Subagent Types\n- explore: research",
+      aiTaskMetadata: "## Available AI Task Types\n- explore: research",
       skillMetadata: "## Available Skills\n- commit: git",
     });
 
@@ -340,7 +340,7 @@ describe("buildSystemPrompt - prompt structure", () => {
     const toolsIdx = prompt.indexOf("## Tools");
     const styleIdx = prompt.indexOf("## Thinking Style");
     const spawnIdx = prompt.indexOf("## When to Reply vs Spawn");
-    const subagentIdx = prompt.indexOf("## Available Subagent Types");
+    const aiTaskIdx = prompt.indexOf("## Available AI Task Types");
     const channelIdx = prompt.indexOf("## Channels and reply()");
     const sessionIdx = prompt.indexOf("## Session History");
     const skillIdx = prompt.indexOf("## Available Skills");
@@ -351,7 +351,7 @@ describe("buildSystemPrompt - prompt structure", () => {
     expect(toolsIdx).toBeGreaterThan(0);
     expect(styleIdx).toBeGreaterThan(0);
     expect(spawnIdx).toBeGreaterThan(0);
-    expect(subagentIdx).toBeGreaterThan(0);
+    expect(aiTaskIdx).toBeGreaterThan(0);
     expect(channelIdx).toBeGreaterThan(0);
     expect(sessionIdx).toBeGreaterThan(0);
     expect(skillIdx).toBeGreaterThan(0);
@@ -361,8 +361,8 @@ describe("buildSystemPrompt - prompt structure", () => {
     expect(thinkIdx).toBeLessThan(toolsIdx);
     expect(toolsIdx).toBeLessThan(styleIdx);
     expect(styleIdx).toBeLessThan(spawnIdx);
-    expect(spawnIdx).toBeLessThan(subagentIdx);
-    expect(subagentIdx).toBeLessThan(channelIdx);
+    expect(spawnIdx).toBeLessThan(aiTaskIdx);
+    expect(aiTaskIdx).toBeLessThan(channelIdx);
     expect(channelIdx).toBeLessThan(sessionIdx);
     expect(sessionIdx).toBeLessThan(skillIdx);
   });
@@ -371,10 +371,10 @@ describe("buildSystemPrompt - prompt structure", () => {
     const prompt = buildSystemPrompt({
       mode: "task",
       persona,
-      subagentPrompt: "## Your Role\nYou are a research assistant.\n\n## Rules\n1. READ ONLY",
+      aiTaskPrompt: "## Your Role\nYou are a research assistant.\n\n## Rules\n1. READ ONLY",
     });
 
-    // Has: identity + safety + subagent prompt
+    // Has: identity + safety + AI task type prompt
     expect(prompt).toContain("Pegasus");
     expect(prompt).toContain("## Safety");
     expect(prompt).toContain("## Your Role");
@@ -389,11 +389,11 @@ describe("buildSystemPrompt - prompt structure", () => {
     expect(prompt).not.toContain("## Session History");
   });
 
-  test("main mode prompt does not contain subagent body", () => {
+  test("main mode prompt does not contain AI task type body", () => {
     const prompt = buildSystemPrompt({
       mode: "main",
       persona,
-      subagentPrompt: "## Your Role\nYou are a research assistant.",
+      aiTaskPrompt: "## Your Role\nYou are a research assistant.",
     });
     expect(prompt).not.toContain("You are a research assistant");
   });

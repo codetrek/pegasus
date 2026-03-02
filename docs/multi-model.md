@@ -2,12 +2,12 @@
 
 ## Why
 
-Users shouldn't need to understand Pegasus's internal roles (compact, reflection, subAgent). Those are implementation details. Instead, the config exposes **tiers** — semantic capability levels that map to how powerful a model you want for each class of work:
+Users shouldn't need to understand Pegasus's internal roles (compact, reflection, AITask). Those are implementation details. Instead, the config exposes **tiers** — semantic capability levels that map to how powerful a model you want for each class of work:
 
 | Tier | Intent | Typical use |
 |------|--------|-------------|
-| `fast` | Cheapest/fastest | Compaction, reflection, extract, explore subagent |
-| `balanced` | Good all-rounder | General/plan subagents, default subagent model |
+| `fast` | Cheapest/fastest | Compaction, reflection, extract, explore task |
+| `balanced` | Good all-rounder | General/plan tasks, default task model |
 | `powerful` | Strongest available | Complex reasoning, future use |
 
 A single `default` model covers the MainAgent and acts as the fallback for any tier that isn't explicitly configured. This means a minimal config only needs one line.
@@ -23,7 +23,7 @@ llm:
   # ── Tier overrides (all optional) ──
   tiers:
     fast: openai/gpt-4o-mini        # compact, reflection, extract, explore
-    balanced: openai/gpt-4o         # general/plan subagents
+    balanced: openai/gpt-4o         # general/plan tasks
     powerful: anthropic/claude-opus-4 # complex reasoning
 
   # ── Provider credentials ──
@@ -49,7 +49,7 @@ tiers:
 When the system needs a model, resolution follows this chain:
 
 ```
-SUBAGENT.md `model` field   (e.g. "fast" or "openai/gpt-4o")
+AITASK.md `model` field   (e.g. "fast" or "openai/gpt-4o")
         ↓ (if set)
   contains "/"? → direct model spec → create/cache
   no "/"?       → treat as tier name
@@ -75,9 +75,9 @@ Internal tasks map to tiers automatically — users don't configure these indivi
 | Compact (`_generateSummary`) | `fast` | Summarization is simple, cost-sensitive |
 | Reflection (post-task) | `fast` | Fire-and-forget memory extraction |
 | Extract (memory index) | `fast` | Cheap factual extraction |
-| Subagent (explore) | SUBAGENT.md `model` field → `fast` | Read-only research |
-| Subagent (general) | SUBAGENT.md `model` field → `balanced` | Full-capability worker |
-| Subagent (plan) | SUBAGENT.md `model` field → `balanced` | Analysis and planning |
+| AITask (explore) | AITASK.md `model` field → `fast` | Read-only research |
+| AITask (general) | AITASK.md `model` field → `balanced` | Full-capability worker |
+| AITask (plan) | AITASK.md `model` field → `balanced` | Analysis and planning |
 
 ## ModelRegistry API
 
@@ -111,9 +111,9 @@ class ModelRegistry {
 }
 ```
 
-## SUBAGENT.md Model Field
+## AITASK.md Model Field
 
-Each subagent type can declare its preferred tier or model in the frontmatter:
+Each AI task type can declare its preferred tier or model in the frontmatter:
 
 ```yaml
 ---
@@ -128,7 +128,7 @@ The `model` field accepts:
 - **Tier name** (`fast`, `balanced`, `powerful`) — resolved via `ModelRegistry.resolve()`, falls back to `default`
 - **Direct model spec** (`openai/gpt-4o`) — used as-is, bypassing tier lookup
 
-If `model` is omitted, the subagent uses the Agent's default model (the one passed at construction, typically `tiers.balanced` or `default`).
+If `model` is omitted, the AI task type uses the Agent's default model (the one passed at construction, typically `tiers.balanced` or `default`).
 
 ## Config Examples
 
@@ -157,7 +157,7 @@ llm:
     balanced: openai/gpt-4o
 ```
 
-### Local dev (Ollama for subagents, cloud for MainAgent)
+### Local dev (Ollama for tasks, cloud for MainAgent)
 
 ```yaml
 llm:

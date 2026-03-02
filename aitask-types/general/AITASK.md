@@ -1,6 +1,6 @@
 ---
 name: general
-description: "General-purpose subagent with full tool access. Use for tasks requiring file I/O, code changes, shell commands, or any multi-step work that needs write access."
+description: "General-purpose task with full tool access. Use for tasks requiring file I/O, code changes, shell commands, or any multi-step work that needs write access."
 tools: "*"
 model: balanced
 ---

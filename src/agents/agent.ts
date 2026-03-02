@@ -29,7 +29,7 @@ import { ToolExecutor } from "../tools/executor.ts";
 import { BackgroundTaskManager } from "../tools/background.ts";
 import type { ToolResult } from "../tools/types.ts";
 import { allBuiltInTools, reflectionTools, allTaskTools } from "../tools/builtins/index.ts";
-import type { SubagentRegistry } from "../subagents/index.ts";
+import type { AITaskTypeRegistry } from "../aitask-types/index.ts";
 import type { MemoryIndexEntry } from "../identity/prompt.ts";
 import { TaskPersister } from "../task/persister.ts";
 import { getContextWindowSize } from "../session/context-windows.ts";
@@ -124,7 +124,7 @@ export interface AgentDeps {
   modelRegistry?: ModelRegistry;  // for tier/model resolution (optional for backward compat)
   persona: Persona;
   settings?: Settings;
-  subagentRegistry?: SubagentRegistry;
+  aiTaskTypeRegistry?: AITaskTypeRegistry;
 }
 
 export class Agent {
@@ -151,7 +151,7 @@ export class Agent {
   private backgroundTasks = new Set<Promise<void>>();
   private settings: Settings;
   private notifyCallback: ((notification: TaskNotification) => void) | null = null;
-  private subagentRegistry: SubagentRegistry | null = null;
+  private aiTaskTypeRegistry: AITaskTypeRegistry | null = null;
   private extractModel: LanguageModel | null = null;
   private modelRegistry: ModelRegistry | null = null;
   private backgroundTaskManager: BackgroundTaskManager;
@@ -169,17 +169,17 @@ export class Agent {
 
     // Per-type registries for LLM tool visibility + execution validation
     this.typeToolRegistries = new Map();
-    this.subagentRegistry = deps.subagentRegistry ?? null;
+    this.aiTaskTypeRegistry = deps.aiTaskTypeRegistry ?? null;
     this.modelRegistry = deps.modelRegistry ?? null;
 
     // Resolve extract model: prefer "fast" tier from registry, fallback to default model
     this.extractModel = deps.modelRegistry?.getForTier("fast") ?? null;
-    if (this.subagentRegistry) {
-      // Build from SubagentRegistry definitions
+    if (this.aiTaskTypeRegistry) {
+      // Build from AITaskTypeRegistry definitions
       const allToolMap = new Map(allTaskTools.map((t) => [t.name, t]));
-      for (const def of this.subagentRegistry.listAll()) {
+      for (const def of this.aiTaskTypeRegistry.listAll()) {
         const registry = new ToolRegistry();
-        const toolNames = this.subagentRegistry.getToolNames(def.name);
+        const toolNames = this.aiTaskTypeRegistry.getToolNames(def.name);
         const tools = toolNames
           .map((name) => allToolMap.get(name))
           .filter((t): t is NonNullable<typeof t> => t != null);
@@ -465,14 +465,14 @@ export class Agent {
     // Select per-type tool registry for LLM visibility
     const typeRegistry = this.typeToolRegistries.get(task.context.taskType);
 
-    // Get subagent-specific system prompt from registry
-    const subagentPrompt = this.subagentRegistry?.getPrompt(task.context.taskType) ?? undefined;
+    // Get AI task type-specific system prompt from registry
+    const aiTaskTypePrompt = this.aiTaskTypeRegistry?.getPrompt(task.context.taskType) ?? undefined;
 
     // Resolve per-type model (from SUBAGENT.md model field or fallback to default)
     const typeModel = this._resolveTypeModel(task.context.taskType);
 
     const reasoning = await this.llmSemaphore.use(() =>
-      this.thinker.run(task.context, memoryIndex, typeRegistry, subagentPrompt, typeModel),
+      this.thinker.run(task.context, memoryIndex, typeRegistry, aiTaskTypePrompt, typeModel),
     );
     task.context.reasoning = reasoning;
 
@@ -708,11 +708,11 @@ export class Agent {
 
   /**
    * Resolve the LLM model for a specific task type.
-   * Checks the subagent registry for a model declaration (tier name or model spec),
-   * then resolves via ModelRegistry. Falls back to the default subagent model.
+   * Checks the AI task type registry for a model declaration (tier name or model spec),
+   * then resolves via ModelRegistry. Falls back to the default model.
    */
   private _resolveTypeModel(taskType: string): LanguageModel | undefined {
-    const modelSpec = this.subagentRegistry?.getModel(taskType);
+    const modelSpec = this.aiTaskTypeRegistry?.getModel(taskType);
     if (modelSpec && this.modelRegistry) {
       return this.modelRegistry.resolve(modelSpec);
     }
@@ -799,10 +799,10 @@ export class Agent {
     this.notifyCallback = callback;
   }
 
-  /** Set subagent registry and rebuild per-type tool registries. */
-  setSubagentRegistry(registry: SubagentRegistry): void {
-    this.subagentRegistry = registry;
-    // Rebuild per-type tool registries from subagent definitions
+  /** Set AI task type registry and rebuild per-type tool registries. */
+  setAITaskTypeRegistry(registry: AITaskTypeRegistry): void {
+    this.aiTaskTypeRegistry = registry;
+    // Rebuild per-type tool registries from AI task type definitions
     this.typeToolRegistries.clear();
     const allToolMap = new Map(allTaskTools.map((t) => [t.name, t]));
     for (const def of registry.listAll()) {

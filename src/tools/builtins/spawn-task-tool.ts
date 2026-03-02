@@ -1,7 +1,7 @@
 /**
- * spawn_subagent tool — signals intent to launch a background subagent.
+ * spawn_task tool — signals intent to launch a background task.
  *
- * The MainAgent intercepts the result and spawns the actual subagent
+ * The MainAgent intercepts the result and spawns the actual task
  * via the existing Task System (Agent).
  */
 
@@ -9,10 +9,10 @@ import { z } from "zod";
 import { ToolCategory } from "../types.ts";
 import type { Tool, ToolResult, ToolContext } from "../types.ts";
 
-export const spawn_subagent: Tool = {
-  name: "spawn_subagent",
+export const spawn_task: Tool = {
+  name: "spawn_task",
   description:
-    "Launch a background subagent for complex operations requiring file I/O, shell commands, web search, or multi-step work",
+    "Launch a background task for complex operations requiring file I/O, shell commands, web search, or multi-step work",
   category: ToolCategory.SYSTEM,
   parameters: z.object({
     description: z.string().describe(
@@ -20,12 +20,12 @@ export const spawn_subagent: Tool = {
     ),
     input: z
       .string()
-      .describe("Detailed instructions for the subagent — include all necessary context, requirements, and constraints"),
+      .describe("Detailed instructions for the task — include all necessary context, requirements, and constraints"),
     type: z
       .enum(["general", "explore", "plan"])
       .default("general")
       .describe(
-        "Subagent type: 'explore' for research (read-only), 'plan' for analysis/planning, 'general' for full capabilities",
+        "Task type: 'explore' for research (read-only), 'plan' for analysis/planning, 'general' for full capabilities",
       ),
   }),
   async execute(params: unknown, context: ToolContext): Promise<ToolResult> {
@@ -36,12 +36,12 @@ export const spawn_subagent: Tool = {
       type?: string;
     };
 
-    // spawn_subagent doesn't execute — it signals intent.
-    // The MainAgent intercepts this tool result and spawns the actual subagent.
+    // spawn_task doesn't execute — it signals intent.
+    // The MainAgent intercepts this tool result and spawns the actual task.
     return {
       success: true,
       result: {
-        action: "spawn_subagent",
+        action: "spawn_task",
         description,
         input,
         type,

@@ -70,12 +70,12 @@ pegasus/
 │   │       ├── memory-tools.ts     # memory_list, memory_read, memory_write, memory_patch, memory_append
 │   │       ├── task-tools.ts       # task_list, task_replay
 │   │       ├── reply-tool.ts       # reply (Main Agent only)
-│   │       └── spawn-subagent-tool.ts  # spawn_subagent (Main Agent only)
+│   │       └── spawn-task-tool.ts      # spawn_task (Main Agent only)
 │   │
-│   ├── subagents/                  # Subagent type system
-│   │   ├── types.ts               # SubagentDefinition, SubagentFrontmatter
-│   │   ├── loader.ts              # Parse SUBAGENT.md files, scan directories
-│   │   ├── registry.ts            # SubagentRegistry (priority resolution, metadata)
+│   ├── aitask-types/                  # AITask type system
+│   │   ├── types.ts               # AITaskTypeDefinition, AITaskTypeFrontmatter
+│   │   ├── loader.ts              # Parse AITASK.md files, scan directories
+│   │   ├── registry.ts            # AITaskTypeRegistry (priority resolution, metadata)
 │   │   └── index.ts               # Re-exports
 │   │
 │   ├── identity/                   # Identity layer
