@@ -18,7 +18,7 @@ let _rgAvailable: boolean | null = null;
 export function isRgAvailable(): boolean {
   if (_rgAvailable !== null) return _rgAvailable;
   try {
-    const result = Bun.spawnSync(["which", "rg"]);
+    const result = Bun.spawnSync(["rg", "--version"], { stdout: "pipe", stderr: "pipe" });
     _rgAvailable = result.exitCode === 0;
   } catch {
     _rgAvailable = false;
@@ -535,6 +535,22 @@ function buildRgArgs(params: GrepParams): string[] {
  *   -41-context line
  *   --
  */
+/**
+ * Parse rg --heading output into our grouped format (single forward pass, O(n)).
+ *
+ * rg --heading outputs groups separated by blank lines:
+ *   filename          (first non-empty line of a group = file header)
+ *   42:match content  (match line)
+ *   41-context line   (context line)
+ *   --                (separator between non-contiguous blocks within same file)
+ *                     (blank line = separator between file groups)
+ *
+ * We convert to:
+ *   === filename ===
+ *   42:match content   (no-context mode)
+ *   :42:match content  (context mode — leading colon)
+ *   -41-context line
+ */
 function parseRgContentOutput(raw: string, maxResults: number, hasContext: boolean): { lines: string[]; totalMatches: number; truncated: boolean } {
   if (!raw.trim()) return { lines: [], totalMatches: 0, truncated: false };
 
@@ -543,89 +559,58 @@ function parseRgContentOutput(raw: string, maxResults: number, hasContext: boole
   let matchesSoFar = 0;
   let currentFile: string | null = null;
   let hitLimit = false;
+  // Track whether the next non-empty, non-separator line is a file header
+  let expectFileHeader = true;
 
-  const rawLines = raw.split("\n");
-
-  for (let i = 0; i < rawLines.length; i++) {
-    const line = rawLines[i]!;
-
-    // Empty line = file separator in --heading mode
+  for (const line of raw.split("\n")) {
+    // Empty line = file group separator → next non-empty line is a file header
     if (line === "") {
+      expectFileHeader = true;
       continue;
     }
 
-    // Block separator
+    // Block separator within a file
     if (line === "--") {
       if (!hitLimit) outputLines.push("--");
       continue;
     }
 
-    // Match line: N:content (colon after line number)
-    const matchLineMatch = line.match(/^(\d+):(.*)$/);
-    if (matchLineMatch) {
+    // Match line: digits followed by colon
+    const matchLine = line.match(/^(\d+):(.*)$/);
+    if (matchLine && !expectFileHeader) {
       totalMatches++;
       matchesSoFar++;
       if (matchesSoFar > maxResults) {
         hitLimit = true;
-        continue; // keep counting totalMatches but don't emit
+        continue;
       }
-
-      // Check if we need a file header — look backwards for the file header
-      const fileHeader = findFileHeaderForLine(rawLines, i);
-      if (fileHeader && fileHeader !== currentFile) {
-        if (currentFile !== null) outputLines.push(""); // blank line between files
-        outputLines.push(`=== ${fileHeader} ===`);
-        currentFile = fileHeader;
-      }
-      // In context mode, match lines use ":lineNum:content" format (leading colon)
-      // In no-context mode, match lines use "lineNum:content" format
       if (hasContext) {
-        outputLines.push(`:${matchLineMatch[1]}:${matchLineMatch[2]}`);
+        outputLines.push(`:${matchLine[1]}:${matchLine[2]}`);
       } else {
-        outputLines.push(`${matchLineMatch[1]}:${matchLineMatch[2]}`);
+        outputLines.push(`${matchLine[1]}:${matchLine[2]}`);
       }
       continue;
     }
 
-    // Context line: N-content (hyphen after line number)
-    const contextLineMatch = line.match(/^(\d+)-(.*)$/);
-    if (contextLineMatch) {
+    // Context line: digits followed by hyphen
+    const contextLine = line.match(/^(\d+)-(.*)$/);
+    if (contextLine && !expectFileHeader) {
       if (!hitLimit) {
-        const fileHeader = findFileHeaderForLine(rawLines, i);
-        if (fileHeader && fileHeader !== currentFile) {
-          if (currentFile !== null) outputLines.push("");
-          outputLines.push(`=== ${fileHeader} ===`);
-          currentFile = fileHeader;
-        }
-        outputLines.push(`-${contextLineMatch[1]}-${contextLineMatch[2]}`);
+        outputLines.push(`-${contextLine[1]}-${contextLine[2]}`);
       }
       continue;
     }
 
-    // Otherwise: it's a file header (bare filename)
-    // We handle file headers lazily when we encounter match/context lines
+    // File header (bare filename — not a match/context line, or expectFileHeader is true)
+    if (line !== currentFile) {
+      if (currentFile !== null) outputLines.push(""); // blank line between files
+      outputLines.push(`=== ${line} ===`);
+      currentFile = line;
+    }
+    expectFileHeader = false;
   }
 
   return { lines: outputLines, totalMatches, truncated: hitLimit };
-}
-
-/**
- * Walk backwards from line index to find the nearest file header.
- * In rg --heading, a file header is a bare line (no :N: or -N- prefix)
- * that appears before the first match/context line of a file group.
- */
-function findFileHeaderForLine(rawLines: string[], lineIdx: number): string | null {
-  for (let j = lineIdx - 1; j >= 0; j--) {
-    const l = rawLines[j]!;
-    if (l === "" || l === "--") continue;
-    if (/^\d+[:\-]/.test(l)) continue; // match/context line, keep searching
-    return l; // bare filename
-  }
-  // The file header might be at the start
-  if (lineIdx >= 0 && rawLines[0] && !/^\d+[:\-]/.test(rawLines[0]) && rawLines[0] !== "" && rawLines[0] !== "--") {
-    return rawLines[0];
-  }
-  return null;
 }
 
 /** Parse rg -c output (count mode): file:count per line → our format. */
@@ -684,12 +669,12 @@ function executeWithRg(params: GrepParams): { output: string; truncated: boolean
 
 // ── JS fallback helpers ──
 
-/** Load .gitignore patterns from the search root and its ancestors. */
+/** Load .gitignore patterns from the search root up to repo root (.git). */
 async function loadGitignore(searchRoot: string): Promise<ReturnType<typeof ignore> | null> {
   const ig = ignore();
   let loaded = false;
 
-  // Walk up from searchRoot to find .gitignore files
+  // Walk up from searchRoot to find .gitignore files, stop at repo root (.git)
   let dir = searchRoot;
   const visited = new Set<string>();
   while (dir && !visited.has(dir)) {
@@ -701,6 +686,13 @@ async function loadGitignore(searchRoot: string): Promise<ReturnType<typeof igno
       loaded = true;
     } catch {
       // No .gitignore at this level
+    }
+    // Stop if we reached a git repo root
+    try {
+      await access(path.join(dir, ".git"));
+      break; // found .git — this is the repo root, stop walking up
+    } catch {
+      // Not a repo root, keep going
     }
     const parent = path.dirname(dir);
     if (parent === dir) break;
@@ -841,6 +833,9 @@ export const grep_files: Tool = {
       const countPerFile: Array<{ file: string; count: number }> = [];
       let totalMatches = 0;
 
+      // Pre-compile non-global regex for line-by-line matching (reused across files)
+      const lineRegex = new RegExp(pattern, case_insensitive ? "i" : "");
+
       // Helper: merge overlapping context ranges
       const buildContextRanges = (matchLineIndices: number[], totalLines: number, ctxLines: number): Array<[number, number]> => {
         if (matchLineIndices.length === 0) return [];
@@ -864,17 +859,13 @@ export const grep_files: Tool = {
           const st = await fsStat(filePath);
           if (st.size > MAX_FILE_SIZE) return false;
 
-          // Skip binary files (check first 8KB for null bytes)
-          const rawBytes = new Uint8Array(await Bun.file(filePath).arrayBuffer());
-          if (isBinaryBuffer(rawBytes)) return false;
+          // Skip binary files: read first 8KB and check for null bytes
+          const file = Bun.file(filePath);
+          const head = new Uint8Array(await file.slice(0, 8192).arrayBuffer());
+          if (isBinaryBuffer(head)) return false;
 
-          const fileContent = new TextDecoder().decode(rawBytes);
+          const fileContent = await file.text();
           const lines = fileContent.split("\n");
-
-          let lineRegex: RegExp;
-          let flags = "";
-          if (case_insensitive) flags += "i";
-          lineRegex = new RegExp(pattern, flags);
 
           const matchLineIndices: number[] = [];
           for (let i = 0; i < lines.length; i++) {
@@ -950,11 +941,12 @@ export const grep_files: Tool = {
           const st = await fsStat(filePath);
           if (st.size > MAX_FILE_SIZE) return false;
 
-          // Skip binary files
-          const rawBytes = new Uint8Array(await Bun.file(filePath).arrayBuffer());
-          if (isBinaryBuffer(rawBytes)) return false;
+          // Skip binary files: read first 8KB and check for null bytes
+          const file = Bun.file(filePath);
+          const head = new Uint8Array(await file.slice(0, 8192).arrayBuffer());
+          if (isBinaryBuffer(head)) return false;
 
-          const fileContent = new TextDecoder().decode(rawBytes);
+          const fileContent = await file.text();
 
           regex.lastIndex = 0;
           let m: RegExpExecArray | null;
@@ -1158,7 +1150,8 @@ export const glob_files: Tool = {
       const entries: string[] = [];
       for await (const entry of glob.scan({ cwd: basePath, onlyFiles: true })) {
         entries.push(entry);
-        // Collect more than max_results so we can sort by mtime, then truncate
+        // Best-effort mtime sorting: collect up to 2x max_results, sort, then truncate.
+        // With very large result sets, the final order may not be globally optimal.
         if (entries.length >= max_results * 2) break;
       }
 
