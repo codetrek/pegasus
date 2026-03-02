@@ -245,7 +245,7 @@ export function createPiAiLanguageModel(config: PiAiAdapterConfig): LanguageMode
       provider: config.provider,
       baseUrl: config.baseURL || `https://api.openai.com/v1`,
       reasoning: false,
-      input: ["text"],
+      input: ["text", "image"],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       contextWindow: 128000,
       maxTokens: 4096,

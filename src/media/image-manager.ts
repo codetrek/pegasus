@@ -118,7 +118,7 @@ export class ImageManager {
     };
 
     this.db.run(
-      `INSERT INTO images (id, path, mime_type, width, height, size_bytes, source, created_at, last_accessed_at)
+      `INSERT OR IGNORE INTO images (id, path, mime_type, width, height, size_bytes, source, created_at, last_accessed_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         ref.id,
