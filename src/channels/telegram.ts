@@ -62,6 +62,9 @@ export class TelegramAdapter implements ChannelAdapter {
           const url =
             `https://api.telegram.org/file/bot${this.token}/` + file.file_path;
           const response = await fetch(url);
+          if (!response.ok) {
+            throw new Error(`Telegram file download failed: ${response.status} ${response.statusText}`);
+          }
           const buffer = Buffer.from(await response.arrayBuffer());
 
           const ref = await this.storeImage!(buffer, "image/jpeg", "telegram");

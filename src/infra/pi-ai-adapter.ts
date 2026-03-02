@@ -18,6 +18,8 @@ import type {
   Api,
   Context,
   AssistantMessage,
+  TextContent,
+  ImageContent,
   Tool as PiAiTool,
 } from "@mariozechner/pi-ai";
 import type {
@@ -54,7 +56,7 @@ export function toPiAiContext(
       case "user": {
         if (msg.images?.length) {
           // Build content blocks: text + images
-          const blocks: any[] = [];
+          const blocks: (TextContent | ImageContent)[] = [];
           if (msg.content) {
             blocks.push({ type: "text", text: msg.content });
           }
@@ -107,7 +109,7 @@ export function toPiAiContext(
       }
 
       case "tool": {
-        const content: any[] = [{ type: "text", text: msg.content }];
+        const content: (TextContent | ImageContent)[] = [{ type: "text", text: msg.content }];
         if (msg.images?.length) {
           for (const img of msg.images) {
             if (img.data) {
