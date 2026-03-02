@@ -137,6 +137,19 @@ export function buildToolsSection(): string[] {
     "- task_replay(taskId): Replay a past task's full conversation.",
     "- session_archive_read(file): Read the previous archived session.",
     "- resume_task(taskId, input): Resume a suspended task with additional information.",
+    "",
+    "### Browser (web page interaction)",
+    "- browser_navigate(url): Open a URL and return the page's accessibility snapshot",
+    "  with ref numbers (e1, e2...). Use refs to interact with elements.",
+    "- browser_click(ref): Click an element by its ref number.",
+    "- browser_type(ref, text, submit?): Type text into an input. Set submit=true to press Enter.",
+    "- browser_scroll(direction, amount?): Scroll the page up or down.",
+    "- browser_snapshot(): Refresh the page snapshot with fresh ref numbers.",
+    "- browser_screenshot(fullPage?): Save a screenshot to disk.",
+    "- browser_close(): Close the browser when done.",
+    "",
+    "Browser workflow: navigate → read snapshot → use refs to click/type → repeat.",
+    "Each action returns a fresh snapshot — previous refs are invalidated.",
   ];
 }
 
@@ -172,6 +185,8 @@ export function buildReplyVsSpawnSection(): string[] {
     '- "Read this file and summarize" → spawn_task(type="explore", ...)',
     '- "Write this function" → spawn_task(type="general", ...)',
     '- "Analyze this code and suggest improvements" → spawn_task(type="plan", ...)',
+    '- "Open this webpage and fill out the form" → spawn_task(type="general", ...)',
+    "  (Task will use browser_navigate, browser_type, browser_click)",
     "",
     "The task runs in your own Agent instance. You receive the result automatically",
     "when it completes. Do NOT poll with task_replay — just wait.",
