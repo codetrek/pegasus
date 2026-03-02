@@ -461,11 +461,12 @@ export class MainAgent {
     const name = spaceIdx === -1 ? text.slice(1) : text.slice(1, spaceIdx);
     const args = spaceIdx === -1 ? undefined : text.slice(spaceIdx + 1).trim() || undefined;
 
-    const skill = this.skillRegistry.get(name);
+    const skill = this.skillRegistry.get(name)
+      ?? this.skillRegistry.get(name.replace(/_/g, "-")); // Telegram converts - to _ in commands
     if (!skill) return false;
     if (!skill.userInvocable) return false;
 
-    const body = this.skillRegistry.loadBody(name, args);
+    const body = this.skillRegistry.loadBody(skill.name, args);
     if (!body) return false;
 
     if (skill.context === "fork") {

@@ -13,6 +13,7 @@ import { getLogger, initLogger } from "./infra/logger.ts";
 import { ModelRegistry } from "./infra/model-registry.ts";
 import { CLIAdapter } from "./channels/cli-adapter.ts";
 import { TelegramAdapter } from "./channels/telegram.ts";
+import { buildTelegramCommands } from "./channels/telegram-commands.ts";
 
 const logger = getLogger("cli");
 
@@ -60,10 +61,12 @@ export async function startCLI(): Promise<void> {
   // Start Telegram if configured
   const telegramConfig = settings.channels?.telegram;
   if (telegramConfig?.enabled && telegramConfig?.token) {
-    const telegramAdapter = new TelegramAdapter(telegramConfig.token, storeImageFn);
+    // Build / command menu from user-invocable skills
+    const commands = buildTelegramCommands(mainAgent.skills.listUserInvocable());
+    const telegramAdapter = new TelegramAdapter(telegramConfig.token, storeImageFn, commands);
     mainAgent.registerAdapter(telegramAdapter);
     await telegramAdapter.start({ send: (msg) => mainAgent.send(msg) });
-    logger.info("telegram_adapter_started");
+    logger.info({ commandCount: commands.length }, "telegram_adapter_started");
   }
 
   printBanner(persona.name, persona.role);
