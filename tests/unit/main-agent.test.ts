@@ -2316,4 +2316,70 @@ describe("MainAgent", () => {
       expect(mockWA.stopWorker).toHaveBeenCalled();
     }, 10_000);
   });
+
+  // ── Vision support tests ──
+
+  describe("getStoreImageFn()", () => {
+    it("should return undefined when vision is disabled", async () => {
+      const model = createReplyModel("ok");
+      const settings = testSettings();
+      // Disable vision explicitly
+      (settings as any).vision = { enabled: false };
+
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings,
+      });
+
+      const fn = agent.getStoreImageFn();
+      expect(fn).toBeUndefined();
+    });
+
+    it("should return a function when vision is enabled", async () => {
+      const model = createReplyModel("ok");
+      const settings = testSettings();
+      // Vision is enabled by default
+
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings,
+      });
+
+      const fn = agent.getStoreImageFn();
+      expect(fn).toBeDefined();
+      expect(typeof fn).toBe("function");
+    });
+  });
+
+  describe("skills getter", () => {
+    it("should expose the skill registry", async () => {
+      const model = createReplyModel("ok");
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+      });
+
+      const skills = agent.skills;
+      expect(skills).toBeDefined();
+      expect(typeof skills.get).toBe("function");
+      expect(typeof skills.has).toBe("function");
+    });
+  });
+
+  describe("projects getter", () => {
+    it("should expose the project manager", async () => {
+      const model = createReplyModel("ok");
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+      });
+
+      const projects = agent.projects;
+      expect(projects).toBeDefined();
+    });
+  });
 });
