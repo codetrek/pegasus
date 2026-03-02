@@ -14,6 +14,7 @@
 declare var self: Worker;
 
 import path from "node:path";
+import { existsSync } from "node:fs";
 import { Agent } from "../agents/agent.ts";
 import type { TaskNotification } from "../agents/agent.ts";
 import { getSettings, setSettings } from "../infra/config.ts";
@@ -24,6 +25,7 @@ import type { InboundMessage } from "../channels/types.ts";
 import { parseProjectFile } from "../projects/loader.ts";
 import { ProxyLanguageModel } from "../projects/proxy-language-model.ts";
 import { spawn_task } from "../tools/builtins/index.ts";
+import { TaskPersister } from "../task/persister.ts";
 
 // ── Types ────────────────────────────────────────────
 
@@ -310,11 +312,16 @@ async function initSubAgent(config: SubAgentConfig): Promise<void> {
   // 10. Auto-submit initial input (subagent mode only)
   //     If memorySnapshot is available, prepend it to the input so the
   //     SubAgent's first reasoning cycle has access to long-term memory.
+  //     If resuming (previous tasks exist on disk), load their results
+  //     as context so the SubAgent knows what was already accomplished.
   //     Capture the returned taskId so onNotify only shuts down for THIS task.
   if (input) {
-    const fullInput = memorySnapshot
-      ? `[Available Memory]\n${memorySnapshot}\n\n---\n\n${input}`
-      : input;
+    const previousContext = await loadPreviousTaskSummary(sessionPath);
+    const fullInput = [
+      previousContext ? `[Previous Session Context]\n${previousContext}` : null,
+      memorySnapshot ? `[Available Memory]\n${memorySnapshot}` : null,
+      input,
+    ].filter(Boolean).join("\n\n---\n\n");
     initialTaskId = await agent.submit(fullInput, "main-agent");
   }
 }
@@ -338,6 +345,12 @@ function handleLLMError(requestId: string, error: string): void {
 }
 
 async function handleShutdown(): Promise<void> {
+  // Cancel all pending LLM requests first — agent.stop() may await in-flight
+  // tasks that are blocked on LLM responses. Without this, stop() can hang
+  // forever if the main thread is no longer responding.
+  if (proxyModel) {
+    proxyModel.cancelAll("Worker shutting down");
+  }
   if (agent) {
     await agent.stop();
   }
@@ -346,6 +359,65 @@ async function handleShutdown(): Promise<void> {
 }
 
 // ── Helpers ──────────────────────────────────────────
+
+/**
+ * Load a summary of previous task results from a session directory.
+ *
+ * When a SubAgent is resumed, the new Agent starts fresh with no memory of
+ * previous tasks. This function reads completed JSONL task logs from disk
+ * and extracts their input + final result, providing context so the resumed
+ * SubAgent knows what was already accomplished.
+ *
+ * @param sessionPath — the session directory (contains tasks/ subdirectory).
+ * @returns summary string, or null if no previous tasks found.
+ */
+export async function loadPreviousTaskSummary(sessionPath: string): Promise<string | null> {
+  const tasksDir = path.join(sessionPath, "tasks");
+  if (!existsSync(tasksDir)) return null;
+
+  try {
+    const index = await TaskPersister.loadIndex(tasksDir);
+    if (index.size === 0) return null;
+
+    const summaries: string[] = [];
+
+    for (const [taskId, date] of index) {
+      const filePath = path.join(tasksDir, date, `${taskId}.jsonl`);
+      if (!existsSync(filePath)) continue;
+
+      try {
+        const ctx = await TaskPersister.replay(filePath);
+
+        // Extract meaningful summary from the task
+        const input = ctx.inputText || ctx.description || "(no input)";
+        let outcome: string;
+
+        if (ctx.finalResult != null) {
+          // Task completed — extract the response text
+          if (typeof ctx.finalResult === "object" && ctx.finalResult !== null) {
+            const response = (ctx.finalResult as Record<string, unknown>).response;
+            outcome = typeof response === "string" ? response : JSON.stringify(ctx.finalResult);
+          } else {
+            outcome = String(ctx.finalResult);
+          }
+        } else if (ctx.error) {
+          outcome = `[Failed: ${ctx.error}]`;
+        } else {
+          outcome = "[No result recorded]";
+        }
+
+        summaries.push(`Task: ${input}\nResult: ${outcome}`);
+      } catch {
+        // Skip tasks with corrupted JSONL
+      }
+    }
+
+    if (summaries.length === 0) return null;
+    return summaries.join("\n\n");
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Convert a TaskNotification to a display string.
