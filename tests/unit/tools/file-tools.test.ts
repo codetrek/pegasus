@@ -421,11 +421,11 @@ describe("file tools", () => {
 
       expect(result.success).toBe(true);
       const output = result.result as string;
-      const lines = output.split("\n").filter(l => l !== "--");
-      expect(lines).toHaveLength(2);
-      // ripgrep format: file:lineNumber:line
-      expect(lines[0]).toContain(":2:second match here");
-      expect(lines[1]).toContain(":4:fourth match here");
+      // Grouped format: file header + match lines
+      expect(output).toContain("=== ");
+      expect(output).toContain("grep-single.txt ===");
+      expect(output).toContain("2:second match here");
+      expect(output).toContain("4:fourth match here");
       // No truncation footer
       expect(output).not.toContain("[");
     });
@@ -443,8 +443,10 @@ describe("file tools", () => {
 
       expect(result.success).toBe(true);
       const output = result.result as string;
-      expect(output).toContain("a.txt");
-      expect(output).toContain("b.txt");
+      // Grouped format: file headers for matching files
+      expect(output).toContain("=== ");
+      expect(output).toContain("a.txt ===");
+      expect(output).toContain("b.txt ===");
       expect(output).not.toContain("c.txt");
     });
 
@@ -462,11 +464,11 @@ describe("file tools", () => {
 
       expect(result.success).toBe(true);
       const output = result.result as string;
-      expect(output).toContain("code.ts");
+      // Grouped format: should have file header for code.ts only
+      expect(output).toContain("code.ts ===");
       expect(output).not.toContain("code.js");
-      // Only one match line (no separators)
-      const lines = output.split("\n").filter(l => l !== "--" && l !== "");
-      expect(lines).toHaveLength(1);
+      // Match line (no file prefix in grouped format)
+      expect(output).toContain("1:const x = 1;");
     });
 
     it("should return empty string when no results found", async () => {
@@ -496,8 +498,11 @@ describe("file tools", () => {
 
       expect(result.success).toBe(true);
       const output = result.result as string;
-      // Should have 5 match lines separated by "--"
-      const matchLines = output.split("\n").filter(l => l !== "--" && l !== "" && !l.startsWith("["));
+      // Grouped format: header + 5 match lines
+      expect(output).toContain("=== ");
+      const matchLines = output.split("\n").filter(l =>
+        l !== "" && !l.startsWith("[") && !l.startsWith("=== ")
+      );
       expect(matchLines).toHaveLength(5);
       // Truncation footer
       expect(output).toContain("[20 total matches, showing first 5]");
@@ -543,12 +548,10 @@ describe("file tools", () => {
 
       expect(result.success).toBe(true);
       const output = result.result as string;
-      // Both files should appear in output
-      expect(output).toContain("top.txt");
-      expect(output).toContain("nested.txt");
-      // Two match blocks separated by "--"
-      const matchLines = output.split("\n").filter(l => l !== "--" && l !== "");
-      expect(matchLines).toHaveLength(2);
+      // Grouped format: both files appear as headers
+      expect(output).toContain("=== ");
+      expect(output).toContain("top.txt ===");
+      expect(output).toContain("nested.txt ===");
     });
 
     it("should error on non-existent path", async () => {
@@ -578,12 +581,15 @@ describe("file tools", () => {
 
       expect(result.success).toBe(true);
       const output = result.result as string;
-      // 3 match lines (Hello, hello, HELLO) — "goodbye" excluded
-      const matchLines = output.split("\n").filter(l => l !== "--" && l !== "");
+      // Grouped format: file header + 3 match lines
+      expect(output).toContain("=== ");
+      const matchLines = output.split("\n").filter(l =>
+        l !== "" && !l.startsWith("=== ")
+      );
       expect(matchLines).toHaveLength(3);
-      expect(output).toContain(":1:Hello World");
-      expect(output).toContain(":2:hello world");
-      expect(output).toContain(":3:HELLO WORLD");
+      expect(output).toContain("1:Hello World");
+      expect(output).toContain("2:hello world");
+      expect(output).toContain("3:HELLO WORLD");
     });
 
     it("should be case-sensitive by default", async () => {
@@ -598,10 +604,13 @@ describe("file tools", () => {
 
       expect(result.success).toBe(true);
       const output = result.result as string;
-      // Only "hello world" matches (line 2)
-      const matchLines = output.split("\n").filter(l => l !== "--" && l !== "");
+      // Grouped format: file header + 1 match line
+      expect(output).toContain("=== ");
+      const matchLines = output.split("\n").filter(l =>
+        l !== "" && !l.startsWith("=== ")
+      );
       expect(matchLines).toHaveLength(1);
-      expect(output).toContain(":2:hello world");
+      expect(output).toContain("2:hello world");
     });
 
     // ── context_lines tests ──
@@ -619,12 +628,16 @@ describe("file tools", () => {
 
       expect(result.success).toBe(true);
       const output = result.result as string;
-      const lines = output.split("\n").filter(l => l !== "--" && l !== "");
-      expect(lines).toHaveLength(3); // 1 before + match + 1 after
-      // Context lines use "-" separator, match lines use ":"
-      expect(lines[0]).toContain("-2-line2");
-      expect(lines[1]).toContain(":3:MATCH_HERE");
-      expect(lines[2]).toContain("-4-line4");
+      // Grouped format: file header + context lines
+      expect(output).toContain("=== ");
+      const contentLines = output.split("\n").filter(l =>
+        l !== "" && !l.startsWith("=== ") && l !== "--"
+      );
+      expect(contentLines).toHaveLength(3); // 1 before + match + 1 after
+      // Context lines use "-N-" separator, match lines use ":N:"
+      expect(output).toContain("-2-line2");
+      expect(output).toContain(":3:MATCH_HERE");
+      expect(output).toContain("-4-line4");
     });
 
     it("should merge overlapping context ranges into single block", async () => {
@@ -640,11 +653,14 @@ describe("file tools", () => {
 
       expect(result.success).toBe(true);
       const output = result.result as string;
-      // Overlapping ranges merged into ONE block (ripgrep behavior)
-      // No "--" block separators since it's a single merged block
+      // Grouped format: file header, then merged context block
+      expect(output).toContain("=== ");
+      // Overlapping ranges merged into ONE block (no "--" block separator)
       expect(output).not.toContain("\n--\n");
-      // Check the 5 content lines (filter out empty lines and footer)
-      const contentLines = output.split("\n").filter(l => l !== "" && !l.startsWith("["));
+      // Check the 5 content lines (filter out header and empty lines)
+      const contentLines = output.split("\n").filter(l =>
+        l !== "" && !l.startsWith("=== ") && !l.startsWith("[")
+      );
       // Merged range: lines 2-6 (b, MATCH1, d, MATCH2, f)
       expect(contentLines).toHaveLength(5);
       expect(contentLines[0]).toContain("-2-b");
@@ -667,12 +683,16 @@ describe("file tools", () => {
 
       expect(result.success).toBe(true);
       const output = result.result as string;
-      const lines = output.split("\n").filter(l => l !== "--" && l !== "");
+      // Grouped format: file header + content lines
+      expect(output).toContain("=== ");
+      const contentLines = output.split("\n").filter(l =>
+        l !== "" && !l.startsWith("=== ") && l !== "--"
+      );
       // Should have 3 lines: MATCH_FIRST, second, third (no negative lines)
-      expect(lines).toHaveLength(3);
-      expect(lines[0]).toContain(":1:MATCH_FIRST");
-      expect(lines[1]).toContain("-2-second");
-      expect(lines[2]).toContain("-3-third");
+      expect(contentLines).toHaveLength(3);
+      expect(contentLines[0]).toContain(":1:MATCH_FIRST");
+      expect(contentLines[1]).toContain("-2-second");
+      expect(contentLines[2]).toContain("-3-third");
     });
 
     // ── output_mode tests ──
@@ -739,8 +759,10 @@ describe("file tools", () => {
 
       expect(result.success).toBe(true);
       const output = result.result as string;
-      // Should contain the match starting at line 1
-      expect(output).toContain(":1:");
+      // Grouped format: file header + match line
+      expect(output).toContain("=== ");
+      // Match starts at line 1 (no-context format: lineNum:content)
+      expect(output).toContain("1:");
       expect(output).toContain("foo()");
       expect(output).toContain("return");
     });
@@ -774,6 +796,8 @@ describe("file tools", () => {
 
       expect(result.success).toBe(true);
       const output = result.result as string;
+      // Grouped format: file header + match content
+      expect(output).toContain("=== ");
       expect(output).toContain("foo");
       expect(output).toContain("bar");
       // Should not be empty

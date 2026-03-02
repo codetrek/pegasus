@@ -438,8 +438,8 @@ interface ContextLine {
 
 export const grep_files: Tool = {
   name: "grep_files",
-  description: "Search file contents using regex. Returns ripgrep-style output: "
-    + "'file:line:content' for matches, 'file-line-content' for context lines, '--' between blocks. "
+  description: "Search file contents using regex. Output grouped by file: "
+    + "'=== file ===' header, then 'lineNum:content' per match, '--' between context blocks. "
     + "Use output_mode='files_with_matches' to get just file paths. "
     + "Prefer grep_files over shell_exec grep/rg for structured, token-efficient search.",
   category: "file" as ToolCategory,
@@ -711,7 +711,7 @@ export const grep_files: Tool = {
         await walkDir(searchPath);
       }
 
-      // Build ripgrep-style text output
+      // Build token-efficient text output, grouped by file
       const outputLines: string[] = [];
 
       if (output_mode === "files_with_matches") {
@@ -723,23 +723,35 @@ export const grep_files: Tool = {
           outputLines.push(`${entry.file}:${entry.count}`);
         }
       } else {
-        // content mode — ripgrep style
+        // content mode — group by file, file name appears once as header
+        let currentFile = "";
         for (let i = 0; i < contentMatches.length; i++) {
           const m = contentMatches[i]!;
-          if (i > 0) outputLines.push("--"); // separator between blocks
 
           if (m.context) {
-            // Context mode: file:lineNum:line for matches, file-lineNum-line for context
+            // Context mode
+            if (m.file !== currentFile) {
+              if (currentFile !== "") outputLines.push(""); // blank line between files
+              outputLines.push(`=== ${m.file} ===`);
+              currentFile = m.file!;
+            } else {
+              outputLines.push("--"); // separator between blocks in same file
+            }
             for (const ctx of m.context) {
               if (ctx.isMatch) {
-                outputLines.push(`${m.file}:${ctx.lineNumber}:${ctx.line}`);
+                outputLines.push(`:${ctx.lineNumber}:${ctx.line}`);
               } else {
-                outputLines.push(`${m.file}-${ctx.lineNumber}-${ctx.line}`);
+                outputLines.push(`-${ctx.lineNumber}-${ctx.line}`);
               }
             }
           } else {
-            // No context: file:lineNum:line
-            outputLines.push(`${m.file}:${m.lineNumber}:${m.line}`);
+            // No context mode
+            if (m.file !== currentFile) {
+              if (currentFile !== "") outputLines.push(""); // blank line between files
+              outputLines.push(`=== ${m.file} ===`);
+              currentFile = m.file!;
+            }
+            outputLines.push(`${m.lineNumber}:${m.line}`);
           }
         }
       }
