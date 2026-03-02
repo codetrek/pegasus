@@ -13,6 +13,7 @@ import { buildReflectionPrompt } from "../prompts/index.ts";
 import type { TaskContext, PostTaskReflection } from "../task/context.ts";
 import type { ToolRegistry } from "../tools/registry.ts";
 import type { ToolExecutor } from "../tools/executor.ts";
+import { estimateTokensFromChars } from "../context/index.ts";
 
 const logger = getLogger("cognitive.reflect");
 
@@ -60,13 +61,16 @@ export class PostTaskReflector {
     const messages = this._buildMessages(context);
 
     // Truncate messages to fit within 60% of context window
-    // Rough estimate: 1 token ≈ 4 chars
-    const maxChars = Math.floor(this.deps.contextWindowSize * 0.6 * 4);
-    const systemChars = system.length;
-    let messagesChars = messages.reduce((sum, m) => sum + (m.content?.length ?? 0), 0);
-    while (messagesChars + systemChars > maxChars && messages.length > 1) {
+    const maxTokens = Math.floor(this.deps.contextWindowSize * 0.6);
+    const systemTokens = estimateTokensFromChars(system.length);
+    let messagesTokens = estimateTokensFromChars(
+      messages.reduce((sum, m) => sum + (m.content?.length ?? 0), 0),
+    );
+    while (messagesTokens + systemTokens > maxTokens && messages.length > 1) {
       messages.shift();
-      messagesChars = messages.reduce((sum, m) => sum + (m.content?.length ?? 0), 0);
+      messagesTokens = estimateTokensFromChars(
+        messages.reduce((sum, m) => sum + (m.content?.length ?? 0), 0),
+      );
     }
 
     const tools = this.deps.toolRegistry.toLLMTools();
