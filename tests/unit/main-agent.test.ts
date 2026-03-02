@@ -882,8 +882,9 @@ describe("MainAgent", () => {
             usage: { promptTokens: 80_000, completionTokens: 10 },
           };
         }
-        // Summarize call
-        if (options.system?.toLowerCase().includes("summarize")) {
+        // Summarize call — use "conversation summarizer" to avoid matching
+        // the main agent system prompt which contains "summarize" as a usage example
+        if (options.system?.includes("conversation summarizer")) {
           return {
             text: "Summary: user asked a question.",
             finishReason: "stop",
@@ -964,8 +965,9 @@ describe("MainAgent", () => {
             usage: { promptTokens: 110_000, completionTokens: 10 },
           };
         }
-        // Summarize call: detected by system prompt containing "summarize"
-        if (options.system?.toLowerCase().includes("summarize")) {
+        // Summarize call — use "conversation summarizer" to avoid matching
+        // the main agent system prompt which contains "summarize" as a usage example
+        if (options.system?.includes("conversation summarizer")) {
           return {
             text: "Summary: user asked a question and got a reply.",
             finishReason: "stop",
@@ -1680,8 +1682,9 @@ describe("MainAgent", () => {
           system?: string;
           messages?: Message[];
         }): Promise<GenerateTextResult> {
-          // Summarize call
-          if (options.system?.toLowerCase().includes("summarize")) {
+          // Summarize call — use "conversation summarizer" to avoid matching
+          // the main agent system prompt which contains "summarize" as a usage example
+          if (options.system?.includes("conversation summarizer")) {
             return {
               text: "Summary: user introduced themselves.",
               finishReason: "stop",
@@ -1823,7 +1826,7 @@ describe("MainAgent", () => {
               usage: { promptTokens: 110_000, completionTokens: 10 },
             };
           }
-          if (options.system?.toLowerCase().includes("summarize")) {
+          if (options.system?.includes("conversation summarizer")) {
             return {
               text: "Summary.",
               finishReason: "stop",
