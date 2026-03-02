@@ -64,8 +64,6 @@ describe("OAuth credential loading", () => {
   beforeEach(async () => {
     await mkdir(authDir, { recursive: true });
     await mkdir(dataDir, { recursive: true });
-    await mkdir(path.join(dataDir, "main"), { recursive: true });
-    await mkdir(path.join(dataDir, "tasks"), { recursive: true });
   });
 
   afterEach(async () => {
