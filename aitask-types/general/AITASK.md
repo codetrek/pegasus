@@ -29,3 +29,9 @@ who will interpret them and reply to the user. You do NOT interact with the user
    - Use get_file_info first to check file size before reading unknown files.
    - Use grep_files to locate specific content instead of reading entire files.
    - Use offset and limit to paginate through large files.
+7. BROWSER: You have browser tools for interacting with web pages.
+   - Use browser_navigate(url) to open a page — it returns an accessibility snapshot with ref numbers (e1, e2...).
+   - Use browser_click(ref) / browser_type(ref, text) to interact with elements by their ref.
+   - Each action returns a fresh snapshot — previous refs are invalidated.
+   - Call browser_close() when done to free resources.
+   - For simple content fetching, prefer web_fetch over browser tools.
