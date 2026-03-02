@@ -189,6 +189,26 @@ export class SubAgentManager {
   }
 
   /**
+   * Mark a SubAgent as done without stopping the Worker.
+   *
+   * Used when the Worker self-terminates after task completion/failure.
+   * The Worker close event fires AFTER this is called, so the onWorkerClose
+   * handler can distinguish normal exit (already marked) from crash (still active).
+   *
+   * @param id — the SubAgent ID to mark.
+   * @param status — "completed" or "failed".
+   */
+  markDone(id: string, status: "completed" | "failed"): void {
+    const entry = this.entries.get(id);
+    if (!entry) return; // Silently ignore — entry may have been cleaned up
+    if (entry.status !== "active") return; // Already marked — idempotent
+
+    entry.status = status;
+    entry.completedAt = Date.now();
+    logger.info({ id, status }, "subagent_marked_done");
+  }
+
+  /**
    * List SubAgent entries, optionally filtered by status.
    *
    * @param status — if provided, only return entries with this status.

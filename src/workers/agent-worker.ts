@@ -227,7 +227,7 @@ async function initProject(config: ProjectConfig): Promise<void> {
 // ── SubAgent mode init ───────────────────────────────
 
 async function initSubAgent(config: SubAgentConfig): Promise<void> {
-  const { input, sessionPath, channelType, channelId, contextWindow } = config;
+  const { input, sessionPath, channelType, channelId, contextWindow, memorySnapshot } = config;
 
   // 1. Load global settings
   const settings = getSettings();
@@ -273,8 +273,23 @@ async function initSubAgent(config: SubAgentConfig): Promise<void> {
   });
 
   // 7. Register notify callback → forward to main thread as InboundMessage
+  //    SubAgent mode: auto-shutdown when task completes or fails.
+  //    The final notify is tagged with metadata.subagentDone so MainAgent
+  //    can call markDone() before the Worker close event fires.
   agent.onNotify((notification: TaskNotification) => {
-    sendNotify(notificationToText(notification));
+    const isDone = notification.type === "completed" || notification.type === "failed";
+    const metadata = isDone
+      ? { subagentDone: notification.type }
+      : undefined;
+
+    sendNotify(notificationToText(notification), metadata);
+
+    if (isDone) {
+      // Give a short delay for the notify message to be delivered
+      setTimeout(async () => {
+        await handleShutdown();
+      }, 100);
+    }
   });
 
   // 8. Start agent
@@ -284,8 +299,13 @@ async function initSubAgent(config: SubAgentConfig): Promise<void> {
   self.postMessage({ type: "ready" });
 
   // 10. Auto-submit initial input (subagent mode only)
+  //     If memorySnapshot is available, prepend it to the input so the
+  //     SubAgent's first reasoning cycle has access to long-term memory.
   if (input) {
-    agent.submit(input, "main-agent");
+    const fullInput = memorySnapshot
+      ? `[Available Memory]\n${memorySnapshot}\n\n---\n\n${input}`
+      : input;
+    agent.submit(fullInput, "main-agent");
   }
 }
 
@@ -335,11 +355,13 @@ function notificationToText(notification: TaskNotification): string {
 /**
  * Send a notify message to the main thread as InboundMessage.
  * Includes channel info so MainAgent knows the source.
+ * Optional metadata can be attached (e.g., subagentDone status).
  */
-function sendNotify(text: string): void {
+function sendNotify(text: string, metadata?: Record<string, unknown>): void {
   const message: InboundMessage = {
     text,
     channel: { type: workerChannelType, channelId: workerChannelId },
+    ...(metadata != null && { metadata }),
   };
   self.postMessage({ type: "notify", message });
 }

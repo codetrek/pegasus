@@ -485,6 +485,89 @@ describe("SubAgentManager — get / list / isActive", () => {
   });
 });
 
+// ── SubAgentManager — markDone ──────────────────────────────────────────
+
+describe("SubAgentManager — markDone", () => {
+  it("should mark active entry as completed without stopping Worker", () => {
+    const wa = createMockWorkerAdapter();
+    const manager = new SubAgentManager(wa, TEST_DATA_DIR);
+
+    const id = manager.spawn("Task", "input");
+    manager.markDone(id, "completed");
+
+    const entry = manager.get(id);
+    expect(entry!.status).toBe("completed");
+    expect(entry!.completedAt).toBeGreaterThan(0);
+
+    // markDone should NOT call stopWorker (Worker is self-terminating)
+    expect((wa.stopWorker as ReturnType<typeof mock>).mock.calls).toHaveLength(0);
+  });
+
+  it("should mark active entry as failed without stopping Worker", () => {
+    const wa = createMockWorkerAdapter();
+    const manager = new SubAgentManager(wa, TEST_DATA_DIR);
+
+    const id = manager.spawn("Task", "input");
+    manager.markDone(id, "failed");
+
+    const entry = manager.get(id);
+    expect(entry!.status).toBe("failed");
+    expect(entry!.completedAt).toBeGreaterThan(0);
+
+    // markDone should NOT call stopWorker
+    expect((wa.stopWorker as ReturnType<typeof mock>).mock.calls).toHaveLength(0);
+  });
+
+  it("should be idempotent — no-op if already marked", () => {
+    const wa = createMockWorkerAdapter();
+    const manager = new SubAgentManager(wa, TEST_DATA_DIR);
+
+    const id = manager.spawn("Task", "input");
+    manager.markDone(id, "completed");
+    const firstCompletedAt = manager.get(id)!.completedAt;
+
+    // Calling markDone again should not change anything
+    manager.markDone(id, "failed");
+
+    const entry = manager.get(id);
+    expect(entry!.status).toBe("completed"); // Still "completed", not changed to "failed"
+    expect(entry!.completedAt).toBe(firstCompletedAt);
+  });
+
+  it("should silently ignore unknown ID", () => {
+    const wa = createMockWorkerAdapter();
+    const manager = new SubAgentManager(wa, TEST_DATA_DIR);
+
+    // Should not throw
+    expect(() => manager.markDone("nonexistent", "completed")).not.toThrow();
+  });
+
+  it("should update activeCount after markDone", () => {
+    const wa = createMockWorkerAdapter();
+    const manager = new SubAgentManager(wa, TEST_DATA_DIR);
+
+    const id = manager.spawn("Task", "input");
+    expect(manager.activeCount).toBe(1);
+
+    manager.markDone(id, "completed");
+    expect(manager.activeCount).toBe(0);
+    expect(manager.isActive(id)).toBe(false);
+  });
+
+  it("should allow resume after markDone", () => {
+    const wa = createMockWorkerAdapter();
+    const manager = new SubAgentManager(wa, TEST_DATA_DIR);
+
+    const id = manager.spawn("Task", "input");
+    manager.markDone(id, "completed");
+
+    // Resume should work after markDone
+    const resumedId = manager.resume(id, "new input");
+    expect(resumedId).toBe(id);
+    expect(manager.isActive(id)).toBe(true);
+  });
+});
+
 // ── SubAgentManager — lifecycle integration ─────────────────────────────
 
 describe("SubAgentManager — lifecycle integration", () => {
@@ -559,5 +642,52 @@ describe("SubAgentManager — lifecycle integration", () => {
 
     // 1 complete + 1 fail = 2 stopWorker calls
     expect((wa.stopWorker as ReturnType<typeof mock>).mock.calls).toHaveLength(2);
+  });
+
+  it("markDone then onWorkerClose should NOT call fail (normal exit)", () => {
+    const wa = createMockWorkerAdapter();
+    const manager = new SubAgentManager(wa, TEST_DATA_DIR);
+
+    const id = manager.spawn("Task", "input");
+
+    // Simulate normal completion: markDone is called before Worker close
+    manager.markDone(id, "completed");
+
+    // After markDone, status is "completed" — not "active"
+    const entry = manager.get(id);
+    expect(entry!.status).toBe("completed");
+
+    // The onWorkerClose handler (in MainAgent) checks:
+    //   if (entry.status === "active") → fail()
+    // Since markDone already set it to "completed", fail() is NOT called.
+    // We verify the precondition here.
+    expect(manager.isActive(id)).toBe(false);
+  });
+
+  it("crash scenario: Worker closes while still active", () => {
+    const wa = createMockWorkerAdapter();
+    const manager = new SubAgentManager(wa, TEST_DATA_DIR);
+
+    const id = manager.spawn("Task", "input");
+
+    // Simulate crash: no markDone called, Worker just closes
+    // Entry is still active
+    expect(manager.isActive(id)).toBe(true);
+    expect(manager.get(id)!.status).toBe("active");
+
+    // The onWorkerClose handler (in MainAgent) should detect this and call fail()
+  });
+
+  it("markDone does not call stopWorker (no double-shutdown)", () => {
+    const wa = createMockWorkerAdapter();
+    const manager = new SubAgentManager(wa, TEST_DATA_DIR);
+
+    const id1 = manager.spawn("Task 1", "input 1");
+    const id2 = manager.spawn("Task 2", "input 2");
+
+    // markDone: no stopWorker calls
+    manager.markDone(id1, "completed");
+    manager.markDone(id2, "failed");
+    expect((wa.stopWorker as ReturnType<typeof mock>).mock.calls).toHaveLength(0);
   });
 });
