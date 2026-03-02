@@ -209,6 +209,31 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("session_archive_read");
   });
 
+  test("Tools section organizes tools by category", () => {
+    const prompt = buildSystemPrompt({ mode: "main", persona });
+    // Verify sub-headers exist
+    expect(prompt).toContain("### Communication");
+    expect(prompt).toContain("### Delegation");
+    expect(prompt).toContain("### Projects");
+    expect(prompt).toContain("### Skills");
+    expect(prompt).toContain("### Memory");
+    expect(prompt).toContain("### Context");
+
+    // Verify delegation tools are under Delegation, not Communication
+    const delegationIdx = prompt.indexOf("### Delegation");
+    const projectsIdx = prompt.indexOf("### Projects");
+    const spawnTaskIdx = prompt.indexOf("spawn_task");
+    const spawnSubagentIdx = prompt.indexOf("spawn_subagent");
+    const resumeSubagentIdx = prompt.indexOf("resume_subagent");
+
+    expect(spawnTaskIdx).toBeGreaterThan(delegationIdx);
+    expect(spawnTaskIdx).toBeLessThan(projectsIdx);
+    expect(spawnSubagentIdx).toBeGreaterThan(delegationIdx);
+    expect(spawnSubagentIdx).toBeLessThan(projectsIdx);
+    expect(resumeSubagentIdx).toBeGreaterThan(delegationIdx);
+    expect(resumeSubagentIdx).toBeLessThan(projectsIdx);
+  });
+
   test("does NOT include Tools section in task mode", () => {
     const prompt = buildSystemPrompt({ mode: "task", persona });
     expect(prompt).not.toContain("## Tools");
@@ -227,6 +252,23 @@ describe("buildSystemPrompt", () => {
   test("includes How to Delegate Work in main mode", () => {
     const prompt = buildSystemPrompt({ mode: "main", persona });
     expect(prompt).toContain("## How to Delegate Work");
+  });
+
+  test("delegation guide has sub-sections with concrete examples", () => {
+    const prompt = buildSystemPrompt({ mode: "main", persona });
+    // Sub-section headers
+    expect(prompt).toContain("### reply() — Handle It Yourself");
+    expect(prompt).toContain("### spawn_task() — Single Atomic Task");
+    expect(prompt).toContain("### spawn_subagent() — Complex Multi-Step Work");
+    expect(prompt).toContain("### create_project() — Long-Lived Effort");
+    // Decision Flowchart
+    expect(prompt).toContain("### Decision Flowchart");
+    // After Delegation
+    expect(prompt).toContain("### After Delegation");
+    // Concrete examples
+    expect(prompt).toContain("Search the web for X");
+    expect(prompt).toContain("Research the top 5 frameworks");
+    expect(prompt).toContain("Key differences from spawn_task");
   });
 
   test("does NOT include How to Delegate Work in task mode", () => {
@@ -398,6 +440,35 @@ describe("buildSystemPrompt - prompt structure", () => {
       aiTaskPrompt: "## Your Role\nYou are a research assistant.",
     });
     expect(prompt).not.toContain("You are a research assistant");
+  });
+
+  test("SubAgent persona background injects system prompt into identity section", () => {
+    const subAgentPersona: Persona = {
+      name: "SubAgent",
+      role: "autonomous orchestrator",
+      personality: ["focused", "systematic", "autonomous"],
+      style: "concise and task-oriented",
+      values: ["accuracy", "efficiency", "thoroughness"],
+      background: [
+        "## Your Role",
+        "",
+        "You are a SubAgent — an autonomous orchestrator.",
+        "",
+        "## Rules",
+        "",
+        "1. FOCUS: Stay strictly on the task you were given.",
+      ].join("\n"),
+    };
+
+    // task mode (SubAgent's Thinker uses default task mode)
+    const prompt = buildSystemPrompt({ mode: "task", persona: subAgentPersona });
+    expect(prompt).toContain("SubAgent");
+    expect(prompt).toContain("autonomous orchestrator");
+    expect(prompt).toContain("FOCUS: Stay strictly on the task");
+
+    // Verify it does NOT include main-only sections
+    expect(prompt).not.toContain("## How You Think");
+    expect(prompt).not.toContain("## Tools");
   });
 });
 
