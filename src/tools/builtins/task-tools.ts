@@ -15,22 +15,18 @@ import { TaskPersister } from "../../task/persister.ts";
 
 export const task_list: Tool = {
   name: "task_list",
-  description: "List historical tasks for a given date",
+  description: "List historical tasks for a date. Returns task IDs, descriptions, and statuses.",
   category: ToolCategory.DATA,
   parameters: z.object({
     date: z
       .string()
       .optional()
       .describe("Date in YYYY-MM-DD format (defaults to today)"),
-    dataDir: z
-      .string()
-      .optional()
-      .describe("Data directory override (for testing)"),
   }),
   async execute(params: unknown, _context: ToolContext): Promise<ToolResult> {
     const startedAt = Date.now();
-    const { date, dataDir } = params as { date?: string; dataDir?: string };
-    const effectiveDataDir = dataDir ?? "data";
+    const { date } = params as { date?: string };
+    const effectiveDataDir = process.env.PEGASUS_DATA_DIR ?? "data";
     const tasksDir = path.join(effectiveDataDir, "tasks");
     const targetDate = date ?? new Date().toISOString().slice(0, 10);
 
@@ -92,19 +88,15 @@ export const task_list: Tool = {
 
 export const task_replay: Tool = {
   name: "task_replay",
-  description: "Load a historical task's conversation messages by taskId",
+  description: "Replay a past task's full conversation by ID. Use to review what a previous task did.",
   category: ToolCategory.DATA,
   parameters: z.object({
     taskId: z.string().describe("The task ID to replay"),
-    dataDir: z
-      .string()
-      .optional()
-      .describe("Data directory override (for testing)"),
   }),
   async execute(params: unknown, _context: ToolContext): Promise<ToolResult> {
     const startedAt = Date.now();
-    const { taskId, dataDir } = params as { taskId: string; dataDir?: string };
-    const effectiveDataDir = dataDir ?? "data";
+    const { taskId } = params as { taskId: string };
+    const effectiveDataDir = process.env.PEGASUS_DATA_DIR ?? "data";
     const tasksDir = path.join(effectiveDataDir, "tasks");
 
     try {

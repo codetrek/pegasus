@@ -160,7 +160,8 @@ describe("buildSystemPrompt", () => {
     const prompt = buildSystemPrompt({ mode: "main", persona });
     expect(prompt).toContain("Runtime:");
     expect(prompt).toContain(process.platform);
-    expect(prompt).toContain(process.arch);
+    expect(prompt).toContain("tz:");
+    expect(prompt).toContain("cwd:");
   });
 
   test("includes runtime metadata in task mode", () => {
@@ -239,41 +240,34 @@ describe("buildSystemPrompt", () => {
     expect(prompt).not.toContain("## Tools");
   });
 
-  test("includes Thinking Style in main mode", () => {
+  test("includes Thinking Style merged into How You Think in main mode", () => {
     const prompt = buildSystemPrompt({ mode: "main", persona });
-    expect(prompt).toContain("## Thinking Style");
+    expect(prompt).toContain("token-efficient");
   });
 
-  test("does NOT include Thinking Style in task mode", () => {
+  test("does NOT include separate Thinking Style section in task mode", () => {
     const prompt = buildSystemPrompt({ mode: "task", persona });
-    expect(prompt).not.toContain("## Thinking Style");
+    expect(prompt).not.toContain("token-efficient");
   });
 
-  test("includes How to Delegate Work in main mode", () => {
+  test("includes Delegation in main mode", () => {
     const prompt = buildSystemPrompt({ mode: "main", persona });
-    expect(prompt).toContain("## How to Delegate Work");
+    expect(prompt).toContain("## Delegation");
   });
 
-  test("delegation guide has sub-sections with concrete examples", () => {
+  test("delegation section has table with all delegation tools", () => {
     const prompt = buildSystemPrompt({ mode: "main", persona });
-    // Sub-section headers
-    expect(prompt).toContain("### reply() — Handle It Yourself");
-    expect(prompt).toContain("### spawn_task() — Single Atomic Task");
-    expect(prompt).toContain("### spawn_subagent() — Complex Multi-Step Work");
-    expect(prompt).toContain("### create_project() — Long-Lived Effort");
-    // Decision Flowchart
-    expect(prompt).toContain("### Decision Flowchart");
-    // After Delegation
-    expect(prompt).toContain("### After Delegation");
-    // Concrete examples
-    expect(prompt).toContain("Search the web for X");
-    expect(prompt).toContain("Research the top 5 frameworks");
-    expect(prompt).toContain("Key differences from spawn_task");
+    expect(prompt).toContain("reply()");
+    expect(prompt).toContain("spawn_task");
+    expect(prompt).toContain("spawn_subagent");
+    expect(prompt).toContain("create_project");
+    expect(prompt).toContain("explore (read-only)");
+    expect(prompt).toContain("SubAgent is autonomous");
   });
 
-  test("does NOT include How to Delegate Work in task mode", () => {
+  test("does NOT include Delegation in task mode", () => {
     const prompt = buildSystemPrompt({ mode: "task", persona });
-    expect(prompt).not.toContain("## How to Delegate Work");
+    expect(prompt).not.toContain("## Delegation");
   });
 
   test("includes Channels in main mode", () => {
@@ -382,8 +376,7 @@ describe("buildSystemPrompt - prompt structure", () => {
     const safetyIdx = prompt.indexOf("## Safety");
     const thinkIdx = prompt.indexOf("## How You Think");
     const toolsIdx = prompt.indexOf("## Tools");
-    const styleIdx = prompt.indexOf("## Thinking Style");
-    const spawnIdx = prompt.indexOf("## How to Delegate Work");
+    const delegateIdx = prompt.indexOf("## Delegation");
     const aiTaskIdx = prompt.indexOf("## Available AI Task Types");
     const channelIdx = prompt.indexOf("## Channels and reply()");
     const sessionIdx = prompt.indexOf("## Session History");
@@ -393,8 +386,7 @@ describe("buildSystemPrompt - prompt structure", () => {
     expect(safetyIdx).toBeGreaterThan(0);
     expect(thinkIdx).toBeGreaterThan(0);
     expect(toolsIdx).toBeGreaterThan(0);
-    expect(styleIdx).toBeGreaterThan(0);
-    expect(spawnIdx).toBeGreaterThan(0);
+    expect(delegateIdx).toBeGreaterThan(0);
     expect(aiTaskIdx).toBeGreaterThan(0);
     expect(channelIdx).toBeGreaterThan(0);
     expect(sessionIdx).toBeGreaterThan(0);
@@ -403,9 +395,8 @@ describe("buildSystemPrompt - prompt structure", () => {
     // Correct order
     expect(safetyIdx).toBeLessThan(thinkIdx);
     expect(thinkIdx).toBeLessThan(toolsIdx);
-    expect(toolsIdx).toBeLessThan(styleIdx);
-    expect(styleIdx).toBeLessThan(spawnIdx);
-    expect(spawnIdx).toBeLessThan(aiTaskIdx);
+    expect(toolsIdx).toBeLessThan(delegateIdx);
+    expect(delegateIdx).toBeLessThan(aiTaskIdx);
     expect(aiTaskIdx).toBeLessThan(channelIdx);
     expect(channelIdx).toBeLessThan(sessionIdx);
     expect(sessionIdx).toBeLessThan(skillIdx);
@@ -427,8 +418,7 @@ describe("buildSystemPrompt - prompt structure", () => {
     // Does NOT have main-only sections
     expect(prompt).not.toContain("## How You Think");
     expect(prompt).not.toContain("## Tools");
-    expect(prompt).not.toContain("## Thinking Style");
-    expect(prompt).not.toContain("## How to Delegate Work");
+    expect(prompt).not.toContain("## Delegation");
     expect(prompt).not.toContain("## Channels");
     expect(prompt).not.toContain("## Session History");
   });
@@ -479,10 +469,9 @@ describe("buildRuntimeSection", () => {
     expect(lines[0]).toMatch(/^Runtime:/);
   });
 
-  test("includes platform, arch, hostname, timezone, date, cwd", () => {
+  test("includes platform, timezone, date, cwd", () => {
     const line = buildRuntimeSection()[0]!;
     expect(line).toContain(process.platform);
-    expect(line).toContain(process.arch);
     expect(line).toContain("tz:");
     expect(line).toContain("date:");
     expect(line).toContain("cwd:");

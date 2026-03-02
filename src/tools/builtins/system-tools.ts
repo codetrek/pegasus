@@ -9,7 +9,7 @@ import type { Tool, ToolResult, ToolContext, ToolCategory } from "../types.ts";
 
 export const current_time: Tool = {
   name: "current_time",
-  description: "Get the current time",
+  description: "Get current date and time. Returns ISO timestamp and formatted local time.",
   category: "system" as ToolCategory,
   parameters: z.object({
     timezone: z.string().optional().describe("IANA timezone (e.g., 'UTC', 'America/New_York')"),
@@ -49,7 +49,7 @@ export const current_time: Tool = {
 
 export const sleep: Tool = {
   name: "sleep",
-  description: "Sleep for a specified duration in seconds",
+  description: "Pause execution for the given duration. Use only when polling or rate-limiting.",
   category: "system" as ToolCategory,
   parameters: z.object({
     duration: z.number().positive().describe("Duration in seconds"),
@@ -74,7 +74,7 @@ export const sleep: Tool = {
 
 export const get_env: Tool = {
   name: "get_env",
-  description: "Get the value of an environment variable",
+  description: "Read an environment variable. Returns null if not set.",
   category: "system" as ToolCategory,
   parameters: z.object({
     key: z.string().describe("Environment variable name"),
@@ -98,7 +98,7 @@ export const get_env: Tool = {
 
 export const set_env: Tool = {
   name: "set_env",
-  description: "Set an environment variable (only affects current process)",
+  description: "Set an environment variable for the current process only. Does not persist across restarts.",
   category: "system" as ToolCategory,
   parameters: z.object({
     key: z.string().describe("Environment variable name"),

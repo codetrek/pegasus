@@ -67,7 +67,7 @@ Today, every spawned task gets the full `allTaskTools` array (26+ tools) and a g
 - system: current_time, sleep, get_env, set_env
 - file: read_file, write_file, list_files, edit_file, grep_files, glob_files
 - network: http_get, http_post, http_request, web_search
-- data: json_parse, json_stringify, base64_encode, base64_decode
+- data: base64_encode, base64_decode
 - memory: memory_list, memory_read, memory_write, memory_patch, memory_append
 - task: task_list, task_replay
 - notify
@@ -76,7 +76,7 @@ Today, every spawned task gets the full `allTaskTools` array (26+ tools) and a g
 - system: current_time, get_env
 - file: read_file, list_files, glob_files, grep_files
 - network: http_get, web_search
-- data: json_parse, base64_decode
+- data: base64_decode
 - memory: memory_list, memory_read
 - task: task_list, task_replay
 - notify
@@ -85,7 +85,7 @@ Today, every spawned task gets the full `allTaskTools` array (26+ tools) and a g
 - system: current_time, get_env
 - file: read_file, list_files, glob_files, grep_files
 - network: http_get, web_search
-- data: json_parse, base64_decode
+- data: base64_decode
 - memory: memory_list, memory_read, memory_write, memory_append
 - task: task_list, task_replay
 - notify

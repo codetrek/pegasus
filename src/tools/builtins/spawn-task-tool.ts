@@ -12,7 +12,7 @@ import type { Tool, ToolResult, ToolContext } from "../types.ts";
 export const spawn_task: Tool = {
   name: "spawn_task",
   description:
-    "Launch a background task for complex operations requiring file I/O, shell commands, web search, or multi-step work",
+    "Launch a background task. Types: explore (read-only), plan (analysis + memory), general (full access). Results arrive in your session automatically.",
   category: ToolCategory.SYSTEM,
   parameters: z.object({
     description: z.string().describe(

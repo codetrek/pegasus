@@ -9,7 +9,7 @@ const MAX_OUTPUT_SIZE = 64 * 1024; // 64KB per stream
 
 export const shell_exec: Tool = {
   name: "shell_exec",
-  description: "Execute a shell command and return its output. For long-running commands, use bg_run(tool='shell_exec').",
+  description: "Execute a shell command synchronously. Returns stdout, stderr, and exit code (truncated at 64KB). For long-running commands (>30s), use bg_run(tool='shell_exec') instead.",
   category: "system" as ToolCategory,
   parameters: z.object({
     command: z.string().describe("The command to execute (passed to shell)"),

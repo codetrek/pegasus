@@ -10,7 +10,7 @@ import { ToolCategory } from "../types.ts";
 
 export const use_skill: Tool = {
   name: "use_skill",
-  description: "Invoke a skill by name. Use when a task matches an available skill.",
+  description: "Invoke a registered skill by name. Available skills are listed in the Skills section.",
   category: ToolCategory.SYSTEM,
   parameters: z.object({
     skill: z.string().describe("Skill name to invoke"),

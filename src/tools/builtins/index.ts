@@ -42,12 +42,10 @@ export { http_get, http_post, http_request, web_search, web_fetch };
 
 // Data tools
 import * as dataToolsModule from "./data-tools.ts";
-const json_parse = dataToolsModule.json_parse;
-const json_stringify = dataToolsModule.json_stringify;
 const base64_encode = dataToolsModule.base64_encode;
 const base64_decode = dataToolsModule.base64_decode;
 
-export { json_parse, json_stringify, base64_encode, base64_decode };
+export { base64_encode, base64_decode };
 
 // Memory tools
 import * as memoryToolsModule from "./memory-tools.ts";
@@ -178,8 +176,6 @@ export const networkTools: Tool[] = [
 ];
 
 export const dataTools: Tool[] = [
-  json_parse,
-  json_stringify,
   base64_encode,
   base64_decode,
 ];
