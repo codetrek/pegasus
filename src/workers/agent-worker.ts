@@ -352,8 +352,17 @@ async function handleShutdown(): Promise<void> {
  */
 function notificationToText(notification: TaskNotification): string {
   switch (notification.type) {
-    case "completed":
-      return String(notification.result ?? "[Task completed]");
+    case "completed": {
+      const result = notification.result;
+      if (result && typeof result === "object") {
+        // _compileResult returns { taskId, input, response, iterations }
+        // Extract the response text — that's the actual LLM output
+        const response = (result as Record<string, unknown>).response;
+        if (typeof response === "string") return response;
+        return JSON.stringify(result);
+      }
+      return String(result ?? "[Task completed]");
+    }
     case "failed":
       return `[Task failed: ${notification.error}]`;
     default:
