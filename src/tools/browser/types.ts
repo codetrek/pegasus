@@ -31,4 +31,6 @@ export interface AriaSnapshotResult {
   snapshot: string;
   /** Map from ref (e.g. "e1") to role-based selector string */
   refMap: Map<string, string>;
+  /** Whether the output was truncated due to maxNodes limit */
+  truncated: boolean;
 }

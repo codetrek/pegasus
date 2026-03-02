@@ -54,18 +54,36 @@ export class BrowserManager {
 
   /** Internal: perform the actual browser launch. */
   private async _launch(): Promise<any> {
-    const pw =
-      this.launcher ?? (await import("playwright-core")).chromium;
-
-    if (this.config.cdpUrl) {
-      this.browser = await pw.connectOverCDP(this.config.cdpUrl);
-      this.context =
-        this.browser.contexts()[0] ?? (await this.browser.newContext());
+    let pw: BrowserLauncher;
+    if (this.launcher) {
+      pw = this.launcher;
     } else {
-      this.browser = await pw.launch({ headless: this.config.headless });
-      this.context = await this.browser.newContext({
-        viewport: this.config.viewport,
-      });
+      try {
+        pw = (await import("playwright-core")).chromium;
+      } catch {
+        throw new Error(
+          "Playwright is not installed. Run `bun add playwright-core && bunx playwright install chromium` to enable browser tools.",
+        );
+      }
+    }
+
+    try {
+      if (this.config.cdpUrl) {
+        this.browser = await pw.connectOverCDP(this.config.cdpUrl);
+        this.context =
+          this.browser.contexts()[0] ?? (await this.browser.newContext());
+      } else {
+        this.browser = await pw.launch({ headless: this.config.headless });
+        this.context = await this.browser.newContext({
+          viewport: this.config.viewport,
+        });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("Executable doesn't exist") || msg.includes("executable")) {
+        throw new Error("Chromium browser is not installed. Run `bunx playwright install chromium` to download it.");
+      }
+      throw new Error(`Failed to launch browser: ${msg.split('\n')[0]}`);
     }
 
     this.page =
@@ -76,7 +94,7 @@ export class BrowserManager {
   }
 
   /** Navigate to URL and return ARIA snapshot. Only http/https URLs allowed. */
-  async navigate(url: string): Promise<{ snapshot: string }> {
+  async navigate(url: string): Promise<{ snapshot: string; truncated: boolean }> {
     // SSRF protection: restrict to http/https schemes
     let parsed: URL;
     try {
@@ -91,29 +109,51 @@ export class BrowserManager {
     }
 
     const page = await this.ensurePage();
-    await page.goto(url, {
-      timeout: this.config.timeout,
-      waitUntil: "domcontentloaded",
-    });
+    try {
+      await page.goto(url, {
+        timeout: this.config.timeout,
+        waitUntil: "domcontentloaded",
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("Timeout") || msg.includes("timeout")) {
+        throw new Error(`Navigation to "${url}" timed out after ${this.config.timeout}ms. The page may be slow — try again or use a different URL.`);
+      }
+      if (msg.includes("ERR_NAME_NOT_RESOLVED")) {
+        throw new Error(`Cannot resolve hostname for "${url}". Check the URL for typos.`);
+      }
+      if (msg.includes("ERR_CONNECTION_REFUSED")) {
+        throw new Error(`Connection refused for "${url}". The server may be down.`);
+      }
+      throw new Error(`Navigation to "${url}" failed: ${msg.split('\n')[0]}`);
+    }
     return this.takeSnapshot();
   }
 
   /** Take ARIA snapshot of current page, refreshing ref map. */
-  async takeSnapshot(): Promise<{ snapshot: string }> {
+  async takeSnapshot(): Promise<{ snapshot: string; truncated: boolean }> {
     const page = await this.ensurePage();
     const url = page.url();
     const tree = await page.accessibility.snapshot();
     const result = formatAriaTree(tree, url);
 
     this.refMap = result.refMap;
-    return { snapshot: result.snapshot };
+    return { snapshot: result.snapshot, truncated: result.truncated };
   }
 
   /** Click element by ref. Returns new snapshot. */
-  async click(ref: string): Promise<{ snapshot: string }> {
+  async click(ref: string): Promise<{ snapshot: string; truncated: boolean }> {
     const selector = this.resolveRef(ref);
     const page = await this.ensurePage();
-    await page.locator(selector).click({ timeout: this.config.timeout });
+    try {
+      await page.locator(selector).click({ timeout: this.config.timeout });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("Timeout") || msg.includes("timeout")) {
+        throw new Error(`Click on ref "${ref}" timed out — the element may be hidden or not clickable. Try browser_snapshot to check current page state.`);
+      }
+      throw new Error(`Click on ref "${ref}" failed: ${msg.split('\n')[0]}`);
+    }
     // Wait for potential navigation/re-render
     await page.waitForTimeout(500);
     return this.takeSnapshot();
@@ -124,14 +164,22 @@ export class BrowserManager {
     ref: string,
     text: string,
     submit: boolean = false,
-  ): Promise<{ snapshot: string }> {
+  ): Promise<{ snapshot: string; truncated: boolean }> {
     const selector = this.resolveRef(ref);
     const page = await this.ensurePage();
     const locator = page.locator(selector);
-    await locator.fill(text, { timeout: this.config.timeout });
-    if (submit) {
-      await locator.press("Enter");
-      await page.waitForTimeout(500);
+    try {
+      await locator.fill(text, { timeout: this.config.timeout });
+      if (submit) {
+        await locator.press("Enter");
+        await page.waitForTimeout(500);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("Timeout") || msg.includes("timeout")) {
+        throw new Error(`Type into ref "${ref}" timed out — the element may not be editable. Try browser_snapshot to check.`);
+      }
+      throw new Error(`Type into ref "${ref}" failed: ${msg.split('\n')[0]}`);
     }
     return this.takeSnapshot();
   }
@@ -140,7 +188,7 @@ export class BrowserManager {
   async scroll(
     direction: "up" | "down",
     amount: number = 3,
-  ): Promise<{ snapshot: string }> {
+  ): Promise<{ snapshot: string; truncated: boolean }> {
     const page = await this.ensurePage();
     const viewportHeight = this.config.viewport.height;
     const delta =
@@ -155,12 +203,12 @@ export class BrowserManager {
   /** Take screenshot, saving to /tmp/. Returns file path + snapshot. */
   async screenshot(
     fullPage: boolean = false,
-  ): Promise<{ screenshotPath: string; snapshot: string }> {
+  ): Promise<{ screenshotPath: string; snapshot: string; truncated: boolean }> {
     const page = await this.ensurePage();
     const screenshotPath = `/tmp/pegasus-browser-${Date.now()}.png`;
     await page.screenshot({ path: screenshotPath, fullPage });
-    const { snapshot } = await this.takeSnapshot();
-    return { screenshotPath, snapshot };
+    const { snapshot, truncated } = await this.takeSnapshot();
+    return { screenshotPath, snapshot, truncated };
   }
 
   /** Close browser and clean up state. */

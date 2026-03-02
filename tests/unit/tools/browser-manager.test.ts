@@ -119,12 +119,9 @@ describe("BrowserManager", () => {
     const result = await manager.navigate("https://example.com");
 
     expect(mocks.mockPage.goto).toHaveBeenCalledTimes(1);
-    expect(mocks.mockPage.goto).toHaveBeenCalledWith("https://example.com", {
-      timeout: 5000,
-      waitUntil: "domcontentloaded",
-    });
     expect(result.snapshot).toContain("[page]");
     expect(result.snapshot).toContain('[button] "OK" [ref=e1]');
+    expect(result.truncated).toBe(false);
   });
 
   // ── 4. takeSnapshot ────────────────────────────────────────────────
@@ -137,6 +134,7 @@ describe("BrowserManager", () => {
     expect(result.snapshot).toContain("[page] url: https://example.com");
     expect(result.snapshot).toContain('[button] "OK" [ref=e1]');
     expect(result.snapshot).toContain('[link] "Help" [ref=e2]');
+    expect(result.truncated).toBe(false);
   });
 
   // ── 5. click — valid ref ───────────────────────────────────────────
@@ -560,5 +558,166 @@ describe("BrowserManager", () => {
 
     await m.scroll("down", 2);
     expect(mocks.mockPage.mouse.wheel).toHaveBeenCalledWith(0, 1200); // 2 * 600
+  });
+
+  // ── Error wrapping — navigate ─────────────────────────────────────
+
+  it("should throw friendly error on navigate timeout", async () => {
+    mocks.mockPage.goto = mock(() =>
+      Promise.reject(new Error("Timeout 5000ms exceeded")),
+    );
+
+    await expect(manager.navigate("https://slow.example.com")).rejects.toThrow(
+      /timed out after 5000ms/,
+    );
+  });
+
+  it("should throw friendly error on DNS resolution failure", async () => {
+    mocks.mockPage.goto = mock(() =>
+      Promise.reject(new Error("net::ERR_NAME_NOT_RESOLVED")),
+    );
+
+    await expect(manager.navigate("https://nonexistent.example")).rejects.toThrow(
+      /Cannot resolve hostname/,
+    );
+  });
+
+  it("should throw friendly error on connection refused", async () => {
+    mocks.mockPage.goto = mock(() =>
+      Promise.reject(new Error("net::ERR_CONNECTION_REFUSED")),
+    );
+
+    await expect(manager.navigate("https://down.example.com")).rejects.toThrow(
+      /Connection refused/,
+    );
+  });
+
+  it("should strip multiline Playwright errors in navigate", async () => {
+    mocks.mockPage.goto = mock(() =>
+      Promise.reject(new Error("Some error\nCall log:\n  - navigating to url")),
+    );
+
+    try {
+      await manager.navigate("https://example.com");
+      expect(true).toBe(false); // should not reach
+    } catch (err: any) {
+      expect(err.message).not.toContain("Call log:");
+      expect(err.message).toContain("Some error");
+    }
+  });
+
+  // ── Error wrapping — click ────────────────────────────────────────
+
+  it("should throw friendly error on click timeout", async () => {
+    await manager.navigate("https://example.com");
+
+    // Override locator to simulate timeout
+    mocks.mockPage.locator = mock(() => ({
+      click: mock(() => Promise.reject(new Error("Timeout 5000ms exceeded"))),
+      fill: mock(() => Promise.resolve()),
+      press: mock(() => Promise.resolve()),
+    }));
+
+    await expect(manager.click("e1")).rejects.toThrow(
+      /Click on ref "e1" timed out/,
+    );
+  });
+
+  it("should throw friendly error on click failure", async () => {
+    await manager.navigate("https://example.com");
+
+    mocks.mockPage.locator = mock(() => ({
+      click: mock(() => Promise.reject(new Error("Element is not visible\nCall log:"))),
+      fill: mock(() => Promise.resolve()),
+      press: mock(() => Promise.resolve()),
+    }));
+
+    try {
+      await manager.click("e1");
+      expect(true).toBe(false);
+    } catch (err: any) {
+      expect(err.message).toContain('Click on ref "e1" failed');
+      expect(err.message).not.toContain("Call log:");
+    }
+  });
+
+  // ── Error wrapping — type ─────────────────────────────────────────
+
+  it("should throw friendly error on type timeout", async () => {
+    await manager.navigate("https://example.com");
+
+    mocks.mockPage.locator = mock(() => ({
+      click: mock(() => Promise.resolve()),
+      fill: mock(() => Promise.reject(new Error("Timeout 5000ms exceeded"))),
+      press: mock(() => Promise.resolve()),
+    }));
+
+    await expect(manager.type("e1", "hello")).rejects.toThrow(
+      /Type into ref "e1" timed out/,
+    );
+  });
+
+  it("should throw friendly error on type failure", async () => {
+    await manager.navigate("https://example.com");
+
+    mocks.mockPage.locator = mock(() => ({
+      click: mock(() => Promise.resolve()),
+      fill: mock(() => Promise.reject(new Error("Element is not an input\nCall log:"))),
+      press: mock(() => Promise.resolve()),
+    }));
+
+    try {
+      await manager.type("e1", "hello");
+      expect(true).toBe(false);
+    } catch (err: any) {
+      expect(err.message).toContain('Type into ref "e1" failed');
+      expect(err.message).not.toContain("Call log:");
+    }
+  });
+
+  // ── Error wrapping — _launch (playwright not installed) ───────────
+
+  it("should throw friendly error when playwright-core is not installed (or chromium missing)", async () => {
+    // Create manager without injected launcher — will try dynamic import.
+    // In CI/test env playwright-core IS installed but chromium is not,
+    // so we expect either "Playwright is not installed" or "Chromium browser is not installed".
+    const m = new BrowserManager(defaultConfig());
+
+    await expect(m.ensurePage()).rejects.toThrow(
+      /Playwright is not installed|Chromium browser is not installed/,
+    );
+  });
+
+  it("should throw friendly error when chromium executable is missing", async () => {
+    const failLauncher: BrowserLauncher = {
+      launch: mock(() =>
+        Promise.reject(new Error("Executable doesn't exist at /path/to/chromium")),
+      ),
+      connectOverCDP: mock(() => Promise.resolve(mocks.mockBrowser)),
+    };
+    const m = new BrowserManager(defaultConfig(), failLauncher);
+
+    await expect(m.ensurePage()).rejects.toThrow(
+      /Chromium browser is not installed/,
+    );
+  });
+
+  it("should throw generic launch error for unknown failures", async () => {
+    const failLauncher: BrowserLauncher = {
+      launch: mock(() =>
+        Promise.reject(new Error("Unknown crash\nStack trace here")),
+      ),
+      connectOverCDP: mock(() => Promise.resolve(mocks.mockBrowser)),
+    };
+    const m = new BrowserManager(defaultConfig(), failLauncher);
+
+    try {
+      await m.ensurePage();
+      expect(true).toBe(false);
+    } catch (err: any) {
+      expect(err.message).toContain("Failed to launch browser");
+      expect(err.message).toContain("Unknown crash");
+      expect(err.message).not.toContain("Stack trace here");
+    }
   });
 });

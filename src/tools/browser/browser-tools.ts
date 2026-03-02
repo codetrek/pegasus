@@ -46,7 +46,7 @@ export const browser_navigate: Tool = {
       const result = await manager.navigate(url);
       return {
         success: true,
-        result: { snapshot: result.snapshot },
+        result: { snapshot: result.snapshot, truncated: result.truncated },
         startedAt,
         completedAt: Date.now(),
         durationMs: Date.now() - startedAt,
@@ -68,8 +68,8 @@ export const browser_navigate: Tool = {
 export const browser_snapshot: Tool = {
   name: "browser_snapshot",
   description:
-    "Get current page's accessibility snapshot with fresh ref numbers. " +
-    "Call this to see the current page state.",
+    "Get the current page's accessibility snapshot with fresh ref numbers. " +
+    "Refs from previous snapshots are invalidated — always use refs from the latest snapshot.",
   category: ToolCategory.BROWSER,
   parameters: z.object({}),
   async execute(_params: unknown, context: ToolContext): Promise<ToolResult> {
@@ -79,7 +79,7 @@ export const browser_snapshot: Tool = {
       const result = await manager.takeSnapshot();
       return {
         success: true,
-        result: { snapshot: result.snapshot },
+        result: { snapshot: result.snapshot, truncated: result.truncated },
         startedAt,
         completedAt: Date.now(),
         durationMs: Date.now() - startedAt,
@@ -122,6 +122,7 @@ export const browser_screenshot: Tool = {
         result: {
           screenshotPath: result.screenshotPath,
           snapshot: result.snapshot,
+          truncated: result.truncated,
           message: `Screenshot saved to ${result.screenshotPath}`,
         },
         startedAt,
@@ -145,8 +146,8 @@ export const browser_screenshot: Tool = {
 export const browser_click: Tool = {
   name: "browser_click",
   description:
-    "Click an element by its ref number from the last snapshot. " +
-    "Returns the updated page snapshot.",
+    "Click an element by its ref number from the most recent snapshot. " +
+    "Returns a new page snapshot with updated refs — previous refs are invalidated after each action.",
   category: ToolCategory.BROWSER,
   parameters: z.object({
     ref: z
@@ -161,7 +162,7 @@ export const browser_click: Tool = {
       const result = await manager.click(ref);
       return {
         success: true,
-        result: { snapshot: result.snapshot },
+        result: { snapshot: result.snapshot, truncated: result.truncated },
         startedAt,
         completedAt: Date.now(),
         durationMs: Date.now() - startedAt,
@@ -184,7 +185,8 @@ export const browser_type: Tool = {
   name: "browser_type",
   description:
     "Type text into an input element by its ref number. " +
-    "Set submit=true to press Enter after typing.",
+    "Set submit=true to press Enter after typing. " +
+    "Returns a new page snapshot with updated refs.",
   category: ToolCategory.BROWSER,
   parameters: z.object({
     ref: z.string().describe("Element ref from snapshot (e.g. 'e1')"),
@@ -207,7 +209,7 @@ export const browser_type: Tool = {
       const result = await manager.type(ref, text, submit);
       return {
         success: true,
-        result: { snapshot: result.snapshot },
+        result: { snapshot: result.snapshot, truncated: result.truncated },
         startedAt,
         completedAt: Date.now(),
         durationMs: Date.now() - startedAt,
@@ -229,8 +231,8 @@ export const browser_type: Tool = {
 export const browser_scroll: Tool = {
   name: "browser_scroll",
   description:
-    "Scroll the page up or down. " +
-    "Amount controls scroll distance (default: 3 viewport-heights).",
+    "Scroll the page up or down and return the updated page snapshot with fresh refs. " +
+    "Amount controls scroll distance in viewport-heights (default: 3).",
   category: ToolCategory.BROWSER,
   parameters: z.object({
     direction: z
@@ -255,7 +257,7 @@ export const browser_scroll: Tool = {
       const result = await manager.scroll(direction, amount);
       return {
         success: true,
-        result: { snapshot: result.snapshot },
+        result: { snapshot: result.snapshot, truncated: result.truncated },
         startedAt,
         completedAt: Date.now(),
         durationMs: Date.now() - startedAt,

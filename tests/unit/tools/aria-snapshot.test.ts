@@ -159,6 +159,7 @@ describe("formatAriaTree", () => {
 
     expect(result.snapshot).toBe("");
     expect(result.refMap.size).toBe(0);
+    expect(result.truncated).toBe(false);
   });
 
   it("should return empty snapshot for null tree even with url", () => {
@@ -166,6 +167,7 @@ describe("formatAriaTree", () => {
 
     expect(result.snapshot).toBe("");
     expect(result.refMap.size).toBe(0);
+    expect(result.truncated).toBe(false);
   });
 
   // ── 7. Empty children handling ──────────────────────────────────────
@@ -380,10 +382,10 @@ describe("formatAriaTree", () => {
   // ── 12. Deep nesting limit ──────────────────────────────────────────
 
   it("should clamp indentation at max depth (8 levels)", () => {
-    // Build a 12-level deep chain
+    // Build a 12-level deep chain using 'region' (not compact-skippable)
     let deepNode: AriaNode = { role: "button", name: "Deep Button" };
     for (let i = 0; i < 11; i++) {
-      deepNode = { role: "group", children: [deepNode] };
+      deepNode = { role: "region", name: `level-${i}`, children: [deepNode] };
     }
     const tree: AriaNode = {
       role: "WebArea",
@@ -464,13 +466,13 @@ describe("formatAriaTree", () => {
 
     const result = formatAriaTree(tree, "https://example.com/login");
 
+    // Compact mode: nameless [group] is collapsed, children promoted to parent level
     expect(result.snapshot).toBe(
       [
         "[page] url: https://example.com/login",
         '  [heading (level 1)] "Sign In"',
-        "  [group]",
-        '    [textbox] "Username" [ref=e1]',
-        '    [textbox] "Password" [ref=e2]',
+        '  [textbox] "Username" [ref=e1]',
+        '  [textbox] "Password" [ref=e2]',
         '  [button] "Log In" [ref=e3]',
         '  [link] "Forgot password?" [ref=e4]',
       ].join("\n"),
@@ -483,5 +485,206 @@ describe("formatAriaTree", () => {
     expect(result.refMap.get("e4")).toBe(
       'role=link[name="Forgot password?"]',
     );
+    expect(result.truncated).toBe(false);
+  });
+
+  // ── maxNodes truncation ──────────────────────────────────────────────
+
+  describe("maxNodes truncation", () => {
+    it("should truncate when node count exceeds maxNodes", () => {
+      const children: AriaNode[] = [];
+      for (let i = 0; i < 10; i++) {
+        children.push({ role: "button", name: `Button ${i}` });
+      }
+      const tree: AriaNode = {
+        role: "WebArea",
+        children,
+      };
+
+      // Limit to 5 nodes — only first 5 buttons rendered
+      const result = formatAriaTree(tree, undefined, 5);
+
+      expect(result.truncated).toBe(true);
+      expect(result.snapshot).toContain('[button] "Button 0"');
+      expect(result.snapshot).toContain('[button] "Button 4"');
+      expect(result.snapshot).not.toContain('[button] "Button 5"');
+      expect(result.snapshot).toContain("truncated: showing 5 of ~11 nodes");
+      expect(result.snapshot).toContain("browser_scroll");
+    });
+
+    it("should not truncate when node count is within maxNodes", () => {
+      const tree: AriaNode = {
+        role: "WebArea",
+        children: [
+          { role: "heading", name: "Title" },
+          { role: "button", name: "OK" },
+        ],
+      };
+
+      const result = formatAriaTree(tree, undefined, 100);
+
+      expect(result.truncated).toBe(false);
+      expect(result.snapshot).not.toContain("truncated");
+      expect(result.snapshot).toContain('[heading] "Title"');
+      expect(result.snapshot).toContain('[button] "OK"');
+    });
+
+    it("should include total node count in truncation message", () => {
+      const children: AriaNode[] = [];
+      for (let i = 0; i < 20; i++) {
+        children.push({ role: "link", name: `Link ${i}` });
+      }
+      const tree: AriaNode = {
+        role: "WebArea",
+        children,
+      };
+
+      const result = formatAriaTree(tree, undefined, 3);
+
+      expect(result.truncated).toBe(true);
+      // Total nodes = 20 children + root = 21
+      // But countNodes counts from root which includes root itself
+      expect(result.snapshot).toContain("of ~21 nodes");
+    });
+
+    it("should set truncated field correctly", () => {
+      const tree: AriaNode = {
+        role: "WebArea",
+        children: [
+          { role: "heading", name: "Title" },
+          { role: "button", name: "OK" },
+        ],
+      };
+
+      // Below limit
+      const notTruncated = formatAriaTree(tree, undefined, 100);
+      expect(notTruncated.truncated).toBe(false);
+
+      // At exact limit
+      const atLimit = formatAriaTree(tree, undefined, 2);
+      expect(atLimit.truncated).toBe(false);
+
+      // Above limit
+      const truncated = formatAriaTree(tree, undefined, 1);
+      expect(truncated.truncated).toBe(true);
+    });
+
+    it("should use default maxNodes (150) when not specified", () => {
+      // Build a tree with 160 nodes (all non-compact-skippable)
+      const children: AriaNode[] = [];
+      for (let i = 0; i < 160; i++) {
+        children.push({ role: "heading", name: `H${i}` });
+      }
+      const tree: AriaNode = {
+        role: "WebArea",
+        children,
+      };
+
+      const result = formatAriaTree(tree);
+
+      expect(result.truncated).toBe(true);
+      expect(result.snapshot).toContain("showing 150 of ~161 nodes");
+    });
+  });
+
+  // ── Compact mode filtering ───────────────────────────────────────────
+
+  describe("compact mode", () => {
+    it("should collapse nameless generic/group/none/presentation containers", () => {
+      const tree: AriaNode = {
+        role: "WebArea",
+        children: [
+          {
+            role: "generic",
+            children: [
+              { role: "button", name: "Inside Generic" },
+            ],
+          },
+          {
+            role: "none",
+            children: [
+              { role: "link", name: "Inside None" },
+            ],
+          },
+          {
+            role: "presentation",
+            children: [
+              { role: "textbox", name: "Inside Presentation" },
+            ],
+          },
+        ],
+      };
+
+      const result = formatAriaTree(tree);
+
+      // Containers should NOT appear
+      expect(result.snapshot).not.toContain("[generic]");
+      expect(result.snapshot).not.toContain("[none]");
+      expect(result.snapshot).not.toContain("[presentation]");
+
+      // Children should be promoted to depth 1
+      expect(result.snapshot).toContain('[button] "Inside Generic" [ref=e1]');
+      expect(result.snapshot).toContain('[link] "Inside None" [ref=e2]');
+      expect(result.snapshot).toContain('[textbox] "Inside Presentation" [ref=e3]');
+    });
+
+    it("should preserve named structural containers", () => {
+      const tree: AriaNode = {
+        role: "WebArea",
+        children: [
+          {
+            role: "group",
+            name: "Login Form",
+            children: [
+              { role: "textbox", name: "Email" },
+            ],
+          },
+          {
+            role: "generic",
+            name: "Main Content",
+            children: [
+              { role: "button", name: "Submit" },
+            ],
+          },
+        ],
+      };
+
+      const result = formatAriaTree(tree);
+
+      // Named containers should appear
+      expect(result.snapshot).toContain('[group] "Login Form"');
+      expect(result.snapshot).toContain('[generic] "Main Content"');
+
+      // Children should be properly indented under parents
+      expect(result.snapshot).toContain('    [textbox] "Email"');
+      expect(result.snapshot).toContain('    [button] "Submit"');
+    });
+
+    it("should not collapse non-structural roles even without name", () => {
+      const tree: AriaNode = {
+        role: "WebArea",
+        children: [
+          {
+            role: "navigation",
+            children: [
+              { role: "link", name: "Home" },
+            ],
+          },
+          {
+            role: "list",
+            children: [
+              { role: "listitem", children: [{ role: "link", name: "Item" }] },
+            ],
+          },
+        ],
+      };
+
+      const result = formatAriaTree(tree);
+
+      // Non-structural roles should appear even without name
+      expect(result.snapshot).toContain("[navigation]");
+      expect(result.snapshot).toContain("[list]");
+      expect(result.snapshot).toContain("[listitem]");
+    });
   });
 });

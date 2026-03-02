@@ -26,36 +26,42 @@ function createMockManager() {
       Promise.resolve({
         snapshot:
           '[page] url: https://example.com\n  [button] "Click" [ref=e1]',
+        truncated: false,
       }),
     ),
     takeSnapshot: mock(() =>
       Promise.resolve({
         snapshot:
           '[page] url: https://example.com\n  [button] "Click" [ref=e1]',
+        truncated: false,
       }),
     ),
     click: mock(() =>
       Promise.resolve({
         snapshot:
           '[page] url: https://example.com\n  [heading] "Clicked!"',
+        truncated: false,
       }),
     ),
     type: mock(() =>
       Promise.resolve({
         snapshot:
           '[page] url: https://example.com\n  [textbox] "Email" [ref=e1] value="test@test.com"',
+        truncated: false,
       }),
     ),
     scroll: mock(() =>
       Promise.resolve({
         snapshot:
           '[page] url: https://example.com\n  [heading] "Section 2"',
+        truncated: false,
       }),
     ),
     screenshot: mock(() =>
       Promise.resolve({
         screenshotPath: "/tmp/pegasus-browser-123.png",
         snapshot: "[page] url: https://example.com",
+        truncated: false,
       }),
     ),
     close: mock(() => Promise.resolve()),
@@ -79,6 +85,7 @@ describe("browser_navigate", () => {
 
     expect(result.success).toBe(true);
     expect((result.result as any).snapshot).toContain("example.com");
+    expect((result.result as any).truncated).toBe(false);
     expect(mgr.navigate).toHaveBeenCalledWith("https://example.com");
     expect(result.startedAt).toBeGreaterThan(0);
     expect(result.durationMs).toBeGreaterThanOrEqual(0);
@@ -130,6 +137,7 @@ describe("browser_snapshot", () => {
 
     expect(result.success).toBe(true);
     expect((result.result as any).snapshot).toContain("[button]");
+    expect((result.result as any).truncated).toBe(false);
     expect(mgr.takeSnapshot).toHaveBeenCalled();
   });
 

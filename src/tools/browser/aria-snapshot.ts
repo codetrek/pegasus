@@ -24,8 +24,22 @@ const INTERACTIVE_ROLES = new Set([
   "searchbox",
 ]);
 
+/**
+ * Structural container roles that can be collapsed (skipped) in compact mode
+ * when they have no name — their children are promoted to the parent's level.
+ */
+const COMPACT_SKIP_ROLES = new Set([
+  "generic",
+  "group",
+  "none",
+  "presentation",
+]);
+
 /** Maximum indentation depth to prevent excessive nesting. */
 const MAX_DEPTH = 8;
+
+/** Default maximum number of rendered nodes before truncation. */
+const DEFAULT_MAX_NODES = 150;
 
 /** Escape double-quotes inside a name string for display. */
 function escapeQuotes(s: string): string {
@@ -96,12 +110,54 @@ interface WalkState {
   refCounter: number;
   lines: string[];
   refMap: Map<string, string>;
+  nodeCount: number;
+  maxNodes: number;
+  truncated: boolean;
+}
+
+/**
+ * Count total nodes in a tree (quick recursive count, no formatting).
+ */
+function countNodes(node: AriaNode): number {
+  let count = 1;
+  if (node.children) {
+    for (const child of node.children) {
+      count += countNodes(child);
+    }
+  }
+  return count;
+}
+
+/**
+ * Check if a node should be skipped in compact mode.
+ * A node is skippable if it's a structural container role with no name.
+ * Its children are promoted to the parent's indentation level.
+ */
+function isCompactSkippable(node: AriaNode): boolean {
+  return COMPACT_SKIP_ROLES.has(node.role) && !node.name;
 }
 
 /**
  * Recursively walk the ARIA tree, collecting formatted lines and ref mappings.
  */
 function walkTree(node: AriaNode, depth: number, state: WalkState): void {
+  // Check truncation limit before rendering this node
+  if (state.nodeCount >= state.maxNodes) {
+    state.truncated = true;
+    return;
+  }
+
+  // Compact mode: skip nameless structural containers, promote children
+  if (isCompactSkippable(node)) {
+    // Don't count this node — it's being collapsed away
+    if (node.children && node.children.length > 0) {
+      for (const child of node.children) {
+        walkTree(child, depth, state);
+      }
+    }
+    return;
+  }
+
   const clampedDepth = Math.min(depth, MAX_DEPTH);
   const indent = "  ".repeat(clampedDepth);
 
@@ -115,6 +171,7 @@ function walkTree(node: AriaNode, depth: number, state: WalkState): void {
   }
 
   state.lines.push(formatNodeLine(node, ref, indent));
+  state.nodeCount++;
 
   if (node.children && node.children.length > 0) {
     for (const child of node.children) {
@@ -127,22 +184,30 @@ function walkTree(node: AriaNode, depth: number, state: WalkState): void {
  * Format a Playwright accessibility snapshot tree into a human/LLM-readable
  * text representation with ref-based selectors for interactive elements.
  *
- * @param tree - Root node from `page.accessibility.snapshot()`, or null.
- * @param url  - Optional page URL to include in the header.
- * @returns Formatted snapshot text and a ref→selector map.
+ * @param tree     - Root node from `page.accessibility.snapshot()`, or null.
+ * @param url      - Optional page URL to include in the header.
+ * @param maxNodes - Maximum number of nodes to render (default: 150).
+ *                   When exceeded, output is truncated with a hint message.
+ * @returns Formatted snapshot text, a ref→selector map, and truncated flag.
  */
 export function formatAriaTree(
   tree: AriaNode | null,
   url?: string,
+  maxNodes?: number,
 ): AriaSnapshotResult {
   if (!tree) {
-    return { snapshot: "", refMap: new Map() };
+    return { snapshot: "", refMap: new Map(), truncated: false };
   }
+
+  const effectiveMax = maxNodes ?? DEFAULT_MAX_NODES;
 
   const state: WalkState = {
     refCounter: 0,
     lines: [],
     refMap: new Map(),
+    nodeCount: 0,
+    maxNodes: effectiveMax,
+    truncated: false,
   };
 
   // Header line
@@ -156,8 +221,17 @@ export function formatAriaTree(
     }
   }
 
+  // Append truncation hint if we hit the limit
+  if (state.truncated) {
+    const totalNodes = countNodes(tree);
+    state.lines.push(
+      `... (truncated: showing ${effectiveMax} of ~${totalNodes} nodes. Use browser_scroll to reveal more, or browser_snapshot for current viewport.)`,
+    );
+  }
+
   return {
     snapshot: state.lines.join("\n"),
     refMap: state.refMap,
+    truncated: state.truncated,
   };
 }
