@@ -51,7 +51,7 @@ describe("SessionStore with images", () => {
     await store.append(msg);
 
     // Read raw JSONL file
-    const raw = await readFile(path.join(tmpDir, "main", "current.jsonl"), "utf-8");
+    const raw = await readFile(path.join(tmpDir, "current.jsonl"), "utf-8");
     expect(raw).not.toContain("secretbase64");
     expect(raw).toContain('"id":"x"');
   });
