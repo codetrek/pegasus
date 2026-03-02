@@ -105,7 +105,7 @@ export class MainAgent {
     this.settings = deps.settings ?? getSettings();
 
     // Session persistence
-    this.sessionStore = new SessionStore(this.settings.dataDir);
+    this.sessionStore = new SessionStore(path.join(this.settings.dataDir, "main"));
 
     // Load Codex credentials synchronously BEFORE models.get()
     // (device code login happens later in start() if needed)
