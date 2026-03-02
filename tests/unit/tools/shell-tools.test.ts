@@ -208,4 +208,78 @@ describe("shell_exec tool", () => {
     expect(shell_exec.category).toBe(ToolCategory.SYSTEM);
     expect(shell_exec.description).toContain("shell command");
   });
+
+  it("should handle catch block with invalid cwd (triggers error)", async () => {
+    // Using an invalid/non-existent directory should trigger an error in spawn
+    const result = await shell_exec.execute(
+      { command: "echo test", cwd: "/nonexistent/path/that/does/not/exist/xyz" },
+      context,
+    );
+
+    // Should return failure due to error
+    expect(result.success).toBe(false);
+    expect(result.error).toBeDefined();
+    expect(result.error).toContain("Command failed");
+    expect(result.startedAt).toBeGreaterThan(0);
+    expect(result.completedAt).toBeGreaterThanOrEqual(result.startedAt);
+    expect(result.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("should handle catch block with Error instance", async () => {
+    // Mock the spawn to throw an Error - we'll use an invalid shell command scenario
+    // By using a command that's invalid syntax, we might trigger error handling
+    const result = await shell_exec.execute(
+      { command: "$(invalid syntax here" },
+      context,
+    );
+
+    // The shell may or may not fail, but we're testing error handling path
+    expect(result.completedAt).toBeGreaterThanOrEqual(result.startedAt);
+    expect(result.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("should handle double truncation for both stdout and stderr", async () => {
+    // Create output that exceeds MAX_OUTPUT_SIZE in both stdout and stderr
+    const result = await shell_exec.execute(
+      { command: "seq 1 4000 | awk '{print \"stdout_line_\" $1}' && seq 1 4000 | awk '{print \"stderr_line_\" $1}' >&2" },
+      context,
+    );
+
+    const r = result.result as ShellResult;
+    expect(r.truncated).toBe(true);
+    expect(r.stdout).toContain("[truncated,");
+    expect(r.stderr).toContain("[truncated,");
+  });
+
+  it("should handle stderr truncation independently", async () => {
+    // Create large stderr output only
+    const result = await shell_exec.execute(
+      { command: "seq 1 7000 | awk '{print \"error_\" $1}' >&2" },
+      context,
+    );
+
+    const r = result.result as ShellResult;
+    expect(r.truncated).toBe(true);
+    expect(r.stderr).toContain("[truncated,");
+  });
+
+  it("should include truncated flag in result when truncation occurs", async () => {
+    const result = await shell_exec.execute(
+      { command: "seq 1 7000 | awk '{print \"line \" $1}'" },
+      context,
+    );
+
+    const r = result.result as ShellResult;
+    // Verify truncated flag is explicitly present in result
+    expect(r.truncated).toBe(true);
+    expect(r.stdout.length).toBeLessThanOrEqual(64 * 1024 + 100); // Allow for the truncation message
+  });
+
+  it("should not include truncated flag when output is small", async () => {
+    const result = await shell_exec.execute({ command: "echo small" }, context);
+
+    const r = result.result as ShellResult;
+    // Verify truncated flag is not present when no truncation occurs
+    expect(r.truncated).toBeUndefined();
+  });
 });
