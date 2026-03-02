@@ -18,6 +18,7 @@ export enum ToolCategory {
   NETWORK = "network",
   DATA = "data",
   MEMORY = "memory", // M2: long-term memory
+  BROWSER = "browser", // Browser automation (Playwright)
   CODE = "code", // Future extension
   MCP = "mcp", // Future extension
   CUSTOM = "custom", // Future extension
@@ -65,6 +66,7 @@ export interface ToolContext {
   memoryDir?: string;
   sessionDir?: string;
   projectManager?: unknown; // ProjectManager — used by project tools (loosely typed to avoid circular imports)
+  browserManager?: unknown; // BrowserManager — used by browser tools (loosely typed to avoid circular imports)
   extractModel?: LanguageModel; // Small model for content extraction (web_fetch)
   backgroundManager?: BackgroundTaskManager; // Background task execution manager (bg_run/bg_output/bg_stop)
 }
