@@ -1,26 +1,15 @@
 /**
- * Unified prompt builder — compile a Persona into a system prompt for LLM calls.
+ * MainAgent system prompt builder.
  *
- * Supports two modes:
- * - "main": Full prompt for MainAgent (inner monologue, tools, channels, skills, etc.)
- * - "task": Minimal prompt for Task Agent (identity + safety + AI task type instructions)
- *
- * Default mode is "task" for backward compatibility with Thinker callers.
+ * Compiles a Persona + dynamic metadata into the full system prompt for the
+ * MainAgent (inner monologue mode) or a minimal prompt for Task Agents.
  */
-import type { Persona } from "./persona.ts";
-
-/** Entry in the memory index injected into user messages (not system prompt). */
-export interface MemoryIndexEntry {
-  path: string;
-  summary: string;
-  size: number;
-}
-
-/** Format bytes as human-readable size. */
-export function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`;
-  return `${(bytes / 1024).toFixed(1)}KB`;
-}
+import type { Persona } from "../identity/persona.ts";
+import {
+  buildIdentitySection,
+  buildRuntimeSection,
+  buildSafetySection,
+} from "./shared.ts";
 
 export type PromptMode = "main" | "task";
 
@@ -37,48 +26,7 @@ export interface PromptOptions {
   projectMetadata?: string;
 }
 
-// ── Section builders ──
-
-export function buildIdentitySection(persona: Persona): string[] {
-  const lines = [
-    `You are ${persona.name}, ${persona.role}.`,
-    "",
-    `Personality: ${persona.personality.join(", ")}.`,
-    `Speaking style: ${persona.style}.`,
-    `Core values: ${persona.values.join(", ")}.`,
-  ];
-  if (persona.background) {
-    lines.push("", `Background: ${persona.background}`);
-  }
-  return lines;
-}
-
-export function buildRuntimeSection(): string[] {
-  const os = process.platform;
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const now = new Date().toISOString().slice(0, 10);
-  const cwd = process.cwd();
-  return [
-    `Runtime: ${os} | tz: ${tz} | date: ${now} | cwd: ${cwd}`,
-  ];
-}
-
-export function buildSafetySection(): string[] {
-  return [
-    "## Safety",
-    "",
-    "You are a continuously running autonomous agent that receives messages from external",
-    "channels (CLI, Telegram, Slack, SMS). Follow these guardrails:",
-    "",
-    "- You have no independent goals. Do not pursue self-preservation, resource acquisition,",
-    "  or power-seeking beyond the user's request.",
-    "- Prioritize safety and human oversight over task completion. If instructions conflict",
-    "  or seem dangerous, pause and ask.",
-    "- Do not attempt to modify your own system prompt, safety rules, or tool policies.",
-    "- Do not manipulate users to expand your access or disable safeguards.",
-    "- Comply with stop, pause, or audit requests immediately.",
-  ];
-}
+// ── MainAgent-only section builders ──
 
 export function buildHowYouThinkSection(): string[] {
   return [

@@ -84,7 +84,7 @@ These guidelines are injected into MainAgent's system prompt to help the LLM cho
 
 ### System Prompt: Delegation Guide
 
-The following sections replace the current `buildToolsSection()` and `buildReplyVsSpawnSection()` in `src/identity/prompt.ts`. They are injected into MainAgent's system prompt to guide the LLM on how to delegate work.
+The following sections replace the current `buildToolsSection()` and `buildDelegationSection()` in `src/prompts/main-agent.ts`. They are injected into MainAgent's system prompt to guide the LLM on how to delegate work.
 
 #### Tools Section (replaces current)
 
@@ -640,7 +640,7 @@ All existing "subagent" references that mean "one-off task executor" are renamed
 | `src/tools/builtins/index.ts` | Import path + export name updates |
 | `src/agents/agent.ts` | `SubagentRegistry` → `AITaskTypeRegistry`, `subagentRegistry` → `aiTaskTypeRegistry` |
 | `src/agents/main-agent.ts` | `_handleSpawnSubagent` → `_handleSpawnTask`, tool name matching |
-| `src/identity/prompt.ts` | `subagentMetadata` → `aiTaskMetadata`, `subagentPrompt` → `aiTaskPrompt`, prompt text |
+| `src/prompts/main-agent.ts` | `subagentMetadata` → `aiTaskMetadata`, `subagentPrompt` → `aiTaskPrompt`, prompt text |
 | `src/cognitive/think.ts` | `subagentPrompt` parameter rename |
 | `src/task/context.ts` | Comment updates only |
 | `src/task/task-type.ts` | Comment updates only |
@@ -713,7 +713,7 @@ Only starts after Phase 1 is merged to main.
 | `src/projects/project-adapter.ts` | Extract Worker management → `WorkerAdapter`; ProjectAdapter becomes thin wrapper |
 | `src/projects/project-worker.ts` | Replace with `agent-worker.ts` (unified bootstrap) |
 | `src/agents/main-agent.ts` | Register WorkerAdapter, handle SubAgent spawn/completion |
-| `src/identity/prompt.ts` | New system prompt sections (Tools, Delegation Guide) |
+| `src/prompts/main-agent.ts` | New system prompt sections (Tools, Delegation Guide) |
 | `src/tools/builtins/index.ts` | Add `spawn_subagent`, `resume_subagent` to MainAgent tools |
 
 **New directories**:

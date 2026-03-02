@@ -31,7 +31,7 @@ import { BrowserManager } from "../tools/browser/index.ts";
 import type { ToolResult } from "../tools/types.ts";
 import { reflectionTools, allTaskTools } from "../tools/builtins/index.ts";
 import type { AITaskTypeRegistry } from "../aitask-types/index.ts";
-import type { MemoryIndexEntry } from "../identity/prompt.ts";
+import { type MemoryIndexEntry, TASK_COMPACT_PROMPT } from "../prompts/index.ts";
 import { TaskPersister } from "../task/persister.ts";
 import { getContextWindowSize } from "../session/context-windows.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
@@ -869,7 +869,7 @@ export class Agent {
     try {
       const model = typeModel ?? this.thinker.model;
       const result = await model.generate({
-        system: "Summarize the following conversation history concisely. Focus on key decisions, tool results, and findings. Keep under 500 characters.",
+        system: TASK_COMPACT_PROMPT,
         messages: [{ role: "user", content: summaryInput }],
         maxTokens: 300,
       });

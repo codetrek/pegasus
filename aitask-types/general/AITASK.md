@@ -32,7 +32,13 @@ who will interpret them and reply to the user. You do NOT interact with the user
    - Use glob_files to find files by name pattern before reading.
    - Use grep_files to locate specific content instead of reading entire files.
    - Use offset and limit to paginate through large files.
-8. BROWSER: You have browser tools for interacting with web pages.
+8. BACKGROUND EXECUTION: Use bg_run/bg_output/bg_stop for long-running operations.
+   - bg_run(tool, params): Start a tool in the background, returns bgTaskId immediately.
+   - bg_output(bgTaskId): Get the result (blocks until done by default).
+   - bg_stop(bgTaskId): Cancel a running background task.
+   - Use for: slow shell commands, large file processing, concurrent web fetches.
+   - Example: bg_run(tool='shell_exec', params={command: 'bun test', timeout: 120000})
+9. BROWSER: You have browser tools for interacting with web pages.
    - Use browser_navigate(url) to open a page — it returns an accessibility snapshot with ref numbers (e1, e2...).
    - Use browser_click(ref) / browser_type(ref, text) to interact with elements by their ref.
    - Each action returns a fresh snapshot — previous refs are invalidated.
