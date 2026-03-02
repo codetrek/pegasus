@@ -24,6 +24,7 @@ export interface SessionEntry {
   ts: number;
   role: string;
   content: string;
+  images?: Array<{ id: string; mimeType: string }>;
   toolCallId?: string;
   toolCalls?: unknown[];
   metadata?: Record<string, unknown>;
@@ -48,6 +49,9 @@ export class SessionStore {
       ts: Date.now(),
       role: message.role,
       content: message.content,
+      ...(message.images && {
+        images: message.images.map(({ id, mimeType }) => ({ id, mimeType })),
+      }),
       toolCallId: message.toolCallId,
       toolCalls: message.toolCalls,
       metadata,
@@ -84,6 +88,9 @@ export class SessionStore {
           role: entry.role as Message["role"],
           content: msgContent,
         };
+        if (entry.images?.length) {
+          msg.images = entry.images;
+        }
         if (entry.toolCallId) msg.toolCallId = entry.toolCallId;
         if (entry.toolCalls)
           msg.toolCalls = entry.toolCalls as Message["toolCalls"];
