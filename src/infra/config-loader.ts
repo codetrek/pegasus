@@ -250,6 +250,7 @@ function configToSettings(config: any): Settings {
     identity: config.identity,
     tools: config.tools,
     session: config.session,
+    context: config.context,
     channels: config.channels,
     logLevel: config.system?.logLevel,
     dataDir: config.system?.dataDir,
