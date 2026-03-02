@@ -149,7 +149,9 @@ Main Agent's tools are its way of **acting on the world**. The LLM's text output
 | Tool | Purpose | Effect |
 |------|---------|--------|
 | `reply` | Speak to the user | Takes `text` + `channelId`, triggers `onReply` → delivered via channel adapter |
-| `spawn_task` | Delegate complex work | Creates a task in the Task System |
+| `spawn_task` | Delegate simple work | Creates a task in the Task System |
+| `spawn_subagent` | Delegate complex work | Launches an autonomous SubAgent in a Worker thread |
+| `resume_subagent` | Resume a completed SubAgent | Restores session history and injects new input |
 | `current_time` | Get current date/time | Returns result to inner monologue |
 | `memory_list` / `memory_read` | Access long-term memory | Returns result to inner monologue |
 | `task_status` / `task_list` | Query task state and history | Returns result to inner monologue |

@@ -75,6 +75,8 @@ pegasus/
 │   ├── mcp/             # MCP server integration + OAuth
 │   ├── models/          # ToolCall, ToolDefinition types
 │   ├── projects/        # Project system (Worker threads)
+│   ├── workers/         # Unified Worker transport (WorkerAdapter)
+│   ├── subagent/        # SubAgent lifecycle (SubAgentManager)
 │   ├── session/         # Session persistence + compaction
 │   ├── skills/          # Skill loader + registry
 │   ├── aitask-types/   # Task type specialization (AITASK.md)
@@ -115,6 +117,7 @@ pegasus/
 - [Session Compact](./session-compact.md) — auto-compact with context window awareness
 - [Skill System](./skill-system.md) — SKILL.md format, loader, registry, triggering
 - [Project System](./project-system.md) — long-lived task spaces, Worker threads
+- [Execution Model](./execution-model.md) — four execution tiers: MainAgent, SubAgent, AITask, Project
 - [MCP Auth](./mcp-auth.md) — MCP server authentication
 
 ### Operations
