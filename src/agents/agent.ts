@@ -500,7 +500,7 @@ export class Agent {
         const memResult = await this.toolExecutor.execute(
           "memory_list",
           {},
-          { taskId: task.context.id, memoryDir: this.storePaths.memory, extractModel: this.extractModel ?? undefined, browserManager: this.browserManager ?? undefined },
+          { taskId: task.context.id, tasksDir: this.storePaths.tasks, memoryDir: this.storePaths.memory, extractModel: this.extractModel ?? undefined, browserManager: this.browserManager ?? undefined },
         );
         if (memResult.success && Array.isArray(memResult.result)) {
           memoryIndex = memResult.result as MemoryIndexEntry[];

@@ -379,14 +379,18 @@ SubAgent persists its session to disk for two purposes:
 ```
 data/agents/subagents/
 ├── abc123/
-│   └── session/
-│       └── current.jsonl    ← SubAgent conversation history
+│   ├── session/
+│   │   └── current.jsonl    ← SubAgent conversation history
+│   └── tasks/
+│       └── index.jsonl      ← SubAgent's own task logs
 ├── def456/
-│   └── session/
-│       └── current.jsonl
+│   ├── session/
+│   │   └── current.jsonl
+│   └── tasks/
+│       └── index.jsonl
 ```
 
-No memory persistence, no task persistence, no skills directory. SubAgent is temporary — only the session log survives for debugging and resume.
+No memory persistence, no skills directory. SubAgent is temporary — session and task logs survive for debugging and resume.
 
 ### Lifecycle
 
