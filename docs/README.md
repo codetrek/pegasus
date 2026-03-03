@@ -119,6 +119,7 @@ pegasus/
 - [Vision Support](./vision.md) — image input, storage, hydration, pruning
 - [Project System](./project-system.md) — long-lived task spaces, Worker threads
 - [Execution Model](./execution-model.md) — four execution tiers: MainAgent, SubAgent, AITask, Project
+- [Security](./security.md) — trust-based channel routing, owner identity, prompt injection resistance
 - [MCP Auth](./mcp-auth.md) — MCP server authentication
 
 ### Operations
