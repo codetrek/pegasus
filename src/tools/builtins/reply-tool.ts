@@ -27,21 +27,28 @@ export const reply: Tool = {
       .string()
       .optional()
       .describe("Thread or conversation ID — use the value from the user message metadata if present"),
+    imageIds: z
+      .array(z.string())
+      .optional()
+      .describe(
+        "Image IDs to send with the reply. Use IDs from [img://ID] references in conversation.",
+      ),
   }),
   async execute(params: unknown, _context: ToolContext): Promise<ToolResult> {
     const startedAt = Date.now();
-    const { text, channelType, channelId, replyTo } = params as {
+    const { text, channelType, channelId, replyTo, imageIds } = params as {
       text: string;
       channelType: string;
       channelId: string;
       replyTo?: string;
+      imageIds?: string[];
     };
 
     // reply doesn't deliver the message — it signals intent.
     // The MainAgent intercepts this tool result and routes to the channel.
     return {
       success: true,
-      result: { action: "reply", text, channelType, channelId, replyTo },
+      result: { action: "reply", text, channelType, channelId, replyTo, imageIds },
       startedAt,
       completedAt: Date.now(),
       durationMs: Date.now() - startedAt,
