@@ -15,6 +15,9 @@ import type {
 
 const logger = getLogger("telegram");
 
+/** Telegram's maximum message length. */
+const MAX_MESSAGE_LENGTH = 4096;
+
 /** Telegram command definition for the / menu. */
 export interface TelegramCommand {
   command: string;      // 1-32 chars, lowercase + digits + underscore only

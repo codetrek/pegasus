@@ -1058,8 +1058,8 @@ export class MainAgent {
       this._channelNotifyTimes.set(channelType, now);
 
       // Build notification with channel identity info (NO message content — security)
-      const userId = message.channel.userId ?? "unknown";
-      const username = (message.metadata?.username as string) ?? "";
+      const userId = sanitizeForPrompt(message.channel.userId ?? "unknown").slice(0, 64);
+      const username = sanitizeForPrompt((message.metadata?.username as string) ?? "").slice(0, 64);
       const userInfo = username ? `${userId} (username: ${username})` : userId;
 
       const notifyText =
