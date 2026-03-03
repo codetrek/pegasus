@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { getContextWindowSize } from "@pegasus/session/context-windows.ts";
+import { getContextWindowSize, isModelKnown } from "@pegasus/context/context-windows.ts";
 
 describe("getContextWindowSize", () => {
   // ── OpenAI ──
@@ -182,5 +182,28 @@ describe("getContextWindowSize", () => {
 
   test("undefined configOverride falls back to built-in table", () => {
     expect(getContextWindowSize("gpt-4o", undefined)).toBe(128_000);
+  }, 5_000);
+});
+
+describe("isModelKnown", () => {
+  test("returns true for known models", () => {
+    expect(isModelKnown("gpt-4o")).toBe(true);
+    expect(isModelKnown("claude-sonnet-4.6")).toBe(true);
+    expect(isModelKnown("deepseek-r1")).toBe(true);
+  }, 5_000);
+
+  test("returns true for date-suffixed known models", () => {
+    expect(isModelKnown("claude-sonnet-4-20250514")).toBe(true);
+    expect(isModelKnown("gpt-4o-2024-08-06")).toBe(true);
+    expect(isModelKnown("deepseek-r1-0528")).toBe(true);
+  }, 5_000);
+
+  test("returns false for unknown models", () => {
+    expect(isModelKnown("unknown-model")).toBe(false);
+    expect(isModelKnown("")).toBe(false);
+  }, 5_000);
+
+  test("returns false for unknown model even with date suffix", () => {
+    expect(isModelKnown("unknown-model-20250101")).toBe(false);
   }, 5_000);
 });

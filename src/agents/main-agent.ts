@@ -10,7 +10,7 @@
 import type { Message } from "../infra/llm-types.ts";
 import { generateText } from "../infra/llm-utils.ts";
 import type { Persona } from "../identity/persona.ts";
-import { buildSystemPrompt, formatSize, COMPACT_SYSTEM_PROMPT } from "../prompts/index.ts";
+import { buildSystemPrompt, formatSize } from "../prompts/index.ts";
 import type { Settings } from "../infra/config.ts";
 import { sanitizeForPrompt } from "../infra/sanitize.ts";
 import { formatTimestamp, formatToolTimestamp } from "../infra/time.ts";
@@ -27,7 +27,7 @@ import { Agent } from "./agent.ts";
 import type { TaskNotification } from "./agent.ts";
 import type { ToolCall } from "../models/tool.ts";
 import { EstimateCounter } from "../infra/token-counter.ts";
-import { getContextWindowSize } from "../session/context-windows.ts";
+import { computeTokenBudget, calculateMaxToolResultChars, truncateToolResult, summarizeMessages, isContextOverflowError, MAX_OVERFLOW_COMPACT_RETRIES } from "../context/index.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import path from "node:path";
 import { SkillRegistry, loadAllSkills } from "../skills/index.ts";
@@ -88,6 +88,7 @@ export class MainAgent {
   private queue: QueueItem[] = [];
   private processing = false;
   private lastPromptTokens = 0;
+  private _overflowRetryCount = 0;
   private tokenCounter = new EstimateCounter();
   private skillRegistry: SkillRegistry;
   private aiTaskTypeRegistry: AITaskTypeRegistry;
@@ -528,13 +529,51 @@ export class MainAgent {
 
     const tools = this.toolRegistry.toLLMTools();
 
-    const result = await generateText({
-      model: this.models.getDefault(),
-      system: this.systemPrompt,
-      messages, // Use hydrated messages, NOT this.sessionMessages
-      tools: tools.length ? tools : undefined,
-      toolChoice: tools.length ? "auto" : undefined,
-    });
+    let result;
+    try {
+      result = await generateText({
+        model: this.models.getDefault(),
+        system: this.systemPrompt,
+        messages, // Use hydrated messages, NOT this.sessionMessages
+        tools: tools.length ? tools : undefined,
+        toolChoice: tools.length ? "auto" : undefined,
+      });
+      this._overflowRetryCount = 0;
+    } catch (err) {
+      if (isContextOverflowError(err) && this._overflowRetryCount < MAX_OVERFLOW_COMPACT_RETRIES) {
+        this._overflowRetryCount++;
+        logger.warn(
+          { error: errorToString(err), attempt: this._overflowRetryCount },
+          "context_overflow_detected_forcing_compact",
+        );
+        const compacted = await this._checkAndCompact();
+        if (!compacted) {
+          const summary = await this._compactWithFallback();
+          await this.sessionStore.compact(summary);
+          this.sessionMessages = await this.sessionStore.load();
+          await this._injectMemoryIndex();
+          this.lastPromptTokens = 0;
+        }
+        // Re-hydrate images after compact (sessionMessages changed)
+        const retryMessages = this.imageManager
+          ? await hydrateImages(
+              this.sessionMessages,
+              this.settings.vision?.keepLastNTurns ?? 5,
+              this._cachedImageRead.bind(this),
+            )
+          : this.sessionMessages;
+        result = await generateText({
+          model: this.models.getDefault(),
+          system: this.systemPrompt,
+          messages: retryMessages,
+          tools: tools.length ? tools : undefined,
+          toolChoice: tools.length ? "auto" : undefined,
+        });
+        this._overflowRetryCount = 0;
+      } else {
+        throw err;
+      }
+    }
 
     // Update lastPromptTokens for compact estimation
     this.lastPromptTokens = result.usage.promptTokens;
@@ -661,13 +700,21 @@ export class MainAgent {
           const rawContent = toolResult.success
             ? JSON.stringify(toolResult.result)
             : `Error: ${toolResult.error}`;
+          const toolBudget = computeTokenBudget({
+            modelId: this.models.getDefaultModelId(),
+            configContextWindow: this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
+          });
+          const maxToolChars = calculateMaxToolResultChars(toolBudget.contextWindow, this.settings.context?.maxToolResultShare);
+          const safeContent = rawContent.length > maxToolChars
+            ? truncateToolResult(rawContent, maxToolChars)
+            : rawContent;
           const tsPrefix = formatToolTimestamp(
             toolResult.completedAt ?? Date.now(),
             toolResult.durationMs,
           );
           const toolMsg: Message = {
             role: "tool",
-            content: `${tsPrefix}\n${rawContent}`,
+            content: `${tsPrefix}\n${safeContent}`,
             toolCallId: tc.id,
           };
           // Propagate images from tool result (e.g., image_read returns images)
@@ -990,12 +1037,12 @@ export class MainAgent {
    * Returns true if compact was performed.
    */
   private async _checkAndCompact(): Promise<boolean> {
-    const contextWindow = getContextWindowSize(
-      this.models.getDefaultModelId(),
-      this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
-    );
-    const threshold = this.settings.session?.compactThreshold ?? 0.8;
-    const maxTokens = contextWindow * threshold;
+    const budget = computeTokenBudget({
+      modelId: this.models.getDefaultModelId(),
+      configContextWindow: this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
+      outputReserveTokens: this.settings.context?.outputReserveTokens,
+      compactThreshold: this.settings.session?.compactThreshold,
+    });
 
     // Estimate current token usage
     const keepLastNTurns = this.settings.vision?.keepLastNTurns ?? 5;
@@ -1019,11 +1066,11 @@ export class MainAgent {
       );
     }
 
-    if (estimatedTokens < maxTokens) return false;
+    if (estimatedTokens < budget.compactTrigger) return false;
 
     // Trigger compact
     logger.info(
-      { estimatedTokens, maxTokens, threshold },
+      { estimatedTokens, compactTrigger: budget.compactTrigger, contextWindow: budget.contextWindow },
       "compact_triggered",
     );
 
@@ -1031,7 +1078,7 @@ export class MainAgent {
     const preCompactMessages = [...this.sessionMessages];
 
     // 1. Generate summary via independent LLM call
-    const summary = await this._generateSummary();
+    const summary = await this._compactWithFallback();
 
     // 2. Archive current session and create new one with summary
     const archiveName = await this.sessionStore.compact(summary);
@@ -1148,10 +1195,10 @@ export class MainAgent {
       toolRegistry: reflectionToolRegistry,
       toolExecutor: this.toolExecutor,
       memoryDir,
-      contextWindowSize: getContextWindowSize(
-        reflectionModel.modelId,
-        this.models.getContextWindowForTier("fast") ?? this.settings.llm.contextWindow,
-      ),
+      contextWindowSize: computeTokenBudget({
+        modelId: reflectionModel.modelId,
+        configContextWindow: this.models.getContextWindowForTier("fast") ?? this.settings.llm.contextWindow,
+      }).contextWindow,
     });
 
     // 6. Run reflection
@@ -1168,13 +1215,55 @@ export class MainAgent {
    * This is NOT part of Main Agent's inner monologue — it's a system operation.
    */
   private async _generateSummary(): Promise<string> {
-    const result = await generateText({
-      model: this.models.getForTier("fast"),
-      system: COMPACT_SYSTEM_PROMPT,
+    return summarizeMessages({
       messages: this.sessionMessages,
+      model: this.models.getForTier("fast"),
+      configContextWindow: this.models.getContextWindowForTier("fast"),
     });
+  }
 
-    return result.text || "No summary generated.";
+  /**
+   * 3-level compact fallback:
+   *   1. Chunked LLM summarize
+   *   2. Mechanical summary (no LLM)
+   *   3. Hard truncate (last resort)
+   */
+  private async _compactWithFallback(): Promise<string> {
+    try {
+      return await this._generateSummary();
+    } catch (err) {
+      logger.warn({ error: errorToString(err) }, "chunked_summary_failed_trying_mechanical");
+    }
+    try {
+      return this._mechanicalSummary();
+    } catch (err) {
+      logger.warn({ error: errorToString(err) }, "mechanical_summary_failed_hard_truncate");
+    }
+    return "[Session history truncated due to context window limit. Previous context was lost.]";
+  }
+
+  private _mechanicalSummary(): string {
+    const userMessages = this.sessionMessages.filter((m) => m.role === "user");
+    const assistantMessages = this.sessionMessages.filter((m) => m.role === "assistant");
+    const toolMessages = this.sessionMessages.filter((m) => m.role === "tool");
+    const recentUsers = userMessages.slice(-3).map(
+      (m, i) => `  ${i + 1}. ${typeof m.content === "string" ? m.content.slice(0, 200) : String(m.content).slice(0, 200)}`,
+    );
+    const toolNames = new Set<string>();
+    for (const m of assistantMessages) {
+      if (m.toolCalls) {
+        for (const tc of m.toolCalls) toolNames.add(tc.name);
+      }
+    }
+    return [
+      `[Session compacted — ${this.sessionMessages.length} messages archived]`,
+      "",
+      "Recent user messages:",
+      ...recentUsers,
+      "",
+      `Tools used: ${[...toolNames].join(", ") || "(none)"}`,
+      `Total exchanges: ${userMessages.length} user, ${assistantMessages.length} assistant, ${toolMessages.length} tool`,
+    ].join("\n");
   }
 
   // ── Helpers ──
@@ -1492,10 +1581,10 @@ export class MainAgent {
     const projectMetadata = this._buildProjectMetadata();
 
     // Get skill metadata with budget
-    const contextWindow = getContextWindowSize(
-      this.models.getDefaultModelId(),
-      this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
-    );
+    const contextWindow = computeTokenBudget({
+      modelId: this.models.getDefaultModelId(),
+      configContextWindow: this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
+    }).contextWindow;
     const skillBudget = Math.max(Math.floor(contextWindow * 0.02 * 4), 16_000);
     const skillMetadata = this.skillRegistry.getMetadataForPrompt(skillBudget);
 

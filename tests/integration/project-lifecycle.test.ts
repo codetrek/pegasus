@@ -39,6 +39,7 @@ function makeTestSettings(): Settings {
       mcpServers: [],
     },
     session: { compactThreshold: 0.8 },
+    context: { outputReserveTokens: 16_000, maxToolResultShare: 0.25 },
     vision: { enabled: true, keepLastNTurns: 5, maxDimensionPx: 1200, maxImageBytes: 5242880 },
     channels: { telegram: { enabled: false } },
     logLevel: "silent",

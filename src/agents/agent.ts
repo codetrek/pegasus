@@ -33,7 +33,8 @@ import { reflectionTools, allTaskTools } from "../tools/builtins/index.ts";
 import type { AITaskTypeRegistry } from "../aitask-types/index.ts";
 import { type MemoryIndexEntry, TASK_COMPACT_PROMPT } from "../prompts/index.ts";
 import { TaskPersister } from "../task/persister.ts";
-import { getContextWindowSize } from "../session/context-windows.ts";
+import { computeTokenBudget, estimateTokensFromChars, calculateMaxToolResultChars, truncateToolResult } from "../context/index.ts";
+import { TASK_COMPACT_THRESHOLD } from "../context/constants.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import type { MCPManager, MCPServerConfig } from "../mcp/index.ts";
 import { wrapMCPTools } from "../mcp/index.ts";
@@ -47,25 +48,21 @@ export type TaskNotification =
   | { type: "failed"; taskId: string; error: string }
   | { type: "notify"; taskId: string; message: string };
 
-/** Max characters for a single tool result before truncation. ~12k tokens. */
-const MAX_TOOL_RESULT_CHARS = 50_000;
-
 /** Push a tool result message into context.messages. */
 export function context_pushToolResult(
   context: TaskContext,
   toolCallId: string,
   toolResult: ToolResult,
+  contextWindowTokens: number,
 ): void {
   let rawContent = toolResult.success
     ? JSON.stringify(toolResult.result)
     : `Error: ${toolResult.error}`;
 
   // Safety net: truncate oversized tool results to protect context window
-  if (rawContent.length > MAX_TOOL_RESULT_CHARS) {
-    rawContent = rawContent.slice(0, MAX_TOOL_RESULT_CHARS)
-      + "\n\n[RESULT TRUNCATED — output exceeded "
-      + MAX_TOOL_RESULT_CHARS.toLocaleString()
-      + " chars. Use more specific queries or smaller ranges.]";
+  const maxChars = calculateMaxToolResultChars(contextWindowTokens);
+  if (rawContent.length > maxChars) {
+    rawContent = truncateToolResult(rawContent, maxChars);
   }
 
   const tsPrefix = formatToolTimestamp(
@@ -261,10 +258,10 @@ export class Agent {
         toolRegistry: reflectionToolRegistry,
         toolExecutor,
         memoryDir: this.storePaths.memory,
-        contextWindowSize: getContextWindowSize(
-          reflectionModel.modelId,
-          deps.modelRegistry?.getContextWindowForTier("fast") ?? this.settings.llm.contextWindow,
-        ),
+        contextWindowSize: computeTokenBudget({
+          modelId: reflectionModel.modelId,
+          configContextWindow: deps.modelRegistry?.getContextWindowForTier("fast") ?? this.settings.llm.contextWindow,
+        }).contextWindow,
       });
     } else {
       this.postReflector = null;
@@ -595,7 +592,9 @@ export class Agent {
             completedAt: Date.now(),
             durationMs: 0,
           };
-          context_pushToolResult(task.context, toolCallId, blockedResult);
+          const taskModelId = this._resolveTypeModel(task.context.taskType)?.modelId ?? this.thinker.model.modelId;
+          const toolBudget = computeTokenBudget({ modelId: taskModelId });
+          context_pushToolResult(task.context, toolCallId, blockedResult, toolBudget.contextWindow);
           const finalResult = {
             ...actorResult,
             result: undefined,
@@ -674,7 +673,9 @@ export class Agent {
         }
 
         // Push tool result message to context
-        context_pushToolResult(task.context, toolCallId, toolResult);
+        const taskModelId2 = this._resolveTypeModel(task.context.taskType)?.modelId ?? this.thinker.model.modelId;
+        const toolBudget2 = computeTokenBudget({ modelId: taskModelId2 });
+        context_pushToolResult(task.context, toolCallId, toolResult, toolBudget2.contextWindow);
 
         // Build final ActionResult from actorResult + toolResult
         const finalResult = {
@@ -842,20 +843,19 @@ export class Agent {
     // Need at least 8 messages to be worth compacting
     if (messages.length < 8) return;
 
-    // Estimate token count (simple heuristic: chars / 3.5)
+    // Estimate token count using shared estimator
     const totalChars = messages.reduce((sum, m) => sum + m.content.length, 0);
-    const estimatedTokens = Math.ceil(totalChars / 3.5);
+    const estimatedTokens = estimateTokensFromChars(totalChars);
 
     // Get context window for the task's model
     const typeModel = this._resolveTypeModel(task.context.taskType);
     const modelId = typeModel?.modelId ?? this.thinker.model.modelId;
-    const contextWindow = getContextWindowSize(modelId);
-    const threshold = contextWindow * 0.7; // 70% — more aggressive than MainAgent's 80%
+    const budget = computeTokenBudget({ modelId, compactThreshold: TASK_COMPACT_THRESHOLD });
 
-    if (estimatedTokens < threshold) return;
+    if (estimatedTokens < budget.compactTrigger) return;
 
     logger.info(
-      { taskId: task.taskId, messageCount: messages.length, estimatedTokens, threshold },
+      { taskId: task.taskId, messageCount: messages.length, estimatedTokens, compactTrigger: budget.compactTrigger },
       "task_compact_triggered",
     );
 

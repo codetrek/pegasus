@@ -157,6 +157,12 @@ session:
   # Fraction of context window that triggers compact (0.1-1.0)
   compactThreshold: ${SESSION_COMPACT_THRESHOLD:-0.8}
 
+context:
+  # Tokens reserved for model output generation (default: 16000)
+  outputReserveTokens: ${CONTEXT_OUTPUT_RESERVE_TOKENS:-16000}
+  # Max share of context window for a single tool result (default: 0.25)
+  maxToolResultShare: ${CONTEXT_MAX_TOOL_RESULT_SHARE:-0.25}
+
 # Vision (image processing)
 vision:
   enabled: true
