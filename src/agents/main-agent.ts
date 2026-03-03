@@ -1196,7 +1196,7 @@ export class MainAgent {
     const budget = computeTokenBudget({
       modelId: this.models.getDefaultModelId(),
       configContextWindow: this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
-      outputReserveTokens: this.settings.context?.outputReserveTokens,
+      // TODO(task-9): add modelLimitsCache + provider here
       compactThreshold: this.settings.session?.compactThreshold,
     });
 
