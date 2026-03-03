@@ -186,12 +186,14 @@ export class WorkerAdapter {
     this.workers.set(key, worker);
 
     // Send init message to the Worker
+    const balancedModelId = this.models?.getModelIdForTier("balanced");
     const contextWindow = this.models?.getContextWindowForTier("balanced");
     const initMsg: WorkerInbound = {
       type: "init",
       mode,
       config: {
         ...config,
+        ...(balancedModelId != null && { proxyModelId: balancedModelId }),
         ...(contextWindow != null && { contextWindow }),
       },
     };

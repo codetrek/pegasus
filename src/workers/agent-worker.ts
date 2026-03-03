@@ -36,6 +36,8 @@ import { SkillRegistry } from "../skills/registry.ts";
 export interface BaseConfig {
   settings: Settings;
   contextWindow?: number;
+  /** Model ID of the actual model used by WorkerAdapter's LLM proxy. */
+  proxyModelId?: string;
 }
 
 /** Init config for project mode. */
@@ -161,7 +163,7 @@ export async function handleInit(
 // ── Project mode init ────────────────────────────────
 
 export async function initProject(config: ProjectConfig): Promise<void> {
-  const { projectPath, contextWindow } = config;
+  const { projectPath, contextWindow, proxyModelId } = config;
 
   // 1. Load global settings
   const settings = getSettings();
@@ -180,9 +182,11 @@ export async function initProject(config: ProjectConfig): Promise<void> {
   }
 
   // 3. Create ProxyLanguageModel — LLM calls go to main thread
+  //    Use proxyModelId from WorkerAdapter (reflects actual LLM proxy model)
+  //    to ensure context window budget calculations match the real model.
   const defaultRole = settings.llm.default;
   const defaultModelSpec = typeof defaultRole === "string" ? defaultRole : defaultRole.model;
-  const modelId = projectDef.model ?? defaultModelSpec;
+  const modelId = proxyModelId ?? projectDef.model ?? defaultModelSpec;
   proxyModel = _createProxyModel(
     "proxy",
     modelId,
@@ -250,17 +254,19 @@ export async function initProject(config: ProjectConfig): Promise<void> {
 // ── SubAgent mode init ───────────────────────────────
 
 export async function initSubAgent(config: SubAgentConfig): Promise<void> {
-  const { input, subagentDir, channelType, channelId, contextWindow, memorySnapshot } = config;
+  const { input, subagentDir, channelType, channelId, contextWindow, memorySnapshot, proxyModelId } = config;
 
   // 1. Load global settings
   const settings = getSettings();
 
   // 2. Create ProxyLanguageModel
+  //    Use proxyModelId from WorkerAdapter when available (matches actual proxy model).
   const defaultRole = settings.llm.default;
   const defaultModelSpec = typeof defaultRole === "string" ? defaultRole : defaultRole.model;
+  const effectiveModelId = proxyModelId ?? defaultModelSpec;
   proxyModel = _createProxyModel(
     "proxy",
-    defaultModelSpec,
+    effectiveModelId,
     (msg: unknown) => postToParent(msg),
   );
 

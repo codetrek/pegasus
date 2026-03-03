@@ -50,6 +50,7 @@ function createMockRegistry(model: LanguageModel): ModelRegistry {
   return {
     getForTier: () => model,
     getContextWindowForTier: () => undefined,
+    getModelIdForTier: () => model.modelId,
   } as unknown as ModelRegistry;
 }
 
@@ -337,6 +338,7 @@ describe("WorkerAdapter — Worker lifecycle (mocked Worker)", () => {
       const mockRegistry = {
         getForTier: () => ({}),
         getContextWindowForTier: () => 128000,
+        getModelIdForTier: () => "test-model",
       } as unknown as ModelRegistry;
       adapter.setModelRegistry(mockRegistry);
 
@@ -345,6 +347,7 @@ describe("WorkerAdapter — Worker lifecycle (mocked Worker)", () => {
       const fakeWorker = instances[0]!;
       const initMsg = fakeWorker.posted[0] as any;
       expect(initMsg.config.contextWindow).toBe(128000);
+      expect(initMsg.config.proxyModelId).toBe("test-model");
     } finally {
       globalThis.Worker = OriginalWorker;
     }

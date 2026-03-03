@@ -245,4 +245,52 @@ describe("Agent lifecycle", () => {
       await agent.stop();
     }
   }, 10_000);
+
+  test("overflow recovery: force compact and retry on context overflow", async () => {
+    let callCount = 0;
+    const overflowModel: LanguageModel = {
+      provider: "test",
+      modelId: "test-model",
+      async generate() {
+        callCount++;
+        if (callCount === 1) {
+          // First call: simulate context overflow error
+          throw new Error("maximum context length exceeded");
+        }
+        // Subsequent calls: return normal response (compact summarize + retry)
+        return {
+          text: "Task completed after overflow recovery.",
+          finishReason: "stop",
+          usage: { promptTokens: 10, completionTokens: 10 },
+        };
+      },
+    };
+
+    // Create agent with many messages to make compact worthwhile
+    const agent = new Agent({
+      model: overflowModel,
+      persona: testPersona,
+      settings: SettingsSchema.parse({
+        llm: { maxConcurrentCalls: 1 },
+        agent: { maxActiveTasks: 5 },
+        logLevel: "warn",
+        dataDir: testDataDir,
+        authDir: "/tmp/pegasus-test-auth",
+      }),
+      storePaths: buildMainAgentPaths(testDataDir),
+    });
+    await agent.start();
+
+    try {
+      const taskId = await agent.submit("test overflow recovery");
+
+      // Wait for task to complete (overflow → compact → retry → succeed)
+      const task = await agent.waitForTask(taskId, 5000);
+      expect(task.state).toBe(TaskState.COMPLETED);
+      // Should have succeeded after overflow recovery
+      expect(task.context.finalResult).not.toBeNull();
+    } finally {
+      await agent.stop();
+    }
+  }, 10_000);
 });
