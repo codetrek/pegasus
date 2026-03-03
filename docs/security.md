@@ -2,7 +2,7 @@
 
 ## Owner Model
 
-Pegasus is a **single-owner system**. One person deploys a Pegasus instance, and that person is the owner. The owner may connect from multiple channels simultaneously — CLI, Telegram, WhatsApp, Discord, etc. — but they are always the same person.
+Pegasus is a **single-owner system**. One person deploys a Pegasus instance, and that person is the owner. The owner may connect from multiple channels simultaneously — CLI, Telegram, WhatsApp, etc. — but they are always the same person.
 
 This is fundamentally different from a multi-user SaaS product. There are no user accounts, no roles, no permissions matrix. There is one owner and everyone else.
 
@@ -17,7 +17,7 @@ Internal channels (`cli`, `project`, `subagent`) share this trust level because 
 | `cli` | Always trusted | Requires SSH/physical access to the machine |
 | `project` | Always trusted | Inter-process message from a Pegasus Worker |
 | `subagent` | Always trusted | Spawned by MainAgent internally |
-| External (telegram, discord, etc.) | Verified per-user | Anyone on the internet can send messages |
+| External (telegram, etc.) | Verified per-user | Anyone on the internet can send messages |
 
 ## Owner Identity Storage
 
@@ -26,7 +26,7 @@ Owner identity is stored at `~/.pegasus/owner.json` — deliberately **outside**
 **Why this location?**
 - The `memory_write` tool is scoped to the `data/` directory. Even if prompt injection tricks the LLM into calling `memory_write`, it cannot modify `owner.json`.
 - File permissions are locked down: directory `0o700`, file `0o600` (owner-only read/write at the OS level).
-- The file lives alongside other auth credentials (`~/.pegasus/auth/`), following the XDG-like convention for user config.
+- The file lives alongside other auth credentials (`~/.pegasus/auth/`), following the established convention for user config.
 
 **File format:**
 
@@ -43,178 +43,18 @@ Owner identity is stored at `~/.pegasus/owner.json` — deliberately **outside**
 - `channels` — maps channel type → list of trusted user IDs
 - `notifiedChannels` — tracks which channel types have already triggered a first-contact notification (prevents repeated alerts)
 
-## Message Routing Flow
+## Message Routing
 
-Every inbound message passes through `classifyMessage()` before reaching MainAgent's processing queue. This is a **code-level interception** — a pure function that runs before any LLM call, not a prompt-based filter.
-
-```
-Inbound Message
-       │
-       ▼
-┌─────────────────────┐
-│  classifyMessage()  │  ← pure function, no LLM involved
-└──────────┬──────────┘
-           │
-     ┌─────┼──────────────────┐
-     │     │                  │
-     ▼     ▼                  ▼
-  "owner"  "no_owner"    "untrusted"
-     │     │                  │
-     ▼     ▼                  ▼
- MainAgent  Discard +       Route to
- processes  notify          channel
- normally   MainAgent       Project
-```
+Every inbound message passes through `classifyMessage()` in `MainAgent.send()`. This is a **code-level interception** — a pure function that runs before any LLM call, not a prompt-based filter.
 
 ### Classification Rules
 
-1. **Internal channel** (cli, project, subagent) → `owner` — always trusted
-2. **External channel, no owner configured** for that channel type → `no_owner_configured` — message discarded, MainAgent notified
-3. **External channel, userId matches** registered owner → `owner` — process normally
-4. **External channel, userId doesn't match** (or missing) → `untrusted` — route to isolated channel Project
+1. **Internal channel** (cli, project, subagent) → always trusted → MainAgent
+2. **External channel, no owner configured** for that channel type → message discarded, MainAgent notified
+3. **External channel, userId matches** registered owner → MainAgent
+4. **External channel, userId doesn't match** (or missing) → route to isolated Channel Project
 
-### Detailed Flow by Classification
-
-**Owner messages** are queued directly into MainAgent's processing queue — identical to CLI input. The owner's Telegram message has the same authority as a CLI command.
-
-**No-owner-configured messages** are discarded entirely (message content never reaches the LLM). Instead, a system notification is injected into MainAgent's session:
-
-```
-[System: New telegram channel activity detected. Sender: 123456789 (username: john).
-No trusted owner configured for telegram channel. All messages are being discarded.
-If this is you, use trust(action="add", channel="telegram", userId="123456789") to add yourself.]
-```
-
-- First contact: immediate notification
-- Subsequent contacts: at most once per hour (prevents notification spam)
-- Message content is **never** included in the notification — only sender identity
-
-**Untrusted messages** are forwarded to a per-channel-type Project (`channel:<type>`), which is auto-created on first contact. These Projects run in isolated Worker threads with restricted capabilities (no shell, no filesystem, no personal data access).
-
-## `/trust` CLI Command
-
-The owner manages trust through the `/trust` skill from CLI:
-
-```bash
-# Add yourself as owner on Telegram
-/trust add telegram 123456789
-
-# Add another device on Discord
-/trust add discord 987654321
-
-# See all trusted identities
-/trust list
-
-# Remove a user
-/trust remove telegram 123456789
-```
-
-The skill parses arguments and calls the `trust` tool. It can also be invoked conversationally — the owner can say "add my Telegram ID 123456789" and the LLM will call the `trust` tool directly.
-
-## Trust Tool
-
-The `trust` tool is a builtin system tool registered on MainAgent's tool registry.
-
-**Security properties:**
-- Available **only** to MainAgent — it is registered in MainAgent's `ToolRegistry`, not in Project or SubAgent tool sets.
-- Non-owner messages **never reach MainAgent** — they are intercepted by `classifyMessage()` before the LLM runs. An attacker on Telegram cannot call the `trust` tool because their messages are routed to the channel Project, which has its own separate tool set without `trust`.
-- Even if prompt injection bypasses the channel Project's restrictions, the Project Worker cannot access MainAgent's `ToolRegistry` — they run in separate threads with separate tool registries.
-
-**Actions:**
-
-| Action | Parameters | Effect |
-|--------|-----------|--------|
-| `add` | `channel`, `userId` | Register userId as owner for channel type |
-| `remove` | `channel`, `userId` | Unregister userId; removes channel key if last user |
-| `list` | — | Return all channel → userId[] mappings |
-
-## Channel Projects
-
-When a non-owner sends a message on a configured channel, Pegasus auto-creates a **channel Project** named `channel:<channelType>` (e.g., `channel:telegram`).
-
-**Properties:**
-- **Isolated runtime**: runs in a separate Worker thread with its own EventBus, Session, and Memory
-- **Restricted capabilities**: no shell commands, no filesystem access, no personal data exposure
-- **Public-facing persona**: instructed to be polite and helpful without revealing owner information
-- **One per channel type**: all non-owner Telegram users share `channel:telegram`; all non-owner Discord users share `channel:discord`
-- **Persistent**: survives restarts, accumulates its own memory and conversation history
-
-**Why per-channel-type, not per-user?**
-- Simpler resource model — one Worker per channel type, not per stranger
-- Channel Projects are a containment boundary, not a personalization feature
-- Per-user isolation can be added later inside the Project if needed
-
-## Security Boundaries
-
-### Code-Level Interception
-
-The trust check is implemented as a **pure function** (`classifyMessage`) called in `MainAgent.send()` before any LLM processing. This is critical:
-
-- **Not a system prompt instruction** — "ignore messages from untrusted users" in a prompt can be bypassed by prompt injection
-- **Not an LLM-driven decision** — the LLM never sees untrusted message content; the code discards it before the LLM runs
-- **Deterministic** — a simple lookup in `OwnerStore`, no ambiguity, no hallucination risk
-
-### Prompt Injection Resistance
-
-| Attack Vector | Defense |
-|--------------|---------|
-| Attacker sends "ignore previous instructions" via Telegram | Message never reaches MainAgent's LLM — discarded at code level |
-| Attacker tries to call `trust(action="add")` | `trust` tool doesn't exist in channel Project's tool registry |
-| Attacker tries to write to `owner.json` via `memory_write` | `owner.json` is outside the `data/` directory; `memory_write` is path-scoped |
-| Attacker sends crafted message to trigger `memory_write` in channel Project | Channel Project has restricted tool set — no `memory_write` to MainAgent's memory |
-| Compromised LLM tries to self-authorize | `classifyMessage` runs before LLM; OwnerStore file has OS-level permissions (0o600) |
-
-### Isolation Layers
-
-```
-┌─────────────────────────────────────────────────┐
-│  OS Level                                        │
-│  ~/.pegasus/owner.json (0o600)                   │
-│  Only readable by process owner                  │
-├─────────────────────────────────────────────────┤
-│  Code Level                                      │
-│  classifyMessage() — deterministic routing        │
-│  Runs before LLM, not bypassable by prompts      │
-├─────────────────────────────────────────────────┤
-│  Process Level                                   │
-│  Channel Projects run in Worker threads           │
-│  Separate ToolRegistry, EventBus, Memory          │
-│  Cannot access MainAgent's tools or session       │
-├─────────────────────────────────────────────────┤
-│  Data Level                                      │
-│  owner.json outside data/ directory               │
-│  memory_write scoped to data/                     │
-│  Channel Project memory isolated per-project      │
-└─────────────────────────────────────────────────┘
-```
-
-## Notification Flow
-
-When a new external channel sends its first message:
-
-```
-1. Telegram user sends "hello"
-       │
-2. classifyMessage() → "no_owner_configured"
-       │
-3. Message content discarded (never stored, never sent to LLM)
-       │
-4. System notification injected into MainAgent session:
-   "[System: New telegram channel activity detected.
-    Sender: 123456789 (username: john). No owner configured.
-    Use trust(add, telegram, 123456789) to add yourself.]"
-       │
-5. MainAgent thinks and may notify owner via CLI or other trusted channel
-       │
-6. Owner runs: /trust add telegram 123456789
-       │
-7. Future Telegram messages from 123456789 → MainAgent (trusted)
-   Future Telegram messages from others → channel:telegram Project
-```
-
-**Rate limiting:** after the first notification, reminders are sent at most **once per hour** per channel type. This prevents a flood of messages from generating a flood of notifications.
-
-## Architecture Diagram
+### Flow Diagram
 
 ```
                     External Channels              Internal Channels
@@ -226,40 +66,139 @@ When a new external channel sends its first message:
                  ┌──────────────────────────────────────────────────┐
                  │              MainAgent.send()                     │
                  │         ┌─────────────────────┐                  │
-                 │         │  classifyMessage()   │                  │
+                 │         │  classifyMessage()   │  ← pure function│
                  │         └──────┬──────┬───────┘                  │
                  │           owner│      │untrusted / no_owner      │
-                 │                │      │                          │
                  │    ┌───────────┘      └──────────────┐           │
                  │    ▼                                 ▼           │
-                 │ ┌──────────────┐    ┌──────────────────────┐    │
-                 │ │ LLM Processing│    │ Discard / Route to   │    │
-                 │ │ Queue (normal)│    │ Channel Project      │    │
-                 │ └──────────────┘    └──────────────────────┘    │
+                 │ MainAgent                    Discard / Route     │
+                 │ LLM Queue                    to Channel Project  │
                  └──────────────────────────────────────────────────┘
-                                                │
-                                                ▼
-                                   ┌─────────────────────┐
-                                   │  Channel Projects    │
-                                   │  (Worker threads)    │
-                                   │                      │
-                                   │  channel:telegram    │
-                                   │  channel:discord     │
-                                   │  ...                  │
-                                   │                      │
-                                   │  Isolated: own tools, │
-                                   │  session, memory.     │
-                                   │  No trust tool.       │
-                                   │  No filesystem.       │
-                                   └─────────────────────┘
 ```
 
-## Key Files
+### Owner Messages
 
-| File | Purpose |
-|------|---------|
-| `src/security/owner-store.ts` | OwnerStore class — read/write `~/.pegasus/owner.json` |
-| `src/security/message-classifier.ts` | `classifyMessage()` — pure routing function |
-| `src/tools/builtins/trust-tool.ts` | `trust` tool — add/remove/list owner identities |
-| `skills/trust/SKILL.md` | `/trust` CLI skill definition |
-| `src/agents/main-agent.ts` | Integration — `send()` interception, handler methods |
+Queued directly into MainAgent's processing queue — identical to CLI input. The owner's Telegram message has the same authority as a CLI command.
+
+### No-Owner-Configured Messages
+
+Discarded entirely (message content never reaches any LLM). A system notification is injected into MainAgent's session with **only sender identity** (userId, username — sanitized) — no message content. Rate-limited: first contact immediate, then at most once per hour.
+
+### Untrusted Messages
+
+Forwarded to a per-channel-type Channel Project for **fully isolated processing**. See "Channel Projects" below.
+
+## Trust Management
+
+The `trust` tool is a MainAgent-only builtin tool. The `/trust` CLI skill provides a command interface:
+
+```
+/trust add telegram 123456789
+/trust remove telegram 123456789
+/trust list
+```
+
+Since non-owner messages never reach MainAgent, they can never invoke the `trust` tool. Once a channel type has owners configured, the owner can also manage trust from any trusted channel (e.g., Telegram → add WhatsApp).
+
+## Channel Projects
+
+When a non-owner sends a message on a configured channel, Pegasus routes it to a **Channel Project** — a fully isolated Worker that processes and replies independently.
+
+### Design Principle: Complete Isolation
+
+Channel Projects are **completely independent** from MainAgent:
+
+- Non-owner messages go directly to the Channel Project Worker
+- The Channel Project Agent processes the message with its own LLM session
+- The Channel Project Agent replies **directly** to the external channel via `reply()` tool
+- **MainAgent is never involved** — no notification, no session injection, no LLM call
+
+This is the critical security property: non-owner content never enters MainAgent's context window, eliminating prompt injection as an attack vector against the owner's agent.
+
+```
+Non-owner Telegram message
+       │
+       ▼
+MainAgent.send() → classifyMessage() → "untrusted"
+       │
+       ▼
+Route to channel:telegram Project Worker
+       │
+       ▼
+┌─ Channel Project Worker (isolated thread) ──────────────┐
+│                                                          │
+│  Receives message with full channel info                 │
+│       │                                                  │
+│  Agent processes (own LLM session, own memory)           │
+│       │                                                  │
+│  Agent calls reply(text, channelType, channelId)         │
+│       │                                                  │
+│  Reply sent directly to external channel                 │
+│  (bypasses MainAgent entirely)                           │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+```
+
+### Why Direct Reply?
+
+The alternative — routing replies back through MainAgent — was rejected because:
+
+1. **Security**: non-owner message content would enter MainAgent's session, creating a prompt injection surface
+2. **Privacy**: owner would see strangers' conversations as noise in their session
+3. **Latency**: an extra LLM call through MainAgent adds unnecessary delay
+4. **Coupling**: defeats the purpose of isolation — the Channel Project should be self-contained
+
+### Worker Protocol
+
+Channel Project replies use a dedicated `"reply"` message type in the Worker protocol, separate from the existing `"notify"` type:
+
+- `"notify"` — status updates from normal Projects → goes to MainAgent.send() (existing behavior)
+- `"reply"` — direct channel replies from Channel Projects → goes directly to channel adapter (new)
+
+This separation ensures normal Project notifications continue working unchanged, while Channel Project replies bypass MainAgent.
+
+### Properties
+
+- **One per channel type**: all non-owner Telegram users share `channel:telegram`
+- **Auto-created**: on first untrusted message for a channel type
+- **Persistent**: survives restarts, accumulates its own memory and conversation history
+- **Isolated data**: own session, memory, and task logs under `data/agents/projects/channel:<type>/`
+- **Full channel info**: receives the sender's channel metadata (channelId, userId, replyTo) with each message, enabling reply routing
+
+### Why Per-Channel-Type?
+
+- Simpler resource model — one Worker per channel type, not per stranger
+- Channel Projects are a containment boundary, not a personalization feature
+- Per-user isolation can be added later inside the Project if needed
+
+## Security Boundaries
+
+### Layer 1: OS Level
+- `~/.pegasus/owner.json` with `0o600` permissions
+- Only readable/writable by the process owner
+
+### Layer 2: Code Level
+- `classifyMessage()` — pure function, runs before any LLM call
+- Deterministic lookup in OwnerStore, no ambiguity, no hallucination risk
+- `trust` tool only registered in MainAgent's ToolRegistry
+
+### Layer 3: Process Level
+- Channel Projects run in separate Worker threads
+- Separate Agent, ToolRegistry, EventBus, Session, Memory
+- Cannot access MainAgent's tools or session
+- Reply directly to external channel — never passes through MainAgent
+
+### Layer 4: Data Level
+- `owner.json` outside `data/` directory — unreachable by `memory_write`
+- Channel Project memory isolated in `data/agents/projects/channel:<type>/memory/`
+- No shared state between MainAgent memory and Channel Project memory
+
+### Prompt Injection Resistance
+
+| Attack Vector | Defense |
+|--------------|---------|
+| Attacker sends "ignore previous instructions" via Telegram | Message never reaches MainAgent — routed to isolated Channel Project at code level |
+| Attacker tries to call trust() | `trust` tool not in Channel Project's tool registry |
+| Attacker tries to write to owner.json | owner.json outside data/ directory; memory_write is path-scoped |
+| Crafted username as prompt injection in notification | userId/username sanitized + truncated before injection into MainAgent session |
+| Channel Project LLM compromised | Cannot affect MainAgent — separate Worker thread, separate tools, reply goes directly to external channel |
