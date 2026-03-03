@@ -48,6 +48,7 @@ function createMockModelRegistry(model: LanguageModel): ModelRegistry {
     tiers: {},
     codex: { enabled: false, baseURL: "https://chatgpt.com/backend-api", model: "gpt-5.3-codex" },
     copilot: { enabled: false },
+    openrouter: { enabled: false },
     maxConcurrentCalls: 3,
     timeout: 120,
     contextWindow: undefined,

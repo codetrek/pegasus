@@ -24,6 +24,7 @@ function makeTestSettings(dataDir: string): Settings {
       tiers: {},
       codex: { enabled: false, baseURL: "https://example.com", model: "test" },
       copilot: { enabled: false },
+      openrouter: { enabled: false },
       maxConcurrentCalls: 1,
       timeout: 30,
       contextWindow: 4096,
