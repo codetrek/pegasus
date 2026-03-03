@@ -199,6 +199,7 @@ export function buildChannelsSection(): string[] {
     "Fields:",
     "- type: the channel type (cli, telegram, slack, sms, web)",
     "- id: the unique channel instance identifier",
+    "- user: (optional) the sender's user ID within the channel",
     "- thread: (optional) thread or conversation ID within the channel",
     "",
     "When calling reply(), pass these values back:",

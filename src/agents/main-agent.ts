@@ -482,7 +482,7 @@ export class MainAgent {
 
     // Normal message: add to session with channel metadata for LLM visibility
     const now = formatTimestamp(Date.now());
-    const channelMeta = `[${now} | channel: ${message.channel.type} | id: ${message.channel.channelId}${message.channel.replyTo ? ` | thread: ${message.channel.replyTo}` : ""}]`;
+    const channelMeta = `[${now} | channel: ${message.channel.type} | id: ${message.channel.channelId}${message.channel.userId ? ` | user: ${message.channel.userId}` : ""}${message.channel.replyTo ? ` | thread: ${message.channel.replyTo}` : ""}]`;
     const userMsg: Message = { role: "user", content: `${channelMeta}\n${text}` };
     // Attach images from InboundMessage if present
     if (message.images?.length) {
