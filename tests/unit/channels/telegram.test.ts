@@ -591,4 +591,15 @@ describe("splitMessage", () => {
   it("handles empty string", () => {
     expect(splitMessage("", 4096)).toEqual([""]);
   });
+
+  it("does not exceed maxLength when newline is at exact boundary", () => {
+    // Newline at position maxLength (0-indexed) — lastIndexOf must not include it
+    const before = "x".repeat(4096);
+    const text = before + "\n" + "y".repeat(100);
+    const result = splitMessage(text, 4096);
+    for (const chunk of result) {
+      expect(chunk.length).toBeLessThanOrEqual(4096);
+    }
+    expect(result.join("")).toBe(text);
+  });
 });

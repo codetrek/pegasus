@@ -195,7 +195,7 @@ export function splitMessage(text: string, maxLength: number): string[] {
     // Try to find a newline to break at (within last 20% of the chunk)
     let cutPoint = maxLength;
     const searchStart = Math.floor(maxLength * 0.8);
-    const lastNewline = remaining.lastIndexOf("\n", maxLength);
+    const lastNewline = remaining.lastIndexOf("\n", maxLength - 1);
     if (lastNewline > searchStart) {
       cutPoint = lastNewline + 1; // include the newline in this chunk
     }
