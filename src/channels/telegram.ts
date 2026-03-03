@@ -24,9 +24,6 @@ export interface TelegramCommand {
   description: string;  // 1-256 chars
 }
 
-/** Telegram's maximum message length. */
-const MAX_MESSAGE_LENGTH = 4096;
-
 export class TelegramAdapter implements ChannelAdapter {
   readonly type = "telegram";
   private bot: Bot;

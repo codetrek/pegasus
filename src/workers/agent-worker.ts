@@ -22,11 +22,9 @@ import type { Settings } from "../infra/config.ts";
 import type { GenerateTextResult } from "../infra/llm-types.ts";
 import type { Persona } from "../identity/persona.ts";
 import type { InboundMessage } from "../channels/types.ts";
-import type { OutboundMessage } from "../channels/types.ts";
 import { parseProjectFile } from "../projects/loader.ts";
 import { ProxyLanguageModel } from "../projects/proxy-language-model.ts";
 import { spawn_task } from "../tools/builtins/index.ts";
-import { reply as replyTool } from "../tools/builtins/reply-tool.ts";
 import { SUBAGENT_SYSTEM_PROMPT } from "../prompts/index.ts";
 import { TaskPersister } from "../task/persister.ts";
 import { buildProjectAgentPaths, buildSubAgentPaths } from "../storage/paths.ts";
@@ -69,9 +67,6 @@ let projectSkillDirs: Array<{ dir: string; source: "builtin" | "user" }> = [];
 let workerChannelType: string = "unknown";
 let workerChannelId: string = "unknown";
 
-/** Channel info from the most recent inbound message (for reply routing). */
-let lastInboundChannel: { type: string; channelId: string; userId?: string; replyTo?: string } | null = null;
-
 /**
  * Expose module-level state for unit testing.
  * Not used in production — only accessed by tests to verify state transitions.
@@ -89,8 +84,6 @@ export const _testState = {
   setSkillRegistry: (r: SkillRegistry | null) => { projectSkillRegistry = r; },
   getSkillDirs: () => projectSkillDirs,
   setSkillDirs: (d: Array<{ dir: string; source: "builtin" | "user" }>) => { projectSkillDirs = d; },
-  getLastInboundChannel: () => lastInboundChannel,
-  setLastInboundChannel: (ch: typeof lastInboundChannel) => { lastInboundChannel = ch; },
 };
 
 // ── Message handler ──────────────────────────────────
@@ -109,7 +102,7 @@ export async function dispatchMessage(data: Record<string, unknown>): Promise<vo
       break;
 
     case "message":
-      handleMessage(data.message as { text: string; channel?: { type: string; channelId: string; userId?: string; replyTo?: string } });
+      handleMessage(data.message as { text: string });
       break;
 
     case "llm_response":
@@ -241,9 +234,6 @@ export async function initProject(config: ProjectConfig): Promise<void> {
   workerChannelType = "project";
   workerChannelId = projectDef.name;
 
-  // 6.5 Determine if this is a channel Project
-  const isChannelProject = projectDef.name.startsWith("channel:");
-
   // 8. Create Agent (with SkillRegistry for skill metadata in system prompt)
   agent = _createAgent({
     model: proxyModel,
@@ -251,36 +241,12 @@ export async function initProject(config: ProjectConfig): Promise<void> {
     settings: agentSettings,
     storePaths: buildProjectAgentPaths(projectPath),
     skillRegistry: projectSkillRegistry,
-    ...(isChannelProject && { additionalTools: [replyTool] }),
   });
 
   // 9. Register notify callback → forward to main thread as InboundMessage
-  if (isChannelProject) {
-    // Channel Project: intercept task results and post as direct replies.
-    // The Agent's task system produces results via onNotify. For channel Projects,
-    // these results should go directly to the external channel, not to MainAgent.
-    agent.onNotify((notification: TaskNotification) => {
-      if (notification.type === "completed" || notification.type === "notify") {
-        const text = notificationToText(notification);
-        if (text && lastInboundChannel) {
-          postReply(text, {
-            type: lastInboundChannel.type,
-            channelId: lastInboundChannel.channelId,
-            replyTo: lastInboundChannel.replyTo,
-          });
-        }
-      }
-      // Failed tasks: still notify MainAgent so the system knows something went wrong
-      if (notification.type === "failed") {
-        sendNotify(notificationToText(notification));
-      }
-    });
-  } else {
-    // Normal Project: forward all notifications to MainAgent
-    agent.onNotify((notification: TaskNotification) => {
-      sendNotify(notificationToText(notification));
-    });
-  }
+  agent.onNotify((notification: TaskNotification) => {
+    sendNotify(notificationToText(notification));
+  });
 
   // 10. Start agent
   await agent.start();
@@ -393,12 +359,9 @@ export async function initSubAgent(config: SubAgentConfig): Promise<void> {
 
 // ── Message handling ─────────────────────────────────
 
-export function handleMessage(message: { text: string; channel?: { type: string; channelId: string; userId?: string; replyTo?: string } }): void {
+export function handleMessage(message: { text: string }): void {
   if (!agent) return;
   const text = typeof message === "string" ? message : message.text;
-  if (typeof message === "object" && message.channel) {
-    lastInboundChannel = message.channel;
-  }
   agent.submit(text, "main-agent");
 }
 
@@ -536,16 +499,6 @@ export function notificationToText(notification: TaskNotification): string {
       // "notify"
       return notification.message ?? "";
   }
-}
-
-/**
- * Send a reply message directly to the main thread for channel routing.
- * Used by channel Projects to reply directly to external channels
- * without going through MainAgent's session.
- */
-export function postReply(text: string, channel: { type: string; channelId: string; replyTo?: string }): void {
-  const message: OutboundMessage = { text, channel };
-  postToParent({ type: "reply", message });
 }
 
 /**
