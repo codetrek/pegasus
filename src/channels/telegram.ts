@@ -21,6 +21,9 @@ export interface TelegramCommand {
   description: string;  // 1-256 chars
 }
 
+/** Telegram's maximum message length. */
+const MAX_MESSAGE_LENGTH = 4096;
+
 export class TelegramAdapter implements ChannelAdapter {
   readonly type = "telegram";
   private bot: Bot;
@@ -152,11 +155,14 @@ export class TelegramAdapter implements ChannelAdapter {
         });
       }
     } else {
-      // Text-only message (existing behavior)
-      await this.bot.api.sendMessage(chatId, message.text, {
-        parse_mode: "Markdown",
-        ...(threadId ? { message_thread_id: threadId } : {}),
-      });
+      // Text-only message — split if exceeding Telegram's 4096 char limit
+      const chunks = splitMessage(message.text, MAX_MESSAGE_LENGTH);
+      for (const chunk of chunks) {
+        await this.bot.api.sendMessage(chatId, chunk, {
+          parse_mode: "Markdown",
+          ...(threadId ? { message_thread_id: threadId } : {}),
+        });
+      }
     }
   }
 
@@ -168,4 +174,35 @@ export class TelegramAdapter implements ChannelAdapter {
   get botInstance(): Bot {
     return this.bot;
   }
+}
+
+/**
+ * Split a message into chunks that fit within Telegram's limit.
+ * Tries to break at newline boundaries for cleaner splits.
+ */
+export function splitMessage(text: string, maxLength: number): string[] {
+  if (text.length <= maxLength) return [text];
+
+  const chunks: string[] = [];
+  let remaining = text;
+
+  while (remaining.length > 0) {
+    if (remaining.length <= maxLength) {
+      chunks.push(remaining);
+      break;
+    }
+
+    // Try to find a newline to break at (within last 20% of the chunk)
+    let cutPoint = maxLength;
+    const searchStart = Math.floor(maxLength * 0.8);
+    const lastNewline = remaining.lastIndexOf("\n", maxLength);
+    if (lastNewline > searchStart) {
+      cutPoint = lastNewline + 1; // include the newline in this chunk
+    }
+
+    chunks.push(remaining.slice(0, cutPoint));
+    remaining = remaining.slice(cutPoint);
+  }
+
+  return chunks;
 }
