@@ -27,9 +27,10 @@ import { Agent } from "./agent.ts";
 import type { TaskNotification } from "./agent.ts";
 import type { ToolCall } from "../models/tool.ts";
 import { EstimateCounter } from "../infra/token-counter.ts";
-import { computeTokenBudget, calculateMaxToolResultChars, truncateToolResult, summarizeMessages, isContextOverflowError, MAX_OVERFLOW_COMPACT_RETRIES } from "../context/index.ts";
+import { computeTokenBudget, calculateMaxToolResultChars, truncateToolResult, summarizeMessages, isContextOverflowError, MAX_OVERFLOW_COMPACT_RETRIES, ModelLimitsCache } from "../context/index.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import path from "node:path";
+import os from "node:os";
 import { SkillRegistry } from "../skills/index.ts";
 import { AITaskTypeRegistry, loadAITaskTypeDefinitions } from "../aitask-types/index.ts";
 import {
@@ -104,6 +105,7 @@ export class MainAgent {
   private ownerStore: OwnerStore;
   private _channelNotifyTimes = new Map<string, number>();
   private systemPrompt: string = "";
+  private modelLimitsCache!: ModelLimitsCache;
   private _codexCredPath: string;
   private _copilotCredPath: string;
   private _mcpAuthDir: string;
@@ -178,6 +180,10 @@ export class MainAgent {
     // Authenticate Copilot provider if configured
     await this._initCopilotAuth();
 
+    // Initialize model limits cache for provider-aware token budget resolution
+    const modelLimitsCacheDir = path.join(os.homedir(), ".pegasus", "model-limits");
+    this.modelLimitsCache = new ModelLimitsCache(modelLimitsCacheDir);
+
     // Task execution engine — created AFTER codex auth so models can resolve codex models
     try {
       this.agent = new Agent({
@@ -186,6 +192,7 @@ export class MainAgent {
         persona: this.persona,
         settings: this.settings,
         storePaths: this.mainStorePaths,
+        modelLimitsCache: this.modelLimitsCache,
       });
     } catch (err) {
       // If codex auth failed and default model is codex, this will throw.
@@ -757,7 +764,9 @@ export class MainAgent {
             : `Error: ${toolResult.error}`;
           const toolBudget = computeTokenBudget({
             modelId: this.models.getDefaultModelId(),
+            provider: this.models.getDefaultProvider(),
             configContextWindow: this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
+            modelLimitsCache: this.modelLimitsCache,
           });
           const maxToolChars = calculateMaxToolResultChars(toolBudget.contextWindow, this.settings.context?.maxToolResultShare);
           const safeContent = rawContent.length > maxToolChars
@@ -1195,9 +1204,10 @@ export class MainAgent {
   private async _checkAndCompact(): Promise<boolean> {
     const budget = computeTokenBudget({
       modelId: this.models.getDefaultModelId(),
+      provider: this.models.getDefaultProvider(),
       configContextWindow: this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
-      // TODO(task-9): add modelLimitsCache + provider here
       compactThreshold: this.settings.session?.compactThreshold,
+      modelLimitsCache: this.modelLimitsCache,
     });
 
     // Estimate current token usage
@@ -1353,7 +1363,9 @@ export class MainAgent {
       memoryDir,
       contextWindowSize: computeTokenBudget({
         modelId: reflectionModel.modelId,
+        provider: this.models.getProviderForTier("fast"),
         configContextWindow: this.models.getContextWindowForTier("fast") ?? this.settings.llm.contextWindow,
+        modelLimitsCache: this.modelLimitsCache,
       }).contextWindow,
     });
 
@@ -1375,6 +1387,7 @@ export class MainAgent {
       messages: this.sessionMessages,
       model: this.models.getForTier("fast"),
       configContextWindow: this.models.getContextWindowForTier("fast"),
+      modelLimitsCache: this.modelLimitsCache,
     });
   }
 
@@ -1739,7 +1752,9 @@ export class MainAgent {
     // Get skill metadata with budget
     const contextWindow = computeTokenBudget({
       modelId: this.models.getDefaultModelId(),
+      provider: this.models.getDefaultProvider(),
       configContextWindow: this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
+      modelLimitsCache: this.modelLimitsCache,
     }).contextWindow;
     const skillBudget = Math.max(Math.floor(contextWindow * 0.02 * 4), 16_000);
     const skillMetadata = this.skillRegistry.getMetadataForPrompt(skillBudget);

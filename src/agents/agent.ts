@@ -34,6 +34,7 @@ import type { AITaskTypeRegistry } from "../aitask-types/index.ts";
 import type { MemoryIndexEntry } from "../prompts/index.ts";
 import { TaskPersister } from "../task/persister.ts";
 import { computeTokenBudget, estimateTokensFromChars, calculateMaxToolResultChars, truncateToolResult, summarizeMessages, isContextOverflowError } from "../context/index.ts";
+import type { ModelLimitsCache } from "../context/index.ts";
 import { TASK_COMPACT_THRESHOLD } from "../context/constants.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import type { MCPManager, MCPServerConfig } from "../mcp/index.ts";
@@ -135,6 +136,8 @@ export interface AgentDeps {
   storePaths: AgentStorePaths;
   /** Whether to run PostTaskReflector after task completion. Default: true. */
   enableReflection?: boolean;
+  /** Cache for provider-fetched model limits. */
+  modelLimitsCache?: ModelLimitsCache;
 }
 
 export class Agent {
@@ -170,6 +173,7 @@ export class Agent {
   private skillRegistry: import("../skills/registry.ts").SkillRegistry | null = null;
   private backgroundTaskManager: BackgroundTaskManager;
   private browserManager: BrowserManager | null = null;
+  private modelLimitsCache: ModelLimitsCache | undefined;
 
   constructor(deps: AgentDeps) {
     this.settings = deps.settings ?? getSettings();
@@ -235,6 +239,7 @@ export class Agent {
 
     this.storePaths = deps.storePaths;
     this.enableReflection = deps.enableReflection ?? true;
+    this.modelLimitsCache = deps.modelLimitsCache;
 
     // Browser manager (optional — only created when browser config exists)
     const browserConfig = this.settings.tools?.browser;
@@ -264,7 +269,9 @@ export class Agent {
         memoryDir: this.storePaths.memory,
         contextWindowSize: computeTokenBudget({
           modelId: reflectionModel.modelId,
+          provider: deps.modelRegistry?.getProviderForTier("fast"),
           configContextWindow: deps.modelRegistry?.getContextWindowForTier("fast") ?? this.settings.llm.contextWindow,
+          modelLimitsCache: this.modelLimitsCache,
         }).contextWindow,
       });
     } else {
@@ -627,7 +634,7 @@ export class Agent {
             durationMs: 0,
           };
           const taskModelId = this._resolveTypeModel(task.context.taskType)?.modelId ?? this.thinker.model.modelId;
-          const toolBudget = computeTokenBudget({ modelId: taskModelId, configContextWindow: this.settings.llm.contextWindow });
+          const toolBudget = computeTokenBudget({ modelId: taskModelId, configContextWindow: this.settings.llm.contextWindow, modelLimitsCache: this.modelLimitsCache });
           context_pushToolResult(task.context, toolCallId, blockedResult, toolBudget.contextWindow);
           const finalResult = {
             ...actorResult,
@@ -708,7 +715,7 @@ export class Agent {
 
         // Push tool result message to context
         const taskModelId2 = this._resolveTypeModel(task.context.taskType)?.modelId ?? this.thinker.model.modelId;
-        const toolBudget2 = computeTokenBudget({ modelId: taskModelId2, configContextWindow: this.settings.llm.contextWindow });
+        const toolBudget2 = computeTokenBudget({ modelId: taskModelId2, configContextWindow: this.settings.llm.contextWindow, modelLimitsCache: this.modelLimitsCache });
         context_pushToolResult(task.context, toolCallId, toolResult, toolBudget2.contextWindow);
 
         // Build final ActionResult from actorResult + toolResult
@@ -890,7 +897,7 @@ export class Agent {
     // Get context window for the task's model
     const typeModel = this._resolveTypeModel(task.context.taskType);
     const modelId = typeModel?.modelId ?? this.thinker.model.modelId;
-    const budget = computeTokenBudget({ modelId, configContextWindow: this.settings.llm.contextWindow, compactThreshold: TASK_COMPACT_THRESHOLD });
+    const budget = computeTokenBudget({ modelId, configContextWindow: this.settings.llm.contextWindow, compactThreshold: TASK_COMPACT_THRESHOLD, modelLimitsCache: this.modelLimitsCache });
 
     if (!force && estimatedTokens < budget.compactTrigger) return;
 
