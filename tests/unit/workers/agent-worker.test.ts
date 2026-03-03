@@ -20,6 +20,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import {
   notificationToText,
   sendNotify,
+  postReply,
   dispatchMessage,
   handleMessage,
   handleLLMResponse,
@@ -274,6 +275,7 @@ describe("sendNotify", () => {
 describe("handleMessage", () => {
   afterEach(() => {
     _testState.setAgent(null);
+    _testState.setLastInboundChannel(null);
   });
 
   it("should do nothing when agent is null", () => {
@@ -310,6 +312,28 @@ describe("handleMessage", () => {
     handleMessage("raw string" as any);
     expect(submitCalls).toHaveLength(1);
     expect(submitCalls[0]).toBe("raw string");
+  });
+
+  it("should store channel info from inbound message", () => {
+    const fakeAgent = {
+      submit: (_text: string, _source: string) => "task_1",
+    };
+    _testState.setAgent(fakeAgent as any);
+
+    const channel = { type: "telegram", channelId: "chat456", userId: "user1", replyTo: "thread1" };
+    handleMessage({ text: "hello", channel });
+    expect(_testState.getLastInboundChannel()).toEqual(channel);
+  });
+
+  it("should NOT store channel info when not present", () => {
+    const fakeAgent = {
+      submit: (_text: string, _source: string) => "task_1",
+    };
+    _testState.setAgent(fakeAgent as any);
+    _testState.setLastInboundChannel(null);
+
+    handleMessage({ text: "hello" });
+    expect(_testState.getLastInboundChannel()).toBeNull();
   });
 });
 
@@ -792,6 +816,213 @@ describe("initProject", () => {
   }, 10_000);
 });
 
+// ── initProject — channel Project behavior ──────────────
+
+describe("initProject — channel Project", () => {
+  let cleanup: () => void;
+  let cleanupExit: () => void;
+  let cleanupAgent: () => void;
+  let cleanupProxy: () => void;
+  let messages: unknown[];
+
+  beforeEach(() => {
+    const capture = captureMessages();
+    messages = capture.messages;
+    cleanup = capture.cleanup;
+    mkdirSync(TEST_DIR, { recursive: true });
+    cleanupExit = _setExitProcessForTest(() => {});
+    lastMockAgent = createMockAgent();
+    lastMockProxy = createMockProxyModel();
+    cleanupAgent = _setAgentFactoryForTest(() => lastMockAgent as any);
+    cleanupProxy = _setProxyModelFactoryForTest(() => lastMockProxy as any);
+  });
+
+  afterEach(async () => {
+    try { _testState.getProxyModel()?.cancelAll("test cleanup"); } catch { /* ignore */ }
+    try { await _testState.getAgent()?.stop(); } catch { /* ignore */ }
+    _testState.setAgent(null);
+    _testState.setProxyModel(null);
+    _testState.setLastInboundChannel(null);
+    cleanup();
+    cleanupExit();
+    cleanupAgent();
+    cleanupProxy();
+    rmSync(TEST_DIR, { recursive: true, force: true });
+  });
+
+  it("should use postReply for completed/notify notifications on channel projects", async () => {
+    const projectDir = `${TEST_DIR}/channel:telegram`;
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(
+      `${projectDir}/PROJECT.md`,
+      ["---", "name: channel:telegram", "status: active", "---", "Channel project."].join("\n"),
+    );
+
+    const settings = makeTestSettings(projectDir);
+    setSettings(settings);
+
+    await initProject({ projectPath: projectDir, settings });
+
+    expect(messages).toContainEqual({ type: "ready" });
+    expect(_notifyCallback).not.toBeNull();
+
+    // Set lastInboundChannel (simulates receiving a message with channel info)
+    _testState.setLastInboundChannel({ type: "telegram", channelId: "chat456", replyTo: "thread1" });
+
+    // Trigger completed notification — should use postReply (type: "reply"), not sendNotify
+    _notifyCallback!({ type: "completed", taskId: "t1", result: { response: "Hello stranger" } });
+
+    const replyMsgs = (messages as any[]).filter(m => m.type === "reply");
+    expect(replyMsgs.length).toBe(1);
+    expect(replyMsgs[0].message.text).toBe("Hello stranger");
+    expect(replyMsgs[0].message.channel.type).toBe("telegram");
+    expect(replyMsgs[0].message.channel.channelId).toBe("chat456");
+    expect(replyMsgs[0].message.channel.replyTo).toBe("thread1");
+
+    // Should NOT have sent via sendNotify (type: "notify") for completed
+    const notifyMsgs = (messages as any[]).filter(m => m.type === "notify");
+    expect(notifyMsgs.length).toBe(0);
+  }, 10_000);
+
+  it("should use sendNotify for failed notifications even on channel projects", async () => {
+    const projectDir = `${TEST_DIR}/channel:slack`;
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(
+      `${projectDir}/PROJECT.md`,
+      ["---", "name: channel:slack", "status: active", "---", "Channel project fail."].join("\n"),
+    );
+
+    const settings = makeTestSettings(projectDir);
+    setSettings(settings);
+
+    await initProject({ projectPath: projectDir, settings });
+    expect(_notifyCallback).not.toBeNull();
+
+    _testState.setLastInboundChannel({ type: "slack", channelId: "C123" });
+
+    // Trigger failed notification — should use sendNotify, not postReply
+    _notifyCallback!({ type: "failed", taskId: "t1", error: "something broke" });
+
+    const notifyMsgs = (messages as any[]).filter(m => m.type === "notify");
+    expect(notifyMsgs.length).toBe(1);
+    expect(notifyMsgs[0].message.text).toContain("[Task failed: something broke]");
+
+    // Should NOT have sent via postReply (type: "reply") for failed
+    const replyMsgs = (messages as any[]).filter(m => m.type === "reply");
+    expect(replyMsgs.length).toBe(0);
+  }, 10_000);
+
+  it("should not postReply when lastInboundChannel is null", async () => {
+    const projectDir = `${TEST_DIR}/channel:telegram2`;
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(
+      `${projectDir}/PROJECT.md`,
+      ["---", "name: channel:telegram2", "status: active", "---", "Channel project."].join("\n"),
+    );
+
+    const settings = makeTestSettings(projectDir);
+    setSettings(settings);
+
+    await initProject({ projectPath: projectDir, settings });
+    expect(_notifyCallback).not.toBeNull();
+
+    // Don't set lastInboundChannel — it stays null
+    _testState.setLastInboundChannel(null);
+
+    _notifyCallback!({ type: "completed", taskId: "t1", result: { response: "Reply" } });
+
+    // No reply should be sent because there's no channel to reply to
+    const replyMsgs = (messages as any[]).filter(m => m.type === "reply");
+    expect(replyMsgs.length).toBe(0);
+  }, 10_000);
+
+  it("non-channel projects should still use sendNotify for all notifications", async () => {
+    const projectDir = `${TEST_DIR}/my-project`;
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(
+      `${projectDir}/PROJECT.md`,
+      ["---", "name: my-project", "status: active", "---", "Normal project."].join("\n"),
+    );
+
+    const settings = makeTestSettings(projectDir);
+    setSettings(settings);
+
+    await initProject({ projectPath: projectDir, settings });
+    expect(_notifyCallback).not.toBeNull();
+
+    // Even if lastInboundChannel is set, normal projects should use sendNotify
+    _testState.setLastInboundChannel({ type: "telegram", channelId: "chat456" });
+
+    _notifyCallback!({ type: "completed", taskId: "t1", result: { response: "Done" } });
+
+    const notifyMsgs = (messages as any[]).filter(m => m.type === "notify");
+    expect(notifyMsgs.length).toBeGreaterThanOrEqual(1);
+
+    const replyMsgs = (messages as any[]).filter(m => m.type === "reply");
+    expect(replyMsgs.length).toBe(0);
+  }, 10_000);
+
+  it("channel project 'notify' type notifications should use postReply", async () => {
+    const projectDir = `${TEST_DIR}/channel:telegram3`;
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(
+      `${projectDir}/PROJECT.md`,
+      ["---", "name: channel:telegram3", "status: active", "---", "Channel project."].join("\n"),
+    );
+
+    const settings = makeTestSettings(projectDir);
+    setSettings(settings);
+
+    await initProject({ projectPath: projectDir, settings });
+    expect(_notifyCallback).not.toBeNull();
+
+    _testState.setLastInboundChannel({ type: "telegram", channelId: "chat789" });
+
+    // "notify" type notifications should also use postReply for channel projects
+    _notifyCallback!({ type: "notify", taskId: "t1", message: "Processing..." });
+
+    const replyMsgs = (messages as any[]).filter(m => m.type === "reply");
+    expect(replyMsgs.length).toBe(1);
+    expect(replyMsgs[0].message.text).toBe("Processing...");
+  }, 10_000);
+});
+
+// ── postReply ───────────────────────────────────────────
+
+describe("postReply", () => {
+  let cleanup: () => void;
+  let messages: unknown[];
+
+  beforeEach(() => {
+    const capture = captureMessages();
+    messages = capture.messages;
+    cleanup = capture.cleanup;
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("should send reply message with channel info", () => {
+    postReply("Hello from project", { type: "telegram", channelId: "chat123", replyTo: "thread1" });
+    expect(messages).toHaveLength(1);
+    const msg = messages[0] as Record<string, unknown>;
+    expect(msg.type).toBe("reply");
+    const inner = msg.message as Record<string, unknown>;
+    expect(inner.text).toBe("Hello from project");
+    expect(inner.channel).toEqual({ type: "telegram", channelId: "chat123", replyTo: "thread1" });
+  });
+
+  it("should work without replyTo", () => {
+    postReply("Hello", { type: "slack", channelId: "C456" });
+    expect(messages).toHaveLength(1);
+    const msg = messages[0] as Record<string, unknown>;
+    expect(msg.type).toBe("reply");
+    const inner = msg.message as Record<string, unknown>;
+    expect(inner.channel).toEqual({ type: "slack", channelId: "C456" });
+  });
+});
+
 // ── initSubAgent ────────────────────────────────────────
 
 describe("initSubAgent", () => {
@@ -991,6 +1222,7 @@ describe("_testState", () => {
     _testState.setProxyModel(null);
     _testState.setChannelType("unknown");
     _testState.setChannelId("unknown");
+    _testState.setLastInboundChannel(null);
   });
 
   it("should get and set agent", () => {
@@ -1018,6 +1250,15 @@ describe("_testState", () => {
     _testState.setChannelId("tg_42");
     expect(_testState.getChannelType()).toBe("telegram");
     expect(_testState.getChannelId()).toBe("tg_42");
+  });
+
+  it("should get and set lastInboundChannel", () => {
+    expect(_testState.getLastInboundChannel()).toBeNull();
+    const channel = { type: "telegram", channelId: "chat123", userId: "user1" };
+    _testState.setLastInboundChannel(channel);
+    expect(_testState.getLastInboundChannel()).toEqual(channel);
+    _testState.setLastInboundChannel(null);
+    expect(_testState.getLastInboundChannel()).toBeNull();
   });
 });
 

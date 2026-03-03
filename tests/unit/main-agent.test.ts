@@ -1987,6 +1987,7 @@ describe("MainAgent", () => {
         hasByKey: mock(() => false),
         setModelRegistry: mock(() => {}),
         setOnNotify: mock(() => {}),
+        setOnReply: mock(() => {}),
         setOnWorkerClose: mock(() => {}),
         addOnWorkerClose: mock(() => {}),
       } as unknown as WorkerAdapter;
@@ -2969,6 +2970,7 @@ describe("MainAgent", () => {
         hasByKey: mock(() => false),
         setModelRegistry: mock(() => {}),
         setOnNotify: mock(() => {}),
+        setOnReply: mock(() => {}),
         setOnWorkerClose: mock(() => {}),
         addOnWorkerClose: mock(() => {}),
       } as unknown as WorkerAdapter;
@@ -3010,12 +3012,15 @@ describe("MainAgent", () => {
       await agent.stop();
     }, 10_000);
 
-    it("should forward channel project responses to original external channel", async () => {
+    it("should wire channel project direct replies to replyCallback via onReply", async () => {
       // Register an owner for telegram, but the untrusted message comes from a different userId
       const store = new OwnerStore(authDir);
       store.add("telegram", "owner123");
 
       const model = createMonologueModel("thinking...");
+
+      // Capture the onReply callback set on WorkerAdapter
+      let capturedOnReply: ((msg: OutboundMessage) => void) | null = null;
       const mockWA = {
         shutdownTimeoutMs: 30_000,
         activeCount: 0,
@@ -3027,6 +3032,7 @@ describe("MainAgent", () => {
         hasByKey: mock(() => false),
         setModelRegistry: mock(() => {}),
         setOnNotify: mock(() => {}),
+        setOnReply: mock((cb: (msg: OutboundMessage) => void) => { capturedOnReply = cb; }),
         setOnWorkerClose: mock(() => {}),
         addOnWorkerClose: mock(() => {}),
       } as unknown as WorkerAdapter;
@@ -3044,37 +3050,20 @@ describe("MainAgent", () => {
       const replies: OutboundMessage[] = [];
       agent.onReply((msg) => replies.push(msg));
 
-      // Step 1: Send an untrusted message — this populates _channelProjectReplyTargets
-      agent.send({
-        text: "hello from stranger",
+      // The onReply callback should have been set on the WorkerAdapter
+      expect(capturedOnReply).not.toBeNull();
+
+      // Simulate a channel Project Worker sending a direct reply
+      capturedOnReply!({
+        text: "Hi there! How can I help?",
         channel: { type: "telegram", channelId: "chat456", userId: "stranger" },
       });
-      await Bun.sleep(300);
 
-      // Step 2: Simulate a channel Project Worker sending its response back
-      // (The Worker sends notify with channel: { type: "project", channelId: "channel:telegram" })
-      agent.send({
-        text: "Hi there! How can I help?",
-        channel: { type: "project", channelId: "channel:telegram" },
-      });
-      await Bun.sleep(300);
-
-      // The channel project response should be forwarded to the original telegram channel
-      const forwardedReply = replies.find(
-        (r) => r.text === "Hi there! How can I help?" && r.channel.type === "telegram",
-      );
-      expect(forwardedReply).toBeDefined();
-      expect(forwardedReply!.channel.channelId).toBe("chat456");
-      expect(forwardedReply!.channel.userId).toBe("stranger");
-
-      // The forwarded message should NOT be in MainAgent's session
-      const sessionFile = Bun.file(
-        `${testDataDir}/agents/main/session/current.jsonl`,
-      );
-      if (await sessionFile.exists()) {
-        const content = await sessionFile.text();
-        expect(content).not.toContain("Hi there! How can I help?");
-      }
+      // The reply should be forwarded to the replyCallback
+      expect(replies).toHaveLength(1);
+      expect(replies[0]!.text).toBe("Hi there! How can I help?");
+      expect(replies[0]!.channel.type).toBe("telegram");
+      expect(replies[0]!.channel.channelId).toBe("chat456");
 
       await agent.stop();
     }, 10_000);

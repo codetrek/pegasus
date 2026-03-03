@@ -135,6 +135,12 @@ describe("WorkerAdapter", () => {
     // No assertion — if it doesn't throw, it works
   });
 
+  it("setOnReply should accept a callback", () => {
+    const adapter = new WorkerAdapter("/fake-worker.ts");
+    adapter.setOnReply(() => {});
+    // No assertion — if it doesn't throw, it works
+  });
+
   it("setOnWorkerClose should accept a callback", () => {
     const adapter = new WorkerAdapter("/fake-worker.ts");
     adapter.setOnWorkerClose(() => {});
@@ -472,6 +478,59 @@ describe("WorkerAdapter — Worker lifecycle (mocked Worker)", () => {
           data: {
             type: "notify",
             message: { text: "hi", channel: { type: "project", channelId: "proj-no-cb" } },
+          },
+        }));
+      }).not.toThrow();
+    } finally {
+      globalThis.Worker = OriginalWorker;
+    }
+  });
+
+  it("worker.onmessage 'reply' should invoke onReply callback", async () => {
+    const { FakeWorker, instances } = createFakeWorkerClass();
+    globalThis.Worker = FakeWorker as any;
+
+    try {
+      const adapter = new WorkerAdapter("/fake-worker.ts");
+      const received: unknown[] = [];
+      adapter.setOnNotify(() => {});
+      adapter.setOnReply((msg) => received.push(msg));
+
+      adapter.startWorker("project", "proj-reply", "project", {});
+      const fakeWorker = instances[0]!;
+
+      const outboundMsg = {
+        text: "Hello from channel project",
+        channel: { type: "telegram", channelId: "chat456" },
+      };
+      fakeWorker.onmessage!(new MessageEvent("message", {
+        data: { type: "reply", message: outboundMsg },
+      }));
+
+      expect(received).toHaveLength(1);
+      expect(received[0]).toEqual(outboundMsg);
+    } finally {
+      globalThis.Worker = OriginalWorker;
+    }
+  });
+
+  it("worker.onmessage 'reply' without callback should not throw", async () => {
+    const { FakeWorker, instances } = createFakeWorkerClass();
+    globalThis.Worker = FakeWorker as any;
+
+    try {
+      const adapter = new WorkerAdapter("/fake-worker.ts");
+      adapter.setOnNotify(() => {});
+      // Note: NOT setting onReply
+
+      adapter.startWorker("project", "proj-no-reply-cb", "project", {});
+      const fakeWorker = instances[0]!;
+
+      expect(() => {
+        fakeWorker.onmessage!(new MessageEvent("message", {
+          data: {
+            type: "reply",
+            message: { text: "hi", channel: { type: "telegram", channelId: "chat123" } },
           },
         }));
       }).not.toThrow();

@@ -30,6 +30,7 @@ export function makeWorkerKey(channelType: string, channelId: string): WorkerKey
 /** Messages sent from Worker -> Main thread. */
 export type WorkerOutbound =
   | { type: "notify"; message: InboundMessage }
+  | { type: "reply"; message: OutboundMessage }
   | { type: "error"; message: string }
   | LLMProxyRequest;
 
@@ -45,6 +46,9 @@ export type WorkerInbound =
 /** Callback invoked when a Worker sends a "notify" message. */
 export type OnNotifyCallback = (message: InboundMessage) => void;
 
+/** Callback invoked when a Worker sends a "reply" message (channel Project direct reply). */
+export type OnReplyCallback = (message: OutboundMessage) => void;
+
 /** Callback invoked when a Worker closes (cleanup notification). */
 export type OnWorkerCloseCallback = (channelType: string, channelId: string) => void;
 
@@ -56,6 +60,7 @@ export class WorkerAdapter {
   private readonly workers = new Map<WorkerKey, Worker>();
   private models: ModelRegistry | null = null;
   private onNotify: OnNotifyCallback | null = null;
+  private onReply: OnReplyCallback | null = null;
   private onWorkerClose: OnWorkerCloseCallback | null = null;
 
   /**
@@ -89,6 +94,11 @@ export class WorkerAdapter {
   /** Set callback for Worker "notify" messages. */
   setOnNotify(callback: OnNotifyCallback): void {
     this.onNotify = callback;
+  }
+
+  /** Set callback for Worker "reply" messages (channel Project direct replies). */
+  setOnReply(callback: OnReplyCallback): void {
+    this.onReply = callback;
   }
 
   /** Set callback for Worker close events (replaces existing callback). */
@@ -150,6 +160,13 @@ export class WorkerAdapter {
             this.onNotify(data.message);
           } else {
             logger.warn({ key }, "notify_received_but_no_callback");
+          }
+          break;
+        case "reply":
+          if (this.onReply) {
+            this.onReply(data.message as OutboundMessage);
+          } else {
+            logger.warn({ key }, "reply_received_but_no_callback");
           }
           break;
         case "llm_request":
