@@ -100,7 +100,7 @@ identity:
 agent:
   maxActiveTasks: 5
   maxConcurrentTools: 3
-  maxCognitiveIterations: ${AGENT_MAX_COGNITIVE_ITERATIONS:-10}
+  maxCognitiveIterations: ${AGENT_MAX_COGNITIVE_ITERATIONS:-100}
   heartbeatInterval: 60  # seconds
   taskTimeout: 300  # seconds, max wait time for task completion
 

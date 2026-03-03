@@ -74,7 +74,7 @@ llm:
 agent:
   maxActiveTasks: 5
   maxConcurrentTools: 3
-  maxCognitiveIterations: 10
+  maxCognitiveIterations: 100
   heartbeatInterval: 60   # seconds
   taskTimeout: 300        # seconds — max wait for task completion
 
@@ -302,7 +302,7 @@ For the full design, see [Tier-Based Model Selection](./multi-model.md).
 |-------|------|---------|-------------|
 | `agent.maxActiveTasks` | number | `5` | Maximum concurrent active tasks |
 | `agent.maxConcurrentTools` | number | `3` | Maximum parallel tool executions |
-| `agent.maxCognitiveIterations` | number | `10` | Max cognitive loop iterations per cycle |
+| `agent.maxCognitiveIterations` | number | `100` | Max cognitive loop iterations per cycle |
 | `agent.heartbeatInterval` | number | `60` | Heartbeat interval in seconds |
 | `agent.taskTimeout` | number | `120` | Max wait time for task completion in seconds |
 
