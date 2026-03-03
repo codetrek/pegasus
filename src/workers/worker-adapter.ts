@@ -186,14 +186,16 @@ export class WorkerAdapter {
     this.workers.set(key, worker);
 
     // Send init message to the Worker
-    const balancedModelId = this.models?.getModelIdForTier("balanced");
+    // Pass the full "provider/model" spec so Workers can set up ProxyLanguageModel
+    // with the correct provider (needed for modelOverride in _handleLLMRequest).
+    const balancedModelSpec = this.models?.getModelSpecForTier("balanced");
     const contextWindow = this.models?.getContextWindowForTier("balanced");
     const initMsg: WorkerInbound = {
       type: "init",
       mode,
       config: {
         ...config,
-        ...(balancedModelId != null && { proxyModelId: balancedModelId }),
+        ...(balancedModelSpec != null && { proxyModelId: balancedModelSpec }),
         ...(contextWindow != null && { contextWindow }),
       },
     };

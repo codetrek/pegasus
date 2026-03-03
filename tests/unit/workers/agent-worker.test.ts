@@ -29,6 +29,7 @@ import {
   initProject,
   initSubAgent,
   loadPreviousTaskSummary,
+  splitModelSpec,
   _testState,
   _setPostMessageForTest,
   _setExitProcessForTest,
@@ -1246,5 +1247,29 @@ describe("_setExitProcessForTest", () => {
     expect(calls).toHaveLength(0);
 
     cleanup();
+  });
+});
+
+// ── splitModelSpec ─────────────────────────────────────
+
+describe("splitModelSpec", () => {
+  it("should split a provider/model spec", () => {
+    const result = splitModelSpec("anthropic/claude-sonnet-4", "openai/gpt-4o");
+    expect(result).toEqual({ provider: "anthropic", model: "claude-sonnet-4" });
+  });
+
+  it("should handle bare model name by extracting provider from fallback", () => {
+    const result = splitModelSpec("gpt-4o", "openai/gpt-4o-mini");
+    expect(result).toEqual({ provider: "openai", model: "gpt-4o" });
+  });
+
+  it("should default provider to openai when fallback has no slash", () => {
+    const result = splitModelSpec("my-model", "bare-fallback");
+    expect(result).toEqual({ provider: "openai", model: "my-model" });
+  });
+
+  it("should handle specs with multiple slashes", () => {
+    const result = splitModelSpec("custom/deep/model-name", "openai/gpt-4o");
+    expect(result).toEqual({ provider: "custom", model: "deep/model-name" });
   });
 });

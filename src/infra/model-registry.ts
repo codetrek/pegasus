@@ -159,6 +159,11 @@ export class ModelRegistry {
     return this._extractModelId(resolved.model);
   }
 
+  /** Get full "provider/model" spec for a tier. */
+  getModelSpecForTier(tier: ModelTier): string {
+    return this._resolveTier(tier).model;
+  }
+
   /** Get context window override for the default model. */
   getDefaultContextWindow(): number | undefined {
     return this._resolveDefault().contextWindow;

@@ -36,7 +36,7 @@ import { SkillRegistry } from "../skills/registry.ts";
 export interface BaseConfig {
   settings: Settings;
   contextWindow?: number;
-  /** Model ID of the actual model used by WorkerAdapter's LLM proxy. */
+  /** Full "provider/model" spec of the actual model used by WorkerAdapter's LLM proxy. */
   proxyModelId?: string;
 }
 
@@ -185,12 +185,15 @@ export async function initProject(config: ProjectConfig): Promise<void> {
   //    Priority: projectDef.model (per-project config from PROJECT.md) >
   //    proxyModelId (actual LLM proxy model from WorkerAdapter) > defaultModelSpec.
   //    Per-project model takes precedence because the user explicitly configured it.
+  //    The full "provider/model" spec is split so ProxyLanguageModel.modelOverride
+  //    produces a resolvable spec for WorkerAdapter._handleLLMRequest.
   const defaultRole = settings.llm.default;
   const defaultModelSpec = typeof defaultRole === "string" ? defaultRole : defaultRole.model;
-  const modelId = projectDef.model ?? proxyModelId ?? defaultModelSpec;
+  const modelSpec = projectDef.model ?? proxyModelId ?? defaultModelSpec;
+  const { provider: proxyProvider, model: proxyModelName } = splitModelSpec(modelSpec, defaultModelSpec);
   proxyModel = _createProxyModel(
-    "proxy",
-    modelId,
+    proxyProvider,
+    proxyModelName,
     (msg: unknown) => postToParent(msg),
   );
 
@@ -264,10 +267,11 @@ export async function initSubAgent(config: SubAgentConfig): Promise<void> {
   //    Use proxyModelId from WorkerAdapter when available (matches actual proxy model).
   const defaultRole = settings.llm.default;
   const defaultModelSpec = typeof defaultRole === "string" ? defaultRole : defaultRole.model;
-  const effectiveModelId = proxyModelId ?? defaultModelSpec;
+  const modelSpec = proxyModelId ?? defaultModelSpec;
+  const { provider: saProvider, model: saModelName } = splitModelSpec(modelSpec, defaultModelSpec);
   proxyModel = _createProxyModel(
-    "proxy",
-    effectiveModelId,
+    saProvider,
+    saModelName,
     (msg: unknown) => postToParent(msg),
   );
 
@@ -393,6 +397,26 @@ export async function handleShutdown(): Promise<void> {
 }
 
 // ── Helpers ──────────────────────────────────────────
+
+/**
+ * Split a "provider/model" spec into its components.
+ * If the spec has no slash (bare model name), extract provider from fallback.
+ * This ensures ProxyLanguageModel.modelOverride produces a spec that
+ * ModelRegistry.resolve() can handle.
+ */
+export function splitModelSpec(
+  spec: string,
+  fallbackSpec: string,
+): { provider: string; model: string } {
+  const slashIdx = spec.indexOf("/");
+  if (slashIdx !== -1) {
+    return { provider: spec.slice(0, slashIdx), model: spec.slice(slashIdx + 1) };
+  }
+  // Bare model name — extract provider from fallback
+  const fbSlash = fallbackSpec.indexOf("/");
+  const provider = fbSlash !== -1 ? fallbackSpec.slice(0, fbSlash) : "openai";
+  return { provider, model: spec };
+}
 
 /**
  * Load a summary of previous task results from a tasks directory.
