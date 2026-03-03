@@ -305,7 +305,12 @@ export class WorkerAdapter {
     }
 
     try {
-      const model = this.models.getForTier("balanced");
+      // Use modelOverride from the request when available (e.g. per-project model
+      // from PROJECT.md). Fall back to "balanced" tier for SubAgents or when
+      // no override is specified.
+      const model = request.modelOverride
+        ? this.models.resolve(request.modelOverride)
+        : this.models.getForTier("balanced");
       const result = await model.generate(request.options);
 
       const responseMsg: WorkerInbound = {

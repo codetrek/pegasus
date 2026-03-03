@@ -874,7 +874,9 @@ export class Agent {
    * Uses the chunked summarizer for safe summarization within the model's
    * context budget. Falls back to mechanical summary if LLM summarization fails.
    *
-   * @param force — skip threshold check (used by overflow recovery).
+   * @param force — skip minimum-message-count and token-threshold checks
+   *                (used by overflow recovery). When forced, reduces keepLast
+   *                to ensure at least some messages are available for compaction.
    */
   private async _compactTaskContext(task: TaskFSM, force = false): Promise<void> {
     const messages = task.context.messages;
@@ -897,12 +899,24 @@ export class Agent {
       "task_compact_triggered",
     );
 
-    // Keep first message (user input) and last 4 messages (recent context)
+    // Keep first message (user input) and last N messages (recent context).
+    // When forced (overflow recovery), reduce keepLast to ensure compaction
+    // can proceed even with few messages.
     const keepFirst = 1;
-    const keepLast = 4;
-    const toSummarize = messages.slice(keepFirst, messages.length - keepLast);
+    const keepLast = force ? Math.min(2, messages.length - 2) : 4;
 
-    if (toSummarize.length < 4) return; // Not enough to summarize
+    // Guard: need at least keepFirst + keepLast + 1 messages to compact anything
+    if (keepFirst + keepLast >= messages.length) {
+      if (force) {
+        logger.warn(
+          { taskId: task.taskId, messageCount: messages.length },
+          "task_compact_forced_but_too_few_messages",
+        );
+      }
+      return;
+    }
+
+    const toSummarize = messages.slice(keepFirst, messages.length - keepLast);
 
     // Generate summary — try chunked summarizer first, then mechanical fallback
     let summaryText: string;

@@ -182,11 +182,12 @@ export async function initProject(config: ProjectConfig): Promise<void> {
   }
 
   // 3. Create ProxyLanguageModel — LLM calls go to main thread
-  //    Use proxyModelId from WorkerAdapter (reflects actual LLM proxy model)
-  //    to ensure context window budget calculations match the real model.
+  //    Priority: projectDef.model (per-project config from PROJECT.md) >
+  //    proxyModelId (actual LLM proxy model from WorkerAdapter) > defaultModelSpec.
+  //    Per-project model takes precedence because the user explicitly configured it.
   const defaultRole = settings.llm.default;
   const defaultModelSpec = typeof defaultRole === "string" ? defaultRole : defaultRole.model;
-  const modelId = proxyModelId ?? projectDef.model ?? defaultModelSpec;
+  const modelId = projectDef.model ?? proxyModelId ?? defaultModelSpec;
   proxyModel = _createProxyModel(
     "proxy",
     modelId,
