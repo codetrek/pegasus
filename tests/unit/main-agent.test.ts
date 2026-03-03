@@ -1023,6 +1023,91 @@ describe("MainAgent", () => {
     await agent.stop();
   }, 15_000);
 
+  it("should fall back to mechanical summary when LLM summarization fails during compact", async () => {
+    // When _generateSummary throws, _compactWithFallback should fall back
+    // to _mechanicalSummary which produces a structured summary without LLM.
+    let callCount = 0;
+    const model: LanguageModel = {
+      provider: "test",
+      modelId: "test-model",
+      async generate(options: {
+        system?: string;
+        messages: Message[];
+      }): Promise<GenerateTextResult> {
+        callCount++;
+
+        // First call: return huge promptTokens to trigger compact on next think
+        if (callCount === 1) {
+          return {
+            text: "",
+            finishReason: "tool_calls",
+            toolCalls: [
+              {
+                id: "tc-reply-1",
+                name: "reply",
+                arguments: { text: "Got it!", channelType: "cli", channelId: "test" },
+              },
+            ],
+            usage: { promptTokens: 110_000, completionTokens: 10 },
+          };
+        }
+        // Summarize call — THROW to force mechanical summary fallback
+        if (options.system?.includes("conversation summarizer")) {
+          throw new Error("LLM summarization unavailable");
+        }
+        // After compact: normal response
+        return {
+          text: "",
+          finishReason: "tool_calls",
+          toolCalls: [
+            {
+              id: `tc-reply-${callCount}`,
+              name: "reply",
+              arguments: { text: "After compact!", channelType: "cli", channelId: "test" },
+            },
+          ],
+          usage: { promptTokens: 100, completionTokens: 10 },
+        };
+      },
+    };
+
+    const settings = SettingsSchema.parse({
+      dataDir: testDataDir,
+      logLevel: "warn",
+      session: { compactThreshold: 0.8 },
+      authDir: "/tmp/pegasus-test-auth",
+    });
+
+    const agent = new MainAgent({ models: createMockModelRegistry(model), persona: testPersona, settings });
+    await agent.start();
+
+    const replies: OutboundMessage[] = [];
+    agent.onReply((msg) => replies.push(msg));
+
+    // First message — triggers large promptTokens
+    agent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
+    await Bun.sleep(500);
+
+    // Second message — triggers compact; summarize fails → mechanical summary
+    agent.send({ text: "how are you", channel: { type: "cli", channelId: "test" } });
+    await Bun.sleep(500);
+
+    // Verify compact happened: archive file should exist
+    const { readdir } = await import("node:fs/promises");
+    const files = await readdir(`${testDataDir}/agents/main/session`);
+    const archives = files.filter((f: string) => f.endsWith(".jsonl") && f !== "current.jsonl");
+    expect(archives.length).toBeGreaterThanOrEqual(1);
+
+    // Verify the current session contains the mechanical summary format
+    const currentSession = await Bun.file(
+      `${testDataDir}/agents/main/session/current.jsonl`,
+    ).text();
+    expect(currentSession).toContain("messages archived");
+    expect(currentSession).toContain("Recent user messages");
+
+    await agent.stop();
+  }, 15_000);
+
   // ── Skill system tests ──
 
   it("should include skill metadata in system prompt when skills exist", async () => {
@@ -2350,6 +2435,30 @@ describe("MainAgent", () => {
       const fn = agent.getStoreImageFn();
       expect(fn).toBeDefined();
       expect(typeof fn).toBe("function");
+    });
+
+    it("should call imageManager.store when the returned function is invoked", async () => {
+      const model = createReplyModel("ok");
+      const settings = testSettings();
+
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings,
+      });
+
+      // Replace the imageManager with a mock to avoid filesystem operations
+      const mockStore = mock(() =>
+        Promise.resolve({ id: "img-abc123", mimeType: "image/png", path: "/fake/path.png" }),
+      );
+      (agent as any).imageManager = { store: mockStore, read: mock(), close: mock() };
+
+      const fn = agent.getStoreImageFn();
+      expect(fn).toBeDefined();
+
+      const result = await fn!(Buffer.from("fake-image-data"), "image/png", "test-source");
+      expect(result).toEqual({ id: "img-abc123", mimeType: "image/png" });
+      expect(mockStore).toHaveBeenCalledTimes(1);
     });
   });
 
