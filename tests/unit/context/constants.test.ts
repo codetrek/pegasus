@@ -2,7 +2,6 @@
 import { describe, it, expect } from "bun:test";
 import {
   CONTEXT_WINDOW_HARD_MIN_TOKENS,
-  CONTEXT_WINDOW_WARN_BELOW_TOKENS,
   DEFAULT_CONTEXT_WINDOW,
   DEFAULT_OUTPUT_RESERVE_TOKENS,
   MIN_OUTPUT_RESERVE_TOKENS,
@@ -19,7 +18,6 @@ import {
 describe("context constants", () => {
   it("defines context window limits", () => {
     expect(CONTEXT_WINDOW_HARD_MIN_TOKENS).toBe(16_000);
-    expect(CONTEXT_WINDOW_WARN_BELOW_TOKENS).toBe(32_000);
     expect(DEFAULT_CONTEXT_WINDOW).toBe(128_000);
   });
 

@@ -8,9 +8,6 @@
 /** Hard minimum context window. Below this, refuse to run. */
 export const CONTEXT_WINDOW_HARD_MIN_TOKENS = 16_000;
 
-/** Warn if context window below this. */
-export const CONTEXT_WINDOW_WARN_BELOW_TOKENS = 32_000;
-
 /** Default context window when model is unknown. */
 export const DEFAULT_CONTEXT_WINDOW = 128_000;
 

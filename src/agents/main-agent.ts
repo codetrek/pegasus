@@ -569,6 +569,7 @@ export class MainAgent {
           tools: tools.length ? tools : undefined,
           toolChoice: tools.length ? "auto" : undefined,
         });
+        this._overflowRetryCount = 0;
       } else {
         throw err;
       }
