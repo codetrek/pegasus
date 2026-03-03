@@ -67,11 +67,6 @@ let projectSkillDirs: Array<{ dir: string; source: "builtin" | "user" }> = [];
 let workerChannelType: string = "unknown";
 let workerChannelId: string = "unknown";
 
-// Original inbound channel info — stored when a channel Project Worker
-// receives a message with external channel info (e.g., from Telegram).
-// Used by sendNotify() to route replies back to the original external channel.
-let lastInboundChannel: { type: string; channelId: string; userId?: string; replyTo?: string } | null = null;
-
 /**
  * Expose module-level state for unit testing.
  * Not used in production — only accessed by tests to verify state transitions.
@@ -89,8 +84,6 @@ export const _testState = {
   setSkillRegistry: (r: SkillRegistry | null) => { projectSkillRegistry = r; },
   getSkillDirs: () => projectSkillDirs,
   setSkillDirs: (d: Array<{ dir: string; source: "builtin" | "user" }>) => { projectSkillDirs = d; },
-  getLastInboundChannel: () => lastInboundChannel,
-  setLastInboundChannel: (ch: { type: string; channelId: string; userId?: string; replyTo?: string } | null) => { lastInboundChannel = ch; },
 };
 
 // ── Message handler ──────────────────────────────────
@@ -109,7 +102,7 @@ export async function dispatchMessage(data: Record<string, unknown>): Promise<vo
       break;
 
     case "message":
-      handleMessage(data.message as { text: string; channel?: { type: string; channelId: string; userId?: string; replyTo?: string } });
+      handleMessage(data.message as { text: string });
       break;
 
     case "llm_response":
@@ -366,15 +359,9 @@ export async function initSubAgent(config: SubAgentConfig): Promise<void> {
 
 // ── Message handling ─────────────────────────────────
 
-export function handleMessage(message: { text: string; channel?: { type: string; channelId: string; userId?: string; replyTo?: string } }): void {
+export function handleMessage(message: { text: string }): void {
   if (!agent) return;
   const text = typeof message === "string" ? message : message.text;
-  // Store original channel info for channel Project reply routing.
-  // When a channel Project Worker receives a message with external channel info
-  // (e.g., from Telegram), we preserve it so sendNotify() can route replies back.
-  if (typeof message === "object" && message.channel) {
-    lastInboundChannel = message.channel;
-  }
   agent.submit(text, "main-agent");
 }
 
@@ -519,30 +506,13 @@ export function notificationToText(notification: TaskNotification): string {
  * Includes channel info so MainAgent knows the source.
  * Optional metadata can be attached (e.g., subagentDone status).
  *
- * For channel Projects (workerChannelId starts with "channel:"), the original
- * external channel info is used instead of the project channel, and
- * `channelProjectResponse: true` metadata is added. This allows MainAgent to
- * forward the reply directly to the external channel without re-classification.
- *
  * Exported for unit testing.
  */
 export function sendNotify(text: string, metadata?: Record<string, unknown>): void {
-  // For channel Projects, use the original external channel info
-  // so MainAgent can forward the reply to the correct external channel.
-  let channel: { type: string; channelId: string; userId?: string; replyTo?: string };
-  let effectiveMetadata = metadata;
-
-  if (workerChannelId.startsWith("channel:") && lastInboundChannel) {
-    channel = lastInboundChannel;
-    effectiveMetadata = { ...metadata, channelProjectResponse: true };
-  } else {
-    channel = { type: workerChannelType, channelId: workerChannelId };
-  }
-
   const message: InboundMessage = {
     text,
-    channel,
-    ...(effectiveMetadata != null && { metadata: effectiveMetadata }),
+    channel: { type: workerChannelType, channelId: workerChannelId },
+    ...(metadata != null && { metadata }),
   };
   postToParent({ type: "notify", message });
 }

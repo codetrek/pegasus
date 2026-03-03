@@ -102,6 +102,8 @@ export class MainAgent {
   private imageManager: ImageManager | null = null; // null when vision disabled
   private imageReadCache: Map<string, { data: string; mimeType: string }> = new Map();
   private ownerStore: OwnerStore;
+  /** Maps channel Project name → last external ChannelInfo for reply routing. */
+  private _channelProjectReplyTargets = new Map<string, ChannelInfo>();
   private _channelNotifyTimes = new Map<string, number>();
   private systemPrompt: string = "";
   private _codexCredPath: string;
@@ -397,22 +399,6 @@ export class MainAgent {
 
   /** Send a message to Main Agent (fire-and-forget, queued). */
   send(message: InboundMessage): void {
-    // Channel Project responses carry external channel info + metadata flag.
-    // Forward directly to the external channel without re-classification.
-    // Without this, the reply would be classified as "untrusted" (since the
-    // userId is a non-owner) and routed back to the channel Project — infinite loop.
-    if (message.metadata?.channelProjectResponse && this.replyCallback) {
-      this.replyCallback({
-        text: message.text,
-        channel: message.channel,
-      });
-      logger.info(
-        { channelType: message.channel.type, channelId: message.channel.channelId },
-        "channel_project_response_forwarded",
-      );
-      return;
-    }
-
     const classification = classifyMessage(message, this.ownerStore);
 
     switch (classification.type) {
@@ -475,6 +461,28 @@ export class MainAgent {
     this.lastChannel = message.channel;
 
     const text = sanitizeForPrompt(message.text.trim());
+
+    // Forward channel Project notifications directly to the external channel.
+    // Channel Projects (named "channel:<type>") handle untrusted user messages
+    // in isolated Workers. Their responses should go to the external channel,
+    // NOT into MainAgent's session (owner shouldn't see strangers' conversations).
+    if (
+      message.channel.type === "project" &&
+      message.channel.channelId.startsWith("channel:")
+    ) {
+      const replyTarget = this._channelProjectReplyTargets.get(message.channel.channelId);
+      if (replyTarget && this.replyCallback) {
+        this.replyCallback({
+          text,
+          channel: replyTarget,
+        });
+        logger.info(
+          { project: message.channel.channelId, targetChannel: replyTarget.type },
+          "channel_project_response_forwarded",
+        );
+      }
+      return; // Don't process through MainAgent's LLM
+    }
 
     // Detect SubAgent completion/failure from tagged notify messages.
     // agent-worker.ts tags the final notify with metadata.subagentDone
@@ -1136,6 +1144,9 @@ export class MainAgent {
         return; // Can't route — discard silently
       }
     }
+
+    // Store the original channel info so we can route project replies back
+    this._channelProjectReplyTargets.set(projectName, message.channel);
 
     // Prepend channel metadata so the Project Worker knows the source context.
     // This mirrors how MainAgent formats messages in _handleMessage() — the LLM

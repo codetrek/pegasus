@@ -103,10 +103,11 @@ export class ProjectAdapter implements ChannelAdapter {
       logger.warn({ projectId }, "send_to_unknown_project");
       return;
     }
+    // Only pass text — Worker's handleMessage only uses text field.
+    // Channel routing is handled by MainAgent, not the Worker.
     this.workerAdapter.deliver("project", projectId, {
       text: message.text,
-      channel: message.channel,
-      ...(message.metadata != null && { metadata: message.metadata }),
+      channel: { type: "project", channelId: projectId },
     } as unknown as OutboundMessage);
   }
 

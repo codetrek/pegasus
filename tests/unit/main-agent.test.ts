@@ -3010,6 +3010,75 @@ describe("MainAgent", () => {
       await agent.stop();
     }, 10_000);
 
+    it("should forward channel project responses to original external channel", async () => {
+      // Register an owner for telegram, but the untrusted message comes from a different userId
+      const store = new OwnerStore(authDir);
+      store.add("telegram", "owner123");
+
+      const model = createMonologueModel("thinking...");
+      const mockWA = {
+        shutdownTimeoutMs: 30_000,
+        activeCount: 0,
+        startWorker: mock(() => {}),
+        stopWorker: mock(async () => {}),
+        stopAll: mock(async () => {}),
+        deliver: mock(() => true),
+        has: mock(() => false),
+        hasByKey: mock(() => false),
+        setModelRegistry: mock(() => {}),
+        setOnNotify: mock(() => {}),
+        setOnWorkerClose: mock(() => {}),
+        addOnWorkerClose: mock(() => {}),
+      } as unknown as WorkerAdapter;
+      const projectAdapter = new ProjectAdapter(mockWA);
+
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: trustSettings(),
+        _projectAdapter: projectAdapter,
+      });
+
+      await agent.start();
+
+      const replies: OutboundMessage[] = [];
+      agent.onReply((msg) => replies.push(msg));
+
+      // Step 1: Send an untrusted message — this populates _channelProjectReplyTargets
+      agent.send({
+        text: "hello from stranger",
+        channel: { type: "telegram", channelId: "chat456", userId: "stranger" },
+      });
+      await Bun.sleep(300);
+
+      // Step 2: Simulate a channel Project Worker sending its response back
+      // (The Worker sends notify with channel: { type: "project", channelId: "channel:telegram" })
+      agent.send({
+        text: "Hi there! How can I help?",
+        channel: { type: "project", channelId: "channel:telegram" },
+      });
+      await Bun.sleep(300);
+
+      // The channel project response should be forwarded to the original telegram channel
+      const forwardedReply = replies.find(
+        (r) => r.text === "Hi there! How can I help?" && r.channel.type === "telegram",
+      );
+      expect(forwardedReply).toBeDefined();
+      expect(forwardedReply!.channel.channelId).toBe("chat456");
+      expect(forwardedReply!.channel.userId).toBe("stranger");
+
+      // The forwarded message should NOT be in MainAgent's session
+      const sessionFile = Bun.file(
+        `${testDataDir}/agents/main/session/current.jsonl`,
+      );
+      if (await sessionFile.exists()) {
+        const content = await sessionFile.text();
+        expect(content).not.toContain("Hi there! How can I help?");
+      }
+
+      await agent.stop();
+    }, 10_000);
+
     it("should expose owner store via getter", () => {
       const model = createReplyModel("ok");
       const agent = new MainAgent({
