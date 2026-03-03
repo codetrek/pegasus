@@ -92,6 +92,7 @@ Tracked features, improvements, and ideas — what's done and what's next.
 - [ ] Per-user permission model: different tool access levels per user
 
 ### Multi-Channel — Remaining
+- [ ] Telegram 要支持发图片/voice
 - [ ] Slack channel adapter
 - [ ] SMS channel adapter
 - [ ] Web/API channel adapter
