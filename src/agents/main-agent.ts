@@ -1532,6 +1532,17 @@ export class MainAgent {
     return this.subAgentManager;
   }
 
+  /** Expose tick internals for testing. */
+  get _tick() {
+    return {
+      start: () => this._startTick(),
+      stop: () => this._stopTick(),
+      fire: () => this._onTick(),
+      isRunning: () => this._tickTimer !== null,
+      sessionMessages: this.sessionMessages,
+    };
+  }
+
   /**
    * Get a StoreImageFn callback for channel adapters.
    * Returns undefined when vision is disabled (imageManager is null).

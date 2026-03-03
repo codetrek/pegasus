@@ -117,4 +117,20 @@ describe("task_status", () => {
     expect(data.state).toBe("failed");
     expect(data.error).toBe("Something went wrong");
   });
+
+  it("should handle registry errors gracefully", async () => {
+    const brokenRegistry = {
+      listAll() { throw new Error("DB corrupted"); },
+      getOrNull() { throw new Error("DB corrupted"); },
+      activeCount: 0,
+      totalCount: 0,
+    };
+
+    const result = await task_status.execute(
+      {},
+      { taskId: "test", taskRegistry: brokenRegistry },
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("DB corrupted");
+  });
 });
