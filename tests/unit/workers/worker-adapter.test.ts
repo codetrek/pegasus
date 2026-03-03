@@ -50,6 +50,9 @@ function createMockRegistry(model: LanguageModel): ModelRegistry {
   return {
     getForTier: () => model,
     getContextWindowForTier: () => undefined,
+    getModelIdForTier: () => model.modelId,
+    getModelSpecForTier: () => `${model.provider}/${model.modelId}`,
+    resolve: () => model,
   } as unknown as ModelRegistry;
 }
 
@@ -274,6 +277,80 @@ describe("WorkerAdapter — _handleLLMRequest", () => {
       error: "raw string error",
     });
   });
+
+  it("should use modelOverride when provided in LLM request", async () => {
+    const adapter = new WorkerAdapter("/fake-worker.ts");
+
+    const posted: unknown[] = [];
+    const mockWorker = { postMessage: (data: unknown) => posted.push(data) } as unknown as Worker;
+    (adapter as any).workers.set("project:test-proj", mockWorker);
+
+    const stubResult: GenerateTextResult = {
+      text: "Hello from override model",
+      finishReason: "stop",
+      usage: { promptTokens: 5, completionTokens: 10 },
+    };
+
+    // Track which method was called
+    let resolvedSpec: string | undefined;
+    let usedTier = false;
+
+    const mockRegistry = {
+      getForTier: () => { usedTier = true; return createStubModel(stubResult); },
+      getContextWindowForTier: () => undefined,
+      getModelIdForTier: () => "balanced-model",
+      resolve: (spec: string) => { resolvedSpec = spec; return createStubModel(stubResult); },
+    } as unknown as ModelRegistry;
+    adapter.setModelRegistry(mockRegistry);
+
+    await adapter._handleLLMRequest("project:test-proj", {
+      type: "llm_request",
+      requestId: "req-override",
+      options: { messages: [] },
+      modelOverride: "anthropic/claude-sonnet-4",
+    });
+
+    expect(resolvedSpec).toBe("anthropic/claude-sonnet-4");
+    expect(usedTier).toBe(false); // Should NOT fall back to tier
+    expect(posted).toHaveLength(1);
+    expect((posted[0] as any).type).toBe("llm_response");
+  });
+
+  it("should fall back to balanced tier when no modelOverride in LLM request", async () => {
+    const adapter = new WorkerAdapter("/fake-worker.ts");
+
+    const posted: unknown[] = [];
+    const mockWorker = { postMessage: (data: unknown) => posted.push(data) } as unknown as Worker;
+    (adapter as any).workers.set("project:test-proj", mockWorker);
+
+    const stubResult: GenerateTextResult = {
+      text: "Hello from tier model",
+      finishReason: "stop",
+      usage: { promptTokens: 5, completionTokens: 10 },
+    };
+
+    let usedTier = false;
+    let resolvedSpec: string | undefined;
+
+    const mockRegistry = {
+      getForTier: () => { usedTier = true; return createStubModel(stubResult); },
+      getContextWindowForTier: () => undefined,
+      getModelIdForTier: () => "balanced-model",
+      resolve: (spec: string) => { resolvedSpec = spec; return createStubModel(stubResult); },
+    } as unknown as ModelRegistry;
+    adapter.setModelRegistry(mockRegistry);
+
+    await adapter._handleLLMRequest("project:test-proj", {
+      type: "llm_request",
+      requestId: "req-no-override",
+      options: { messages: [] },
+      // No modelOverride
+    });
+
+    expect(usedTier).toBe(true); // Should use balanced tier
+    expect(resolvedSpec).toBeUndefined(); // Should NOT call resolve
+    expect(posted).toHaveLength(1);
+  });
 });
 
 // ── WorkerAdapter — Worker lifecycle (mocked Worker) ─────────────────
@@ -337,6 +414,7 @@ describe("WorkerAdapter — Worker lifecycle (mocked Worker)", () => {
       const mockRegistry = {
         getForTier: () => ({}),
         getContextWindowForTier: () => 128000,
+        getModelSpecForTier: () => "openai/test-model",
       } as unknown as ModelRegistry;
       adapter.setModelRegistry(mockRegistry);
 
@@ -345,6 +423,7 @@ describe("WorkerAdapter — Worker lifecycle (mocked Worker)", () => {
       const fakeWorker = instances[0]!;
       const initMsg = fakeWorker.posted[0] as any;
       expect(initMsg.config.contextWindow).toBe(128000);
+      expect(initMsg.config.proxyModelId).toBe("openai/test-model");
     } finally {
       globalThis.Worker = OriginalWorker;
     }
