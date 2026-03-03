@@ -2562,4 +2562,224 @@ describe("MainAgent", () => {
       expect(tickMessages).toHaveLength(0);
     }, 15_000);
   });
+
+  // ── reload_skills ──────────────────────────────────────────
+
+  describe("reload_skills tool", () => {
+    it("should reload skill registry and rebuild system prompt when LLM calls reload_skills", async () => {
+      // Set up a skill directory with one skill
+      const tmpDir = `/tmp/pegasus-test-main-agent-reload-skills-${process.pid}-${Date.now()}`;
+      const globalSkillDir = `${tmpDir}/skills`;
+      const skillDir = `${globalSkillDir}/dynamic-skill`;
+      await mkdir(skillDir, { recursive: true });
+      await Bun.write(`${skillDir}/SKILL.md`, [
+        "---",
+        "name: dynamic-skill",
+        "description: A dynamically installed skill",
+        "---",
+        "",
+        "Instructions for dynamic-skill.",
+      ].join("\n"));
+
+      let callCount = 0;
+      let capturedSystem = "";
+      let capturedMessages: Message[] = [];
+      const model: LanguageModel = {
+        provider: "test",
+        modelId: "test-model",
+        async generate(options: { system?: string; messages?: Message[] }): Promise<GenerateTextResult> {
+          callCount++;
+          capturedSystem = options.system ?? "";
+          capturedMessages = options.messages ?? [];
+          if (callCount === 1) {
+            // LLM calls reload_skills
+            return {
+              text: "Skills changed, reloading.",
+              finishReason: "tool_calls",
+              toolCalls: [{
+                id: "tc-reload",
+                name: "reload_skills",
+                arguments: {},
+              }],
+              usage: { promptTokens: 10, completionTokens: 10 },
+            };
+          }
+          if (callCount === 2) {
+            // After reload, LLM replies
+            return {
+              text: "",
+              finishReason: "tool_calls",
+              toolCalls: [{ id: "tc-reply", name: "reply", arguments: { text: "Skills reloaded!", channelType: "cli", channelId: "test" } }],
+              usage: { promptTokens: 20, completionTokens: 10 },
+            };
+          }
+          return { text: "", finishReason: "stop", usage: { promptTokens: 5, completionTokens: 0 } };
+        },
+      };
+
+      const settings = SettingsSchema.parse({ dataDir: tmpDir, logLevel: "warn", authDir: "/tmp/pegasus-test-auth" });
+      const agent = new MainAgent({ models: createMockModelRegistry(model), persona: testPersona, settings });
+      await agent.start();
+
+      // Before reload: dynamic-skill should already be loaded (in global skill dir)
+      expect(agent.skills.has("dynamic-skill")).toBe(true);
+
+      // Now add another skill to disk AFTER start
+      const newSkillDir = `${globalSkillDir}/new-skill`;
+      await mkdir(newSkillDir, { recursive: true });
+      await Bun.write(`${newSkillDir}/SKILL.md`, [
+        "---",
+        "name: new-skill",
+        "description: A brand new skill",
+        "---",
+        "",
+        "New skill instructions.",
+      ].join("\n"));
+
+      // Before reload_skills is called, new-skill is NOT in registry
+      expect(agent.skills.has("new-skill")).toBe(false);
+
+      const replies: OutboundMessage[] = [];
+      agent.onReply((msg) => replies.push(msg));
+
+      agent.send({ text: "reload please", channel: { type: "cli", channelId: "test" } });
+      await Bun.sleep(500);
+
+      // After reload_skills tool was processed:
+      // 1. new-skill should now be in registry
+      expect(agent.skills.has("new-skill")).toBe(true);
+      // 2. The tool result should contain reloaded + skillCount
+      const toolResults = capturedMessages.filter((m) => m.role === "tool");
+      const reloadResult = toolResults.find((m) => m.content?.includes("reloaded"));
+      expect(reloadResult).toBeDefined();
+      expect(reloadResult!.content).toContain('"reloaded":true');
+      // 3. The system prompt (captured on 2nd call) should contain new-skill
+      expect(capturedSystem).toContain("new-skill");
+
+      expect(replies.length).toBeGreaterThanOrEqual(1);
+      expect(replies[0]!.text).toBe("Skills reloaded!");
+
+      await agent.stop();
+      await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    }, 15_000);
+
+    it("should broadcast skills_reload to project Workers", async () => {
+      const tmpDir = `/tmp/pegasus-test-main-agent-broadcast-${process.pid}-${Date.now()}`;
+
+      let callCount = 0;
+      const model: LanguageModel = {
+        provider: "test",
+        modelId: "test-model",
+        async generate(): Promise<GenerateTextResult> {
+          callCount++;
+          if (callCount === 1) {
+            return {
+              text: "Reloading.",
+              finishReason: "tool_calls",
+              toolCalls: [{ id: "tc-reload", name: "reload_skills", arguments: {} }],
+              usage: { promptTokens: 10, completionTokens: 10 },
+            };
+          }
+          if (callCount === 2) {
+            return {
+              text: "",
+              finishReason: "tool_calls",
+              toolCalls: [{ id: "tc-reply", name: "reply", arguments: { text: "Done", channelType: "cli", channelId: "test" } }],
+              usage: { promptTokens: 10, completionTokens: 10 },
+            };
+          }
+          return { text: "", finishReason: "stop", usage: { promptTokens: 5, completionTokens: 0 } };
+        },
+      };
+
+      // Create a mock WorkerAdapter to capture broadcast calls
+      const broadcastCalls: Array<{ channelType: string; message: unknown }> = [];
+      const workerAdapter = new WorkerAdapter("/fake-worker.ts");
+      workerAdapter.broadcast = (channelType: string, message: unknown) => {
+        broadcastCalls.push({ channelType, message });
+        // Don't call origBroadcast — no real workers to send to
+      };
+
+      const projectAdapter = new ProjectAdapter(workerAdapter);
+
+      const settings = SettingsSchema.parse({ dataDir: tmpDir, logLevel: "warn", authDir: "/tmp/pegasus-test-auth" });
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings,
+        _projectAdapter: projectAdapter,
+      });
+      await agent.start();
+
+      const replies: OutboundMessage[] = [];
+      agent.onReply((msg) => replies.push(msg));
+
+      agent.send({ text: "reload", channel: { type: "cli", channelId: "test" } });
+      await Bun.sleep(500);
+
+      // Verify broadcast was called with skills_reload
+      expect(broadcastCalls.length).toBeGreaterThanOrEqual(1);
+      const skillsReloadBroadcast = broadcastCalls.find(
+        (c) => c.channelType === "project" && (c.message as any).type === "skills_reload"
+      );
+      expect(skillsReloadBroadcast).toBeDefined();
+
+      await agent.stop();
+      await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    }, 15_000);
+
+    it("should handle reload_skills with no skills on disk", async () => {
+      // Empty data dir — no skills at all
+      let callCount = 0;
+      let capturedMessages: Message[] = [];
+      const model: LanguageModel = {
+        provider: "test",
+        modelId: "test-model",
+        async generate(options: { messages?: Message[] }): Promise<GenerateTextResult> {
+          callCount++;
+          capturedMessages = options.messages ?? [];
+          if (callCount === 1) {
+            return {
+              text: "Reloading.",
+              finishReason: "tool_calls",
+              toolCalls: [{ id: "tc-reload", name: "reload_skills", arguments: {} }],
+              usage: { promptTokens: 10, completionTokens: 10 },
+            };
+          }
+          if (callCount === 2) {
+            return {
+              text: "",
+              finishReason: "tool_calls",
+              toolCalls: [{ id: "tc-reply", name: "reply", arguments: { text: "OK", channelType: "cli", channelId: "test" } }],
+              usage: { promptTokens: 10, completionTokens: 10 },
+            };
+          }
+          return { text: "", finishReason: "stop", usage: { promptTokens: 5, completionTokens: 0 } };
+        },
+      };
+
+      const settings = testSettings();
+      const agent = new MainAgent({ models: createMockModelRegistry(model), persona: testPersona, settings });
+      await agent.start();
+
+      const replies: OutboundMessage[] = [];
+      agent.onReply((msg) => replies.push(msg));
+
+      agent.send({ text: "reload", channel: { type: "cli", channelId: "test" } });
+      await Bun.sleep(500);
+
+      // Should not crash, tool result should show skillCount
+      const toolResults = capturedMessages.filter((m) => m.role === "tool");
+      const reloadResult = toolResults.find((m) => m.content?.includes("reloaded"));
+      expect(reloadResult).toBeDefined();
+      // skillCount includes builtin skills (commit, review, clawhub) even with empty data dir
+      const parsed = JSON.parse(reloadResult!.content);
+      expect(parsed.reloaded).toBe(true);
+      expect(parsed.skillCount).toBeGreaterThanOrEqual(0);
+
+      expect(replies.length).toBeGreaterThanOrEqual(1);
+
+      await agent.stop();
+    }, 15_000);
+  });
 });
