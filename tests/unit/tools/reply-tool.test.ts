@@ -63,4 +63,30 @@ describe("reply tool", () => {
     const data = result.result as { replyTo?: string };
     expect(data.replyTo).toBeUndefined();
   });
+
+  it("should pass through imageIds in result", async () => {
+    const result = await reply.execute(
+      { text: "here", channelType: "telegram", channelId: "123", imageIds: ["abc", "def"] },
+      { taskId: "test" },
+    );
+    expect(result.success).toBe(true);
+    const r = result.result as { imageIds?: string[] };
+    expect(r.imageIds).toEqual(["abc", "def"]);
+  });
+
+  it("should work without imageIds (backward compat)", async () => {
+    const result = await reply.execute(
+      { text: "hi", channelType: "cli", channelId: "main" },
+      { taskId: "test" },
+    );
+    expect(result.success).toBe(true);
+    const r = result.result as { imageIds?: string[] };
+    expect(r.imageIds).toBeUndefined();
+  });
+
+  it("should have imageIds in parameter schema", () => {
+    const schema = reply.parameters as import("zod").ZodObject<Record<string, import("zod").ZodTypeAny>>;
+    // Verify imageIds is defined in the schema shape
+    expect(schema.shape).toHaveProperty("imageIds");
+  });
 });

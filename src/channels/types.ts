@@ -25,10 +25,18 @@ export interface InboundMessage {
   metadata?: Record<string, unknown>;
 }
 
+/** Structured content for outbound messages. */
+export interface OutboundContent {
+  text: string;
+  images?: Array<{ id: string; data: string; mimeType: string }>;
+  // Future: fileId?, audioId?
+}
+
 /** Outbound response from Main Agent. */
 export interface OutboundMessage {
-  text: string;
+  text: string;  // Keep for backward compat (plain text shorthand)
   channel: ChannelInfo;
+  content?: OutboundContent;  // Structured content (when images present)
   metadata?: Record<string, unknown>;
 }
 

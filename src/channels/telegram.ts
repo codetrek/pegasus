@@ -118,11 +118,46 @@ export class TelegramAdapter implements ChannelAdapter {
 
   async deliver(message: OutboundMessage): Promise<void> {
     const chatId = Number(message.channel.channelId);
-    const options: Record<string, unknown> = { parse_mode: "Markdown" };
-    if (message.channel.replyTo) {
-      options.message_thread_id = Number(message.channel.replyTo);
+    const threadId = message.channel.replyTo
+      ? Number(message.channel.replyTo)
+      : undefined;
+
+    const images = message.content?.images;
+
+    if (images?.length) {
+      if (images.length === 1) {
+        // Single image: sendPhoto with caption
+        const img = images[0]!;
+        const buffer = Buffer.from(img.data, "base64");
+        const { InputFile } = await import("grammy");
+        await this.bot.api.sendPhoto(
+          chatId,
+          new InputFile(buffer, `${img.id}.jpg`),
+          {
+            caption: message.content?.text || message.text || undefined,
+            parse_mode: "Markdown",
+            ...(threadId ? { message_thread_id: threadId } : {}),
+          },
+        );
+      } else {
+        // Multiple images: sendMediaGroup
+        const { InputFile } = await import("grammy");
+        const media = images.map((img, i) => ({
+          type: "photo" as const,
+          media: new InputFile(Buffer.from(img.data, "base64"), `${img.id}.jpg`),
+          ...(i === 0 ? { caption: message.content?.text || message.text || undefined, parse_mode: "Markdown" as const } : {}),
+        }));
+        await this.bot.api.sendMediaGroup(chatId, media, {
+          ...(threadId ? { message_thread_id: threadId } : {}),
+        });
+      }
+    } else {
+      // Text-only message (existing behavior)
+      await this.bot.api.sendMessage(chatId, message.text, {
+        parse_mode: "Markdown",
+        ...(threadId ? { message_thread_id: threadId } : {}),
+      });
     }
-    await this.bot.api.sendMessage(chatId, message.text, options);
   }
 
   async stop(): Promise<void> {

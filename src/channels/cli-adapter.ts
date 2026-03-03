@@ -128,7 +128,13 @@ export class CLIAdapter implements ChannelAdapter {
   }
 
   async deliver(message: OutboundMessage): Promise<void> {
-    console.log(`\n  ${this.personaName}: ${message.text}\n`);
+    console.log(`\n  ${this.personaName}: ${message.text}`);
+    if (message.content?.images?.length) {
+      for (const img of message.content.images) {
+        console.log(`  📎 [Image: ${img.id}]`);
+      }
+    }
+    console.log("");
     this.rl.prompt();
   }
 

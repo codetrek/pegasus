@@ -555,11 +555,12 @@ export class MainAgent {
 
       for (const tc of result.toolCalls) {
         if (tc.name === "reply") {
-          const { text, channelType, channelId, replyTo } = tc.arguments as {
+          const { text, channelType, channelId, replyTo, imageIds } = tc.arguments as {
             text: string;
             channelType?: string;
             channelId: string;
             replyTo?: string;
+            imageIds?: string[];
           };
           const toolMsg: Message = {
             role: "tool",
@@ -569,10 +570,27 @@ export class MainAgent {
           this.sessionMessages.push(toolMsg);
           await this.sessionStore.append(toolMsg);
           if (this.replyCallback) {
-            this.replyCallback({
+            // Build outbound message
+            const outbound: OutboundMessage = {
               text,
               channel: { type: channelType ?? channel.type, channelId, replyTo },
-            });
+            };
+
+            // If imageIds provided, read image data and attach as structured content
+            if (imageIds?.length && this.imageManager) {
+              const images: Array<{ id: string; data: string; mimeType: string }> = [];
+              for (const id of imageIds) {
+                const img = await this.imageManager.read(id);
+                if (img) {
+                  images.push({ id, data: img.data, mimeType: img.mimeType });
+                }
+              }
+              if (images.length > 0) {
+                outbound.content = { text, images };
+              }
+            }
+
+            this.replyCallback(outbound);
           }
         } else if (tc.name === "spawn_task") {
           await this._handleSpawnTask(tc);
