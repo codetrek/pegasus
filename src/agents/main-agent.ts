@@ -27,9 +27,11 @@ import { Agent } from "./agent.ts";
 import type { TaskNotification } from "./agent.ts";
 import type { ToolCall } from "../models/tool.ts";
 import { EstimateCounter } from "../infra/token-counter.ts";
-import { computeTokenBudget, calculateMaxToolResultChars, truncateToolResult, summarizeMessages, isContextOverflowError, MAX_OVERFLOW_COMPACT_RETRIES } from "../context/index.ts";
+import { computeTokenBudget, calculateMaxToolResultChars, truncateToolResult, summarizeMessages, isContextOverflowError, MAX_OVERFLOW_COMPACT_RETRIES, ModelLimitsCache, CopilotModelFetcher, OpenRouterModelFetcher } from "../context/index.ts";
+import type { ProviderModelFetcher } from "../context/index.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import path from "node:path";
+import os from "node:os";
 import { SkillRegistry } from "../skills/index.ts";
 import { AITaskTypeRegistry, loadAITaskTypeDefinitions } from "../aitask-types/index.ts";
 import {
@@ -104,8 +106,11 @@ export class MainAgent {
   private ownerStore: OwnerStore;
   private _channelNotifyTimes = new Map<string, number>();
   private systemPrompt: string = "";
+  private modelLimitsCache!: ModelLimitsCache;
   private _codexCredPath: string;
   private _copilotCredPath: string;
+  private _copilotBaseURL?: string;
+  private _copilotTokenProvider?: () => Promise<string>;
   private _mcpAuthDir: string;
   private _tickTimer: ReturnType<typeof setTimeout> | null = null;
   private _tickFirstIntervalMs = 30_000; // first tick after 30s
@@ -178,6 +183,13 @@ export class MainAgent {
     // Authenticate Copilot provider if configured
     await this._initCopilotAuth();
 
+    // Initialize model limits cache for provider-aware token budget resolution
+    const modelLimitsCacheDir = path.join(os.homedir(), ".pegasus", "model-limits");
+    this.modelLimitsCache = new ModelLimitsCache(modelLimitsCacheDir);
+
+    // Fetch model limits from provider APIs
+    await this._initModelLimits();
+
     // Task execution engine — created AFTER codex auth so models can resolve codex models
     try {
       this.agent = new Agent({
@@ -186,6 +198,7 @@ export class MainAgent {
         persona: this.persona,
         settings: this.settings,
         storePaths: this.mainStorePaths,
+        modelLimitsCache: this.modelLimitsCache,
       });
     } catch (err) {
       // If codex auth failed and default model is codex, this will throw.
@@ -757,7 +770,9 @@ export class MainAgent {
             : `Error: ${toolResult.error}`;
           const toolBudget = computeTokenBudget({
             modelId: this.models.getDefaultModelId(),
+            provider: this.models.getDefaultProvider(),
             configContextWindow: this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
+            modelLimitsCache: this.modelLimitsCache,
           });
           const maxToolChars = calculateMaxToolResultChars(toolBudget.contextWindow, this.settings.context?.maxToolResultShare);
           const safeContent = rawContent.length > maxToolChars
@@ -1195,9 +1210,10 @@ export class MainAgent {
   private async _checkAndCompact(): Promise<boolean> {
     const budget = computeTokenBudget({
       modelId: this.models.getDefaultModelId(),
+      provider: this.models.getDefaultProvider(),
       configContextWindow: this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
-      outputReserveTokens: this.settings.context?.outputReserveTokens,
       compactThreshold: this.settings.session?.compactThreshold,
+      modelLimitsCache: this.modelLimitsCache,
     });
 
     // Estimate current token usage
@@ -1353,7 +1369,9 @@ export class MainAgent {
       memoryDir,
       contextWindowSize: computeTokenBudget({
         modelId: reflectionModel.modelId,
+        provider: this.models.getProviderForTier("fast"),
         configContextWindow: this.models.getContextWindowForTier("fast") ?? this.settings.llm.contextWindow,
+        modelLimitsCache: this.modelLimitsCache,
       }).contextWindow,
     });
 
@@ -1375,6 +1393,7 @@ export class MainAgent {
       messages: this.sessionMessages,
       model: this.models.getForTier("fast"),
       configContextWindow: this.models.getContextWindowForTier("fast"),
+      modelLimitsCache: this.modelLimitsCache,
     });
   }
 
@@ -1514,6 +1533,69 @@ export class MainAgent {
   }
 
   /**
+   * Fetch model limits from enabled providers.
+   * First-run (no disk cache): await fetch (blocking).
+   * Subsequent (disk cache exists): background refresh (non-blocking).
+   */
+  private async _initModelLimits(): Promise<void> {
+    const awaitable: Promise<void>[] = [];
+    const background: Promise<void>[] = [];
+
+    const doFetch = (fetcher: ProviderModelFetcher) => () => {
+      return fetcher.fetch().then((models) => {
+        if (models.size > 0) {
+          this.modelLimitsCache.update(fetcher.provider, models);
+          logger.info({ provider: fetcher.provider, count: models.size }, "model_limits_updated");
+        }
+      });
+    };
+
+    // Copilot
+    if (this._copilotTokenProvider && this._copilotBaseURL) {
+      const fetcher = new CopilotModelFetcher(this._copilotTokenProvider, this._copilotBaseURL);
+      const task = doFetch(fetcher);
+      if (this.modelLimitsCache.hasProviderCache("copilot")) {
+        background.push(task().catch(err =>
+          logger.warn({ provider: "copilot", error: String(err) }, "model_limits_bg_refresh_failed")
+        ));
+      } else {
+        awaitable.push(task().catch(err =>
+          logger.warn({ provider: "copilot", error: String(err) }, "model_limits_first_fetch_failed")
+        ));
+      }
+    }
+
+    // OpenRouter
+    const orConfig = this.settings.llm?.openrouter;
+    if (orConfig?.enabled && orConfig?.apiKey) {
+      const fetcher = new OpenRouterModelFetcher(orConfig.apiKey);
+      const task = doFetch(fetcher);
+      if (this.modelLimitsCache.hasProviderCache("openrouter")) {
+        background.push(task().catch(err =>
+          logger.warn({ provider: "openrouter", error: String(err) }, "model_limits_bg_refresh_failed")
+        ));
+      } else {
+        awaitable.push(task().catch(err =>
+          logger.warn({ provider: "openrouter", error: String(err) }, "model_limits_first_fetch_failed")
+        ));
+      }
+    }
+
+    // Await first-run fetches (blocking — adds seconds to first startup)
+    if (awaitable.length > 0) {
+      logger.info({ count: awaitable.length }, "model_limits_first_run_awaiting");
+      await Promise.all(awaitable);
+    }
+
+    // Background refreshes fire-and-forget
+    if (background.length > 0) {
+      Promise.all(background).then(() =>
+        logger.info("model_limits_bg_refresh_complete")
+      );
+    }
+  }
+
+  /**
    * Async Copilot auth — runs GitHub device code login if no stored credentials.
    * Called from start() so it can do async operations (token exchange, interactive login).
    * Uses pi-ai's loginGitHubCopilot and refreshGitHubCopilotToken.
@@ -1569,6 +1651,20 @@ export class MainAgent {
         this._copilotCredPath,
       );
       logger.info("copilot_auth_ready");
+
+      // Store connection info for model limits fetching
+      this._copilotBaseURL = baseURL;
+      this._copilotTokenProvider = async () => {
+        // Read fresh credentials from disk (they may have been refreshed)
+        const freshCreds = this._loadOAuthCredentials(this._copilotCredPath);
+        if (!freshCreds) throw new Error("No Copilot credentials");
+        if (Date.now() >= freshCreds.expires) {
+          const refreshed = await refreshGitHubCopilotToken(freshCreds.refresh);
+          this._saveOAuthCredentials(this._copilotCredPath, refreshed);
+          return refreshed.access;
+        }
+        return freshCreds.access;
+      };
     } catch (err) {
       logger.error(
         { error: errorToString(err) },
@@ -1739,7 +1835,9 @@ export class MainAgent {
     // Get skill metadata with budget
     const contextWindow = computeTokenBudget({
       modelId: this.models.getDefaultModelId(),
+      provider: this.models.getDefaultProvider(),
       configContextWindow: this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
+      modelLimitsCache: this.modelLimitsCache,
     }).contextWindow;
     const skillBudget = Math.max(Math.floor(contextWindow * 0.02 * 4), 16_000);
     const skillMetadata = this.skillRegistry.getMetadataForPrompt(skillBudget);

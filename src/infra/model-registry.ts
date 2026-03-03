@@ -174,6 +174,18 @@ export class ModelRegistry {
     return this._resolveTier(tier).contextWindow;
   }
 
+  /** Get provider name for the default model. */
+  getDefaultProvider(): string {
+    const resolved = this._resolveDefault();
+    return this._extractProvider(resolved.model);
+  }
+
+  /** Get provider name for a tier model. */
+  getProviderForTier(tier: ModelTier): string {
+    const resolved = this._resolveTier(tier);
+    return this._extractProvider(resolved.model);
+  }
+
   // ── Internal resolution ────────────────────────────────────────
 
   /** Resolve the default spec. */
@@ -190,6 +202,12 @@ export class ModelRegistry {
   private _extractModelId(spec: string): string {
     const slashIdx = spec.indexOf("/");
     return slashIdx === -1 ? spec : spec.slice(slashIdx + 1);
+  }
+
+  /** Extract provider name from "provider/model" spec. Returns "" if no slash. */
+  private _extractProvider(spec: string): string {
+    const slashIdx = spec.indexOf("/");
+    return slashIdx === -1 ? "" : spec.slice(0, slashIdx);
   }
 
   /** Get or create a cached model instance from a resolved spec. */

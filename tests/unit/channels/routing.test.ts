@@ -42,6 +42,7 @@ function createMockModelRegistry(model: LanguageModel): ModelRegistry {
     contextWindow: undefined,
     codex: { enabled: false, baseURL: "https://chatgpt.com/backend-api", model: "gpt-5.3-codex" },
     copilot: { enabled: false },
+    openrouter: { enabled: false },
   };
   const registry = new ModelRegistry(llmConfig);
   (registry as any).cache.set("test/test-model", model);

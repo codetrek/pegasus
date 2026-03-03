@@ -51,12 +51,18 @@ export const CopilotConfigSchema = z.object({
   enabled: booleanFromString.default(false),
 });
 
+export const OpenRouterConfigSchema = z.object({
+  enabled: booleanFromString.default(false),
+  apiKey: z.string().optional(),
+});
+
 export const LLMConfigSchema = z.object({
   providers: z.record(z.string(), ProviderConfigSchema).default({}),
   default: RoleValueSchema.default("openai/gpt-4o-mini"),
   tiers: TiersConfigSchema,
   codex: CodexConfigSchema.default({}),
   copilot: CopilotConfigSchema.default({}),
+  openrouter: OpenRouterConfigSchema.default({}),
 
   // System-wide settings
   maxConcurrentCalls: z.coerce.number().int().positive().default(3),
@@ -222,6 +228,7 @@ export const SettingsSchema = z.object({
 export type LLMConfig = z.infer<typeof LLMConfigSchema>;
 export type CodexConfig = z.infer<typeof CodexConfigSchema>;
 export type CopilotConfig = z.infer<typeof CopilotConfigSchema>;
+export type OpenRouterConfig = z.infer<typeof OpenRouterConfigSchema>;
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 export type RoleValue = z.infer<typeof RoleValueSchema>;
 export type TiersConfig = z.infer<typeof TiersConfigSchema>;

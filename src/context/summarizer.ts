@@ -15,6 +15,7 @@
 import type { LanguageModel, Message } from "../infra/llm-types.ts";
 import { getLogger } from "../infra/logger.ts";
 import { computeTokenBudget, estimateTokensFromChars } from "./budget.ts";
+import type { ModelLimitsCache } from "./model-limits-cache.ts";
 import { TOKEN_ESTIMATION_SAFETY_MARGIN } from "./constants.ts";
 
 const logger = getLogger("context.summarizer");
@@ -34,6 +35,8 @@ export interface SummarizeOptions {
   model: LanguageModel;
   /** Override context window (tokens). If omitted, looked up from model registry. */
   configContextWindow?: number;
+  /** Cache for provider-fetched model limits. */
+  modelLimitsCache?: ModelLimitsCache;
 }
 
 // ── Serialization ──
@@ -129,7 +132,7 @@ const SUMMARIZE_SYSTEM = [
 export async function summarizeMessages(
   options: SummarizeOptions,
 ): Promise<string> {
-  const { messages, model, configContextWindow } = options;
+  const { messages, model, configContextWindow, modelLimitsCache } = options;
 
   if (messages.length === 0) return "";
 
@@ -137,6 +140,7 @@ export async function summarizeMessages(
   const budget = computeTokenBudget({
     modelId: model.modelId,
     configContextWindow,
+    modelLimitsCache,
   });
 
   // We use effectiveInputBudget minus some room for the system prompt

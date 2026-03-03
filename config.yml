@@ -36,6 +36,13 @@ llm:
   copilot:
     enabled: ${COPILOT_ENABLED:-false}
 
+  # OpenRouter integration (for model limits discovery only)
+  # When enabled, Pegasus fetches real model limits from OpenRouter API.
+  # Actual LLM calls still go through providers with type: openai.
+  openrouter:
+    enabled: ${OPENROUTER_ENABLED:-false}
+    apiKey: ${OPENROUTER_API_KEY:-}
+
   # Provider configurations — each key becomes a provider name
   # Used in tiers/default as "providerName/modelName"
   providers:

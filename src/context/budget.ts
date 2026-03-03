@@ -7,88 +7,108 @@
  * All LLM call sites share this single function.
  */
 import {
-  DEFAULT_OUTPUT_RESERVE_TOKENS,
-  MIN_OUTPUT_RESERVE_TOKENS,
   TOKEN_ESTIMATION_SAFETY_MARGIN,
   DEFAULT_COMPACT_THRESHOLD,
   CHARS_PER_TOKEN,
   CONTEXT_WINDOW_HARD_MIN_TOKENS,
 } from "./constants.ts";
-import { getContextWindowSize, isModelKnown } from "./context-windows.ts";
+import type { ModelLimitsCache } from "./model-limits-cache.ts";
+import {
+  getModelLimits,
+  DEFAULT_MODEL_LIMITS,
+  type ModelLimits,
+} from "./model-limits.ts";
 
 /** Resolved token budget for a specific LLM call site. */
 export interface TokenBudget {
   /** Total context window for this model. */
   contextWindow: number;
-  /** Tokens reserved for model output. */
-  outputReserve: number;
-  /** Max tokens available for input (system + messages). */
-  inputBudget: number;
+  /** Max tokens the model can generate (from ModelLimits). */
+  maxOutputTokens: number;
+  /** Max tokens available for input — real provider limit. */
+  maxInputTokens: number;
   /** Input budget with safety margin applied. */
   effectiveInputBudget: number;
   /** Token count that triggers compact. */
   compactTrigger: number;
-  /** Source of context window value. */
-  source: "config" | "registry" | "default";
+  /** Source of model limits. */
+  source: "config" | "cache" | "registry" | "default";
 }
 
 export interface BudgetOptions {
   /** Model ID (e.g. "gpt-4o", "claude-sonnet-4.6"). */
   modelId: string;
+  /** Provider identifier for cache lookup (e.g. "copilot", "openrouter"). */
+  provider?: string;
   /** Config-level context window override. */
   configContextWindow?: number;
-  /** Config-level output reserve override. */
-  outputReserveTokens?: number;
   /** Compact threshold (0.0 - 1.0). Defaults to 0.8. */
   compactThreshold?: number;
+  /** Cache for provider-fetched model limits. */
+  modelLimitsCache?: ModelLimitsCache;
 }
 
 export function computeTokenBudget(options: BudgetOptions): TokenBudget {
-  // 1. Resolve context window
   let source: TokenBudget["source"];
-  let contextWindow: number;
+  let limits: ModelLimits;
 
+  // 1. Config override (highest priority)
   if (options.configContextWindow) {
-    contextWindow = options.configContextWindow;
+    limits = {
+      maxInputTokens: options.configContextWindow,
+      maxOutputTokens: DEFAULT_MODEL_LIMITS.maxOutputTokens,
+      contextWindow: options.configContextWindow,
+    };
     source = "config";
+  } else if (options.modelLimitsCache) {
+    // 2. Cache → registry → default (via ModelLimitsCache)
+    const resolved = options.modelLimitsCache.resolve(
+      options.modelId,
+      options.provider,
+    );
+    limits = resolved.limits;
+    source = resolved.source;
   } else {
-    contextWindow = getContextWindowSize(options.modelId);
-    source = isModelKnown(options.modelId) ? "registry" : "default";
+    // 3. Static registry (backward compat when no cache provided)
+    const staticLimits = getModelLimits(options.modelId);
+    if (staticLimits) {
+      limits = staticLimits;
+      source = "registry";
+    } else {
+      limits = DEFAULT_MODEL_LIMITS;
+      source = "default";
+    }
   }
 
-  // 1b. Resolve output reserve (computed early so clamp can account for it)
-  const outputReserve = Math.max(
-    MIN_OUTPUT_RESERVE_TOKENS,
-    options.outputReserveTokens ?? DEFAULT_OUTPUT_RESERVE_TOKENS,
-  );
-
-  // 1c. Enforce minimum context window to prevent degenerate budgets
-  //     (e.g., contextWindow < outputReserve -> inputBudget=0 -> compactTrigger=0 -> infinite compact)
-  //     Minimum must leave room for at least some input tokens beyond the output reserve.
+  // Enforce minimum context window
+  let contextWindow = limits.contextWindow;
   const effectiveMinContextWindow = Math.max(
     CONTEXT_WINDOW_HARD_MIN_TOKENS,
-    outputReserve + CONTEXT_WINDOW_HARD_MIN_TOKENS,
+    limits.maxOutputTokens + CONTEXT_WINDOW_HARD_MIN_TOKENS,
   );
   if (contextWindow < effectiveMinContextWindow) {
     contextWindow = effectiveMinContextWindow;
   }
 
-  // 2. Compute input budget
-  const inputBudget = Math.max(0, contextWindow - outputReserve);
-
-  // 4. Apply safety margin
-  const effectiveInputBudget = Math.floor(
-    inputBudget / TOKEN_ESTIMATION_SAFETY_MARGIN,
+  // maxInputTokens — clamp to at least CONTEXT_WINDOW_HARD_MIN_TOKENS
+  const maxInputTokens = Math.max(
+    CONTEXT_WINDOW_HARD_MIN_TOKENS,
+    limits.maxInputTokens,
   );
 
-  // 5. Compute compact trigger
+  // Apply safety margin
+  const effectiveInputBudget = Math.floor(
+    maxInputTokens / TOKEN_ESTIMATION_SAFETY_MARGIN,
+  );
+
+  // Compute compact trigger
   const threshold = options.compactThreshold ?? DEFAULT_COMPACT_THRESHOLD;
   const compactTrigger = Math.floor(effectiveInputBudget * threshold);
 
   return {
     contextWindow,
-    outputReserve,
-    inputBudget,
+    maxOutputTokens: limits.maxOutputTokens,
+    maxInputTokens,
     effectiveInputBudget,
     compactTrigger,
     source,

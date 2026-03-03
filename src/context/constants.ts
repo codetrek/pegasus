@@ -11,6 +11,9 @@ export const CONTEXT_WINDOW_HARD_MIN_TOKENS = 16_000;
 /** Default context window when model is unknown. */
 export const DEFAULT_CONTEXT_WINDOW = 128_000;
 
+/** Default max output tokens when model is unknown. */
+export const DEFAULT_MAX_OUTPUT_TOKENS = 16_000;
+
 // ── Output Reserve ──
 
 /** Default tokens reserved for model output generation. */

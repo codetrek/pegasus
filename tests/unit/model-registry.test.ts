@@ -22,6 +22,7 @@ function baseLLMConfig(overrides?: Partial<LLMConfig>): LLMConfig {
     contextWindow: undefined,
     codex: { enabled: false, baseURL: "https://chatgpt.com/backend-api", model: "gpt-5.3-codex" },
     copilot: { enabled: false },
+    openrouter: { enabled: false },
     ...overrides,
   };
 }

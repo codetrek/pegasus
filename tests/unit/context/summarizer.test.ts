@@ -1,5 +1,17 @@
 /**
  * Tests for summarizer.ts — chunked summarization with message serialization.
+ *
+ * Budget math note (post model-limits refactor):
+ * When configContextWindow is provided, budget uses:
+ *   maxInputTokens = configContextWindow (clamped to CONTEXT_WINDOW_HARD_MIN_TOKENS = 16k)
+ *   effectiveInputBudget = floor(maxInputTokens / 1.2)
+ *   maxOutputTokens = DEFAULT_MAX_OUTPUT_TOKENS (16k)
+ *
+ * Example: configContextWindow=17_000 (above hard min, but small):
+ *   contextWindow clamped to max(16000, 16000+16000) = 32000
+ *   maxInputTokens = max(16000, 17000) = 17000
+ *   effectiveInputBudget = floor(17000/1.2) = 14166
+ *   availableTokens = 14166 - systemTokens(~46) ≈ 14120
  */
 import { describe, it, expect } from "bun:test";
 import type { LanguageModel, Message } from "../../../src/infra/llm-types.ts";
@@ -211,9 +223,13 @@ describe("summarizeMessages", () => {
   });
 
   it("chunks and merges large message sets", async () => {
+    // Budget math with configContextWindow: 17_000 (NEW formula):
+    //   maxInputTokens = max(16000, 17000) = 17000
+    //   effectiveInputBudget = floor(17000/1.2) = 14166
+    //   availableTokens ≈ 14166 - 46 = 14120
+    //
     // 30 messages of ~1900 chars each → serialized total ≈ 57600 chars ≈ 16457 tokens
-    // Min effective context window = 32k (clamped), effectiveInputBudget = 13333
-    // 16457 > 13272 (available after system prompt) → forces chunking
+    // 16457 > 14120 → forces chunking
     const messages: Message[] = [];
     for (let i = 0; i < 30; i++) {
       messages.push({
@@ -232,7 +248,7 @@ describe("summarizeMessages", () => {
     const result = await summarizeMessages({
       messages,
       model,
-      configContextWindow: 30_000,
+      configContextWindow: 17_000,
     });
 
     // Should have made multiple calls (chunk summaries + merge)
@@ -242,17 +258,13 @@ describe("summarizeMessages", () => {
   }, 10_000);
 
   it("merge overflow triggers recursive batching", async () => {
-    // Goal: force chunked summarization, then make the partial summaries too
-    // large to merge in one pass, triggering the recursive-batching path.
-    //
-    // Budget math (configContextWindow: 30_000):
-    //   contextWindow clamped to 32000, outputReserve=16000
-    //   inputBudget=16000, effectiveInputBudget=13333
-    //   availableTokens = 13333 - systemTokens(~46) ≈ 13287
-    //   To overflow merge: combined partials chars > 13287*3.5 ≈ 46505
+    // Budget math with configContextWindow: 17_000 (NEW formula):
+    //   maxInputTokens = max(16000, 17000) = 17000
+    //   effectiveInputBudget = floor(17000/1.2) = 14166
+    //   availableTokens ≈ 14166 - 46 = 14120
     //
     // We need enough chunks so that partial summaries (each ~15000 chars)
-    // combine to exceed ~46505 chars → 4+ partials of 15000 chars each.
+    // combine to exceed ~14120*3.5 ≈ 49420 chars → 4+ partials of 15000 chars each.
     const messages: Message[] = [];
     for (let i = 0; i < 50; i++) {
       messages.push({
@@ -263,7 +275,7 @@ describe("summarizeMessages", () => {
 
     const responses: string[] = [];
     for (let i = 0; i < 100; i++) {
-      // Each chunk summary returns ~15000 chars → combined 4+ partials > 46505
+      // Each chunk summary returns ~15000 chars → combined 4+ partials > 49420
       // After recursive batching, batch summaries return short text → fits in single merge
       if (i < 10) {
         responses.push(`Summary chunk ${i} - ${"b".repeat(15000)}`);
@@ -277,7 +289,7 @@ describe("summarizeMessages", () => {
     const result = await summarizeMessages({
       messages,
       model,
-      configContextWindow: 30_000,
+      configContextWindow: 17_000,
     });
 
     // Should terminate and produce a result
@@ -288,12 +300,11 @@ describe("summarizeMessages", () => {
   }, 15_000);
 
   it("merge overflow — cannot reduce batches falls back to concatenation", async () => {
-    // Goal: each partial summary is so large that each one alone exceeds
-    // safeTokens, so every partial becomes its own batch → batches.length >= partials.length
-    // → falls back to concatenation.
-    //
-    // availableTokens ≈ 13287, safeTokens = floor(13287/1.2) = 11072
-    // Need each partial > 11072 * 3.5 ≈ 38752 chars
+    // Budget math with configContextWindow: 17_000 (NEW formula):
+    //   maxInputTokens = 17000, effectiveInputBudget = 14166
+    //   availableTokens ≈ 14120
+    //   safeTokens = floor(14120/1.2) = 11766, in chars ≈ 41181
+    //   Need each partial > 41181 chars
     const messages: Message[] = [];
     for (let i = 0; i < 50; i++) {
       messages.push({
@@ -304,8 +315,8 @@ describe("summarizeMessages", () => {
 
     const responses: string[] = [];
     for (let i = 0; i < 100; i++) {
-      // Each partial summary is ~40000 chars → each exceeds safeTokens
-      responses.push(`Chunk ${i} ${"z".repeat(40000)}`);
+      // Each partial summary is ~45000 chars → each exceeds safeTokens
+      responses.push(`Chunk ${i} ${"z".repeat(45000)}`);
     }
 
     const { model } = createMockModel(responses);
@@ -313,7 +324,7 @@ describe("summarizeMessages", () => {
     const result = await summarizeMessages({
       messages,
       model,
-      configContextWindow: 30_000,
+      configContextWindow: 17_000,
     });
 
     // Falls back to concatenation — result should contain the separator
@@ -323,43 +334,16 @@ describe("summarizeMessages", () => {
   }, 15_000);
 
   it("merge depth limit fallback — concatenates when max depth reached", async () => {
-    // Goal: force recursive batching to hit MAX_MERGE_DEPTH (3).
-    // Each level of recursion needs to overflow again.
-    // We need the mock to return large responses at every level.
-    //
-    // Depth 0: partials overflow → batch → summarize batches → recurse at depth 1
-    // Depth 1: batch summaries overflow → batch → summarize → recurse at depth 2
-    // Depth 2: batch summaries overflow → batch → summarize → recurse at depth 3
-    // Depth 3: >= MAX_MERGE_DEPTH → concatenate
-    //
-    // Need many partials that overflow but CAN be reduced into fewer batches
-    // at each level, yet the batch summaries are still large enough to overflow.
-    // Budget (configContextWindow: 30_000):
-    //   contextWindow=32000, outputReserve=16000, inputBudget=16000
-    //   effectiveInputBudget=13333, availableTokens~13287
-    //   safeTokens = floor(13287/1.2) = 11072, in chars ~38752
+    // Budget math with configContextWindow: 17_000 (NEW formula):
+    //   maxInputTokens = 17000, effectiveInputBudget = 14166
+    //   availableTokens ≈ 14120
+    //   safeTokens = floor(14120/1.2) = 11766, in chars ≈ 41181
     //
     // Strategy: produce 16+ chunk partials so recursive halving takes 4 levels:
     //   Depth 0: 16 partials -> 8 batches (2/batch) -> 8 batch summaries
     //   Depth 1: 8 partials -> 4 batches -> 4 batch summaries
     //   Depth 2: 4 partials -> 2 batches -> 2 batch summaries
     //   Depth 3: 2 partials -> depth >= MAX_MERGE_DEPTH(3) -> concatenate!
-    //
-    // Each partial ~24000 chars = 6858 tokens; 1 fits in safeTokens (6858<11072)
-    // but 2 barely overflow availableTokens: 2*24000+7=48007 -> 13716>13287
-    // So at each depth, combined always overflows and we need batching,
-    // but each batch can hold only 1 partial -> batches == partials -> can't reduce!
-    // This means with 24000 chars we'd hit "cannot reduce" instead of depth limit.
-    //
-    // We need 2 per batch but combined overflow: partial ~18000 chars (5143 tokens)
-    // 2 per batch: 10286 < 11072 safeTokens -> ok
-    // But combined of 2: 36007 -> 10288 < 13287 -> fits at depth 2!
-    //
-    // Solution: use more chunks so we have 4+ partials at depth 2:
-    //   32 chunks at depth 0 -> 16 batches -> 16 summaries
-    //   Depth 1: 16 -> 8 batches -> 8 summaries
-    //   Depth 2: 8 -> 4 batches -> 4 summaries
-    //   Depth 3: 4 partials -> combined=72021 -> 20578>13287 -> overflow -> depth>=3 -> concat!
     //
     // 32 chunks: 32 * 20 = 640 messages
     const messages: Message[] = [];
@@ -381,7 +365,7 @@ describe("summarizeMessages", () => {
     const result = await summarizeMessages({
       messages,
       model,
-      configContextWindow: 30_000,
+      configContextWindow: 17_000,
     });
 
     // Should terminate via depth limit and contain the concatenation separator
@@ -390,76 +374,18 @@ describe("summarizeMessages", () => {
   }, 30_000);
 
   it("merge with exactly 1 partial summary returns it directly", async () => {
-    // Force chunking into exactly 1 chunk by having messages just barely
-    // exceed the budget when serialized, but all fit in one chunk.
-    // Actually: we need totalTokens > availableTokens (to trigger chunking)
-    // but chunkMessagesByTokenBudget should return 1 chunk.
+    // Many tiny messages: content tokens fit in one chunk, but serialized
+    // text (with "[user]: " prefixes) exceeds availableTokens.
     //
-    // This happens when the serialized text estimate exceeds budget but all
-    // messages fit in one chunk (e.g., estimation disagreement due to overhead).
+    // Budget: configContextWindow=17_000 → effectiveInputBudget=14166
+    //   availableTokens ≈ 14120
     //
-    // Simpler approach: make messages that serialize to just over availableTokens
-    // but each message is small enough to group into one chunk.
-    // availableTokens ≈ 13287, in chars ≈ 46505
-    // Make 10 messages of 4700 chars each → serialized ≈ 47200 chars > 46505 → chunks
-    // But chunk budget safeMax = floor(13287/1.2) = 11072 tokens ≈ 38752 chars
-    // Each message tokens ≈ 4700/3.5 ≈ 1343 → 10 * 1343 = 13430 > 11072
-    // So this would create multiple chunks. We need a different approach.
-    //
-    // Actually the partials.length === 1 check is in mergeSummaries, not in
-    // the chunking path. After chunking, if only 1 chunk, summarizeMessages
-    // calls singlePassSummarize for it, then mergeSummaries([onePartial], ...)
-    // which returns partials[0] directly.
-    //
-    // To trigger: we need exactly 1 chunk. This means the first chunk fits all
-    // messages, but the raw serialized total is over availableTokens.
-    // chunkMessagesByTokenBudget uses safeMax = floor(availableTokens/1.2)
-    // So we need total msg tokens > availableTokens but <= safeMax... no, that
-    // doesn't work since safeMax < availableTokens.
-    //
-    // Wait: estimateTokensFromChars for serialized text uses the FULL serialized
-    // string (with "[role]: " prefixes), while chunkMessagesByTokenBudget estimates
-    // per-message using msg.content.length. The serialized text adds overhead.
-    //
-    // So: content tokens could be <= safeMax (all in one chunk), but serialized
-    // total tokens (with prefixes and newlines) > availableTokens.
-    //
-    // 10 messages of 4500 chars each:
-    // Per-message tokens: ceil(4500/3.5) = 1286, total = 12860 < safeMax(11072)?
-    // No, 12860 > 11072. Need fewer/smaller messages.
-    //
-    // 8 messages of 4500 chars:
-    // Per-message: 1286, total = 10288 < 11072 → 1 chunk
-    // Serialized: 8 * (4500 + ~10 prefix) + 7 newlines = 36080 + 70 + 7 = 36157 chars
-    // Serialized tokens: ceil(36157/3.5) = 10331 < 13287 → fits in single pass!
-    //
-    // We need serialized tokens > availableTokens. Let's use 12 messages of 4300 chars:
-    // Per-message: ceil(4300/3.5) = 1229, total = 14748 > 11072 → multiple chunks
-    //
-    // This is getting complex. The simplest way is to use 1 very large message
-    // that forces a single chunk (oversized isolation). Message of 50000 chars:
-    // Serialized: "[user]: " + 2000 (truncated) + "..." = ~2011 chars
-    // Serialized tokens: ceil(2011/3.5) = 575 < 13287 → single pass, no chunking!
-    //
-    // Actually the `partials.length === 1` return in mergeSummaries is already tested
-    // indirectly when the "cannot reduce batches" path catches it. Let's just ensure
-    // the path is covered by testing through summarizeMessages with controlled args.
-    //
-    // A simpler way: have messages that JUST overflow the budget so we get 2 chunks,
-    // then first chunk summary is large, second is tiny. The merge gets 2 partials
-    // and combined fits → single merge (line 216-222). That's already tested.
-    //
-    // For partials.length === 1: we'd need exactly 1 chunk from chunkMessagesByTokenBudget
-    // but serialized > availableTokens. This can happen because:
-    //   chunkMessagesByTokenBudget uses msg.content.length for token estimation
-    //   while summarizeMessages uses serializeMessagesForSummary full output
-    //
-    // Let me try: many tiny messages with short content but lots of messages.
-    // Each message content is 10 chars → content tokens ≈ 3 per message
-    // But serialized adds "[user]: " (8 chars) + "\n" → ~19 chars per message
-    // 3000 messages: content tokens = 3000 * 3 = 9000 < 11072 → 1 chunk
-    // Serialized: 3000 * 19 = 57000 chars → tokens = ceil(57000/3.5) = 16286 > 13287
-    // → forces chunking! And chunkMessagesByTokenBudget puts all in 1 chunk!
+    // 3000 messages of "tiny msg " (10 chars each):
+    //   Per-message tokens: ceil(10/3.5) = 3, total = 9000
+    //   chunkMessagesByTokenBudget safeMax = floor(14120/1.2) = 11766
+    //   9000 < 11766 → all fit in 1 chunk
+    //   Serialized: 3000 * ~19 chars = ~57000 chars → tokens ~16286 > 14120 → triggers chunking path
+    //   But chunkMessagesByTokenBudget returns 1 chunk → 1 partial → returned directly
     const messages: Message[] = [];
     for (let i = 0; i < 3000; i++) {
       messages.push({ role: "user", content: "tiny msg " });
@@ -470,7 +396,7 @@ describe("summarizeMessages", () => {
     const result = await summarizeMessages({
       messages,
       model,
-      configContextWindow: 30_000,
+      configContextWindow: 17_000,
     });
 
     // Only 1 chunk → 1 partial → mergeSummaries returns it directly
