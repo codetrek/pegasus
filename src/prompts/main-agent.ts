@@ -249,6 +249,11 @@ export function buildSystemPrompt(options: PromptOptions): string {
     if (options.aiTaskPrompt) {
       lines.push("", options.aiTaskPrompt);
     }
+
+    // Task Agent: append skill metadata (if available, e.g. for Project agents)
+    if (options.skillMetadata) {
+      lines.push("", options.skillMetadata);
+    }
   }
 
   return lines.join("\n");

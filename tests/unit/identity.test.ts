@@ -337,13 +337,14 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("Available Skills");
   });
 
-  test("does NOT include skill metadata in task mode", () => {
+  test("includes skill metadata in task mode (for project agents)", () => {
     const prompt = buildSystemPrompt({
       mode: "task",
       persona,
       skillMetadata: "## Available Skills\n- commit: git commit helper",
     });
-    expect(prompt).not.toContain("Available Skills");
+    expect(prompt).toContain("Available Skills");
+    expect(prompt).toContain("commit: git commit helper");
   });
 
   // Backward compat: no mode defaults to "task"

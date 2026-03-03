@@ -30,7 +30,7 @@ import { EstimateCounter } from "../infra/token-counter.ts";
 import { computeTokenBudget, calculateMaxToolResultChars, truncateToolResult, summarizeMessages, isContextOverflowError, MAX_OVERFLOW_COMPACT_RETRIES } from "../context/index.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import path from "node:path";
-import { SkillRegistry, loadAllSkills } from "../skills/index.ts";
+import { SkillRegistry } from "../skills/index.ts";
 import { AITaskTypeRegistry, loadAITaskTypeDefinitions } from "../aitask-types/index.ts";
 import {
   refreshOpenAICodexToken,
@@ -39,7 +39,7 @@ import {
   getGitHubCopilotBaseUrl,
   type OAuthCredentials,
 } from "@mariozechner/pi-ai";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, statSync } from "node:fs";
 import { loginCodexDeviceCode } from "../infra/codex-device-login.ts";
 import { ProjectManager } from "../projects/manager.ts";
 import { ProjectAdapter } from "../projects/project-adapter.ts";
@@ -91,6 +91,8 @@ export class MainAgent {
   private _overflowRetryCount = 0;
   private tokenCounter = new EstimateCounter();
   private skillRegistry: SkillRegistry;
+  private skillDirs: Array<{ dir: string; source: "builtin" | "user" }> = [];
+  private skillsDirMtimes: Map<string, number> = new Map();
   private aiTaskTypeRegistry: AITaskTypeRegistry;
   private projectManager: ProjectManager;
   private projectAdapter: ProjectAdapter;
@@ -246,10 +248,18 @@ export class MainAgent {
       }
     }
 
-    // Load skills from builtin and user directories
+    // Load skills from builtin, global, and main-only directories
+    // Priority: builtin < global < main-only (later dirs override earlier)
     const builtinSkillDir = path.join(process.cwd(), "skills");
-    const userSkillDir = path.join(this.settings.dataDir, "skills");
-    this.skillRegistry.registerMany(loadAllSkills(builtinSkillDir, userSkillDir));
+    const globalSkillDir = path.join(this.settings.dataDir, "skills");
+    const mainSkillDir = path.join(this.settings.dataDir, "agents", "main", "skills");
+    this.skillDirs = [
+      { dir: builtinSkillDir, source: "builtin" },
+      { dir: globalSkillDir, source: "user" },
+      { dir: mainSkillDir, source: "user" },
+    ];
+    this.skillRegistry.reloadFromDirs(this.skillDirs);
+    this._snapshotSkillMtimes();
     logger.info({ skillCount: this.skillRegistry.listAll().length }, "skills_loaded");
 
     // Load AI task type definitions from builtin and user directories
@@ -515,6 +525,9 @@ export class MainAgent {
    * which will trigger another _think when processed.
    */
   private async _think(channel: { type: string; channelId: string; replyTo?: string }): Promise<void> {
+    // Check if skill directories changed (e.g. after clawhub install)
+    this._checkSkillsReload();
+
     // Check if compact is needed before LLM call
     await this._checkAndCompact();
 
@@ -1622,6 +1635,48 @@ export class MainAgent {
   /** Expose agent for testing. */
   get taskAgent(): Agent {
     return this.agent;
+  }
+
+  // ── Skill auto-reload ──────────────────────────────
+
+  /** Snapshot current mtimes for all skill directories. */
+  private _snapshotSkillMtimes(): void {
+    for (const { dir } of this.skillDirs) {
+      try {
+        this.skillsDirMtimes.set(dir, statSync(dir).mtimeMs);
+      } catch {
+        // Directory may not exist yet — that's fine
+      }
+    }
+  }
+
+  /**
+   * Check if any skill directory has changed since last snapshot.
+   * If so, reload SkillRegistry and notify project Workers.
+   */
+  private _checkSkillsReload(): void {
+    let changed = false;
+    for (const { dir } of this.skillDirs) {
+      try {
+        const mtime = statSync(dir).mtimeMs;
+        if (mtime !== this.skillsDirMtimes.get(dir)) {
+          this.skillsDirMtimes.set(dir, mtime);
+          changed = true;
+        }
+      } catch {
+        // Directory doesn't exist — check if it was previously tracked
+        if (this.skillsDirMtimes.has(dir)) {
+          this.skillsDirMtimes.delete(dir);
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      this.skillRegistry.reloadFromDirs(this.skillDirs);
+      // Notify all project Workers to reload their skills too
+      this.projectAdapter.getWorkerAdapter().broadcast("project", { type: "skills_reload" });
+      logger.info("skills_auto_reloaded");
+    }
   }
 
   /** Expose skill registry for testing. */

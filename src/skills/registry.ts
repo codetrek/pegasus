@@ -8,7 +8,7 @@ import { readFileSync } from "fs";
 import { getLogger } from "../infra/logger.ts";
 import { errorToString } from "../infra/errors.ts";
 import type { SkillDefinition } from "./types.ts";
-import { splitFrontmatter } from "./loader.ts";
+import { splitFrontmatter, scanSkillDir } from "./loader.ts";
 
 const logger = getLogger("skill_registry");
 
@@ -27,6 +27,20 @@ export class SkillRegistry {
         logger.info({ name: skill.name, source: skill.source }, "skill_override");
       }
     }
+  }
+
+  /**
+   * Clear and reload skills from multiple directories with priority.
+   * Directories listed later have higher priority (their skills override earlier ones).
+   */
+  reloadFromDirs(dirs: Array<{ dir: string; source: "builtin" | "user" }>): void {
+    this.skills.clear();
+    const allSkills: SkillDefinition[] = [];
+    for (const { dir, source } of dirs) {
+      allSkills.push(...scanSkillDir(dir, source));
+    }
+    this.registerMany(allSkills);
+    logger.info({ count: this.skills.size }, "skills_reloaded");
   }
 
   /** Get skill by name. Returns null if not found. */

@@ -28,6 +28,7 @@ import { spawn_task } from "../tools/builtins/index.ts";
 import { SUBAGENT_SYSTEM_PROMPT } from "../prompts/index.ts";
 import { TaskPersister } from "../task/persister.ts";
 import { buildProjectAgentPaths, buildSubAgentPaths } from "../storage/paths.ts";
+import { SkillRegistry } from "../skills/registry.ts";
 
 // ── Types ────────────────────────────────────────────
 
@@ -56,6 +57,10 @@ export interface SubAgentConfig extends BaseConfig {
 let agent: Agent | null = null;
 let proxyModel: ProxyLanguageModel | null = null;
 
+// Skill registry for project Workers (null for subagent mode)
+let projectSkillRegistry: SkillRegistry | null = null;
+let projectSkillDirs: Array<{ dir: string; source: "builtin" | "user" }> = [];
+
 // Channel info for subagent mode (used to tag notify messages)
 let workerChannelType: string = "unknown";
 let workerChannelId: string = "unknown";
@@ -73,6 +78,10 @@ export const _testState = {
   getChannelId: () => workerChannelId,
   setChannelType: (t: string) => { workerChannelType = t; },
   setChannelId: (id: string) => { workerChannelId = id; },
+  getSkillRegistry: () => projectSkillRegistry,
+  setSkillRegistry: (r: SkillRegistry | null) => { projectSkillRegistry = r; },
+  getSkillDirs: () => projectSkillDirs,
+  setSkillDirs: (d: Array<{ dir: string; source: "builtin" | "user" }>) => { projectSkillDirs = d; },
 };
 
 // ── Message handler ──────────────────────────────────
@@ -104,6 +113,10 @@ export async function dispatchMessage(data: Record<string, unknown>): Promise<vo
 
     case "shutdown":
       await handleShutdown();
+      break;
+
+    case "skills_reload":
+      handleSkillsReload();
       break;
   }
 }
@@ -197,27 +210,40 @@ export async function initProject(config: ProjectConfig): Promise<void> {
     ? { ...settings, llm: { ...settings.llm, contextWindow } }
     : settings;
 
-  // 6. Store channel info
+  // 6. Build project SkillRegistry (project-specific > global > builtin)
+  projectSkillRegistry = new SkillRegistry();
+  const builtinSkillDir = path.join(process.cwd(), "skills");
+  const globalSkillDir = path.join(settings.dataDir, "skills");
+  const projectSkillDir = path.join(projectPath, "skills");
+  projectSkillDirs = [
+    { dir: builtinSkillDir, source: "builtin" },
+    { dir: globalSkillDir, source: "user" },
+    { dir: projectSkillDir, source: "user" },
+  ];
+  projectSkillRegistry.reloadFromDirs(projectSkillDirs);
+
+  // 7. Store channel info
   workerChannelType = "project";
   workerChannelId = projectDef.name;
 
-  // 7. Create Agent
+  // 8. Create Agent (with SkillRegistry for skill metadata in system prompt)
   agent = _createAgent({
     model: proxyModel,
     persona,
     settings: agentSettings,
     storePaths: buildProjectAgentPaths(projectPath),
+    skillRegistry: projectSkillRegistry,
   });
 
-  // 8. Register notify callback → forward to main thread as InboundMessage
+  // 9. Register notify callback → forward to main thread as InboundMessage
   agent.onNotify((notification: TaskNotification) => {
     sendNotify(notificationToText(notification));
   });
 
-  // 9. Start agent
+  // 10. Start agent
   await agent.start();
 
-  // 10. Signal ready
+  // 11. Signal ready
   postToParent({ type: "ready" });
 }
 
@@ -326,6 +352,13 @@ export function handleMessage(message: { text: string }): void {
   if (!agent) return;
   const text = typeof message === "string" ? message : message.text;
   agent.submit(text, "main-agent");
+}
+
+/** Re-scan skill directories and update the project's SkillRegistry. */
+export function handleSkillsReload(): void {
+  if (projectSkillRegistry && projectSkillDirs.length > 0) {
+    projectSkillRegistry.reloadFromDirs(projectSkillDirs);
+  }
 }
 
 export function handleLLMResponse(requestId: string, result: GenerateTextResult): void {

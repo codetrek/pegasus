@@ -38,6 +38,7 @@ export type WorkerInbound =
   | { type: "init"; mode: "project" | "subagent"; config: Record<string, unknown> }
   | { type: "message"; message: OutboundMessage }
   | { type: "shutdown" }
+  | { type: "skills_reload" }
   | { type: "llm_response"; requestId: string; result: unknown }
   | { type: "llm_error"; requestId: string; error: string };
 
@@ -263,6 +264,23 @@ export class WorkerAdapter {
       }),
     );
     logger.info("all_workers_stopped");
+  }
+
+  /** Send a message to all Workers of a given channelType. */
+  broadcast(channelType: string, message: WorkerInbound): void {
+    const prefix = `${channelType}:`;
+    for (const [key, worker] of this.workers) {
+      if (key.startsWith(prefix)) {
+        worker.postMessage(message);
+      }
+    }
+  }
+
+  /** Send a message to all Workers. */
+  broadcastAll(message: WorkerInbound): void {
+    for (const worker of this.workers.values()) {
+      worker.postMessage(message);
+    }
   }
 
   /**
