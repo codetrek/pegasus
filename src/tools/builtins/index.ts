@@ -94,11 +94,13 @@ const reply = replyToolModule.reply;
 
 export { reply };
 
-// Skill tool (for Main Agent — signal tool)
+// Skill tools (for Main Agent — signal tools)
 import * as skillToolModule from "./skill-tool.ts";
 const use_skill = skillToolModule.use_skill;
+import * as reloadSkillsModule from "./reload-skills-tool.ts";
+const reload_skills = reloadSkillsModule.reload_skills;
 
-export { use_skill };
+export { use_skill, reload_skills };
 
 // Project tools (for Main Agent)
 import * as projectToolsModule from "./project-tools.ts";
@@ -255,6 +257,7 @@ export const mainAgentTools: Tool[] = [
   resume_subagent,
   reply,
   use_skill,
+  reload_skills,
   create_project,
   list_projects,
   suspend_project,

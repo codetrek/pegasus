@@ -732,3 +732,55 @@ describe("WorkerAdapter — Worker lifecycle (mocked Worker)", () => {
     }
   });
 });
+
+// ── WorkerAdapter — broadcast ────────────────────────────────────────
+
+describe("WorkerAdapter — broadcast", () => {
+  const OriginalWorker = globalThis.Worker;
+
+  it("broadcast sends to all Workers of a given channelType", () => {
+    const { FakeWorker, instances } = createFakeWorkerClass();
+    globalThis.Worker = FakeWorker as any;
+
+    try {
+      const adapter = new WorkerAdapter("/fake-worker.ts");
+      adapter.setOnNotify(() => {});
+
+      adapter.startWorker("project", "proj-a", "project", {});
+      adapter.startWorker("project", "proj-b", "project", {});
+      adapter.startWorker("subagent", "sa-1", "subagent", {});
+
+      // Each worker gets 1 init message
+      expect(instances[0]!.posted).toHaveLength(1);
+      expect(instances[1]!.posted).toHaveLength(1);
+      expect(instances[2]!.posted).toHaveLength(1);
+
+      // Broadcast to projects only
+      adapter.broadcast("project", { type: "skills_reload" });
+
+      // Project workers get the broadcast
+      expect(instances[0]!.posted).toHaveLength(2);
+      expect(instances[1]!.posted).toHaveLength(2);
+      expect((instances[0]!.posted[1] as any).type).toBe("skills_reload");
+      expect((instances[1]!.posted[1] as any).type).toBe("skills_reload");
+
+      // Subagent worker does NOT get the broadcast
+      expect(instances[2]!.posted).toHaveLength(1);
+    } finally {
+      globalThis.Worker = OriginalWorker;
+    }
+  });
+
+  it("broadcast with no matching workers is a no-op", () => {
+    const { FakeWorker } = createFakeWorkerClass();
+    globalThis.Worker = FakeWorker as any;
+
+    try {
+      const adapter = new WorkerAdapter("/fake-worker.ts");
+      // No workers started — should not throw
+      adapter.broadcast("project", { type: "skills_reload" });
+    } finally {
+      globalThis.Worker = OriginalWorker;
+    }
+  });
+});

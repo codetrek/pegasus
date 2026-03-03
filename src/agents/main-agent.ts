@@ -30,7 +30,7 @@ import { EstimateCounter } from "../infra/token-counter.ts";
 import { computeTokenBudget, calculateMaxToolResultChars, truncateToolResult, summarizeMessages, isContextOverflowError, MAX_OVERFLOW_COMPACT_RETRIES } from "../context/index.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import path from "node:path";
-import { SkillRegistry, loadAllSkills } from "../skills/index.ts";
+import { SkillRegistry } from "../skills/index.ts";
 import { AITaskTypeRegistry, loadAITaskTypeDefinitions } from "../aitask-types/index.ts";
 import {
   refreshOpenAICodexToken,
@@ -91,6 +91,7 @@ export class MainAgent {
   private _overflowRetryCount = 0;
   private tokenCounter = new EstimateCounter();
   private skillRegistry: SkillRegistry;
+  private skillDirs: Array<{ dir: string; source: "builtin" | "user" }> = [];
   private aiTaskTypeRegistry: AITaskTypeRegistry;
   private projectManager: ProjectManager;
   private projectAdapter: ProjectAdapter;
@@ -246,10 +247,17 @@ export class MainAgent {
       }
     }
 
-    // Load skills from builtin and user directories
+    // Load skills from builtin, global, and main-only directories
+    // Priority: builtin < global < main-only (later dirs override earlier)
     const builtinSkillDir = path.join(process.cwd(), "skills");
-    const userSkillDir = path.join(this.settings.dataDir, "skills");
-    this.skillRegistry.registerMany(loadAllSkills(builtinSkillDir, userSkillDir));
+    const globalSkillDir = path.join(this.settings.dataDir, "skills");
+    const mainSkillDir = path.join(this.settings.dataDir, "agents", "main", "skills");
+    this.skillDirs = [
+      { dir: builtinSkillDir, source: "builtin" },
+      { dir: globalSkillDir, source: "user" },
+      { dir: mainSkillDir, source: "user" },
+    ];
+    this.skillRegistry.reloadFromDirs(this.skillDirs);
     logger.info({ skillCount: this.skillRegistry.listAll().length }, "skills_loaded");
 
     // Load AI task type definitions from builtin and user directories
@@ -679,6 +687,21 @@ export class MainAgent {
             await this.sessionStore.append(toolMsg);
             needsFollowUp = true; // LLM needs to follow skill instructions
           }
+        } else if (tc.name === "reload_skills") {
+          // Reload skill registry, rebuild system prompt, notify project Workers.
+          // Called explicitly by skills (e.g. clawhub) after modifying skill files.
+          this._reloadSkills();
+          const toolMsg: Message = {
+            role: "tool",
+            content: JSON.stringify({
+              reloaded: true,
+              skillCount: this.skillRegistry.listAll().length,
+            }),
+            toolCallId: tc.id,
+          };
+          this.sessionMessages.push(toolMsg);
+          await this.sessionStore.append(toolMsg);
+          needsFollowUp = true;
         } else {
           // Execute simple tool directly — results need LLM follow-up
           needsFollowUp = true;
@@ -1622,6 +1645,31 @@ export class MainAgent {
   /** Expose agent for testing. */
   get taskAgent(): Agent {
     return this.agent;
+  }
+
+  // ── Skill reload (event-driven, NOT polling) ────────
+  //
+  // DESIGN NOTE — Prompt Stability:
+  //   The system prompt (this.systemPrompt) is built once in start() and cached.
+  //   This is intentional: a stable system prompt enables LLM provider-side
+  //   prompt caching, which significantly reduces latency and token cost.
+  //   The prompt is ONLY rebuilt when skills explicitly change (via reload_skills
+  //   tool). Do NOT rebuild the prompt on every _think() cycle.
+  //
+
+  /**
+   * Reload skills from disk, rebuild the system prompt, and notify project Workers.
+   *
+   * Called by the reload_skills tool handler — NOT on a timer or polling loop.
+   * Triggers: clawhub install/update/remove, or any operation that changes skill files.
+   */
+  private _reloadSkills(): void {
+    this.skillRegistry.reloadFromDirs(this.skillDirs);
+    // Rebuild system prompt so LLM sees updated skill metadata
+    this.systemPrompt = this._buildSystemPrompt();
+    // Notify all project Workers to reload their skills too
+    this.projectAdapter.getWorkerAdapter().broadcast("project", { type: "skills_reload" });
+    logger.info({ skillCount: this.skillRegistry.listAll().length }, "skills_reloaded");
   }
 
   /** Expose skill registry for testing. */

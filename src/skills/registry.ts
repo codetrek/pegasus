@@ -8,7 +8,7 @@ import { readFileSync } from "fs";
 import { getLogger } from "../infra/logger.ts";
 import { errorToString } from "../infra/errors.ts";
 import type { SkillDefinition } from "./types.ts";
-import { splitFrontmatter } from "./loader.ts";
+import { splitFrontmatter, scanSkillDir } from "./loader.ts";
 
 const logger = getLogger("skill_registry");
 
@@ -27,6 +27,22 @@ export class SkillRegistry {
         logger.info({ name: skill.name, source: skill.source }, "skill_override");
       }
     }
+  }
+
+  /**
+   * Reload skills from multiple directories with priority.
+   * Directories listed later have higher priority (their skills override earlier ones).
+   * Uses build-swap pattern: builds a new map first, then swaps atomically.
+   */
+  reloadFromDirs(dirs: Array<{ dir: string; source: "builtin" | "user" }>): void {
+    const next = new Map<string, SkillDefinition>();
+    for (const { dir, source } of dirs) {
+      for (const skill of scanSkillDir(dir, source)) {
+        next.set(skill.name, skill); // later dirs override earlier (by insertion order)
+      }
+    }
+    this.skills = next;
+    logger.info({ count: this.skills.size }, "skills_reloaded");
   }
 
   /** Get skill by name. Returns null if not found. */

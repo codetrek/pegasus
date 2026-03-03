@@ -125,7 +125,12 @@ export class TelegramAdapter implements ChannelAdapter {
       ? Number(message.channel.replyTo)
       : undefined;
 
-    const images = message.content?.images;
+    // TODO: OutboundMessage doesn't have content.images yet — this is prep
+    // for future rich content support. Cast to access optional fields safely.
+    const msg = message as OutboundMessage & {
+      content?: { text?: string; images?: Array<{ id: string; data: string }> };
+    };
+    const images = msg.content?.images;
 
     if (images?.length) {
       if (images.length === 1) {
@@ -137,7 +142,7 @@ export class TelegramAdapter implements ChannelAdapter {
           chatId,
           new InputFile(buffer, `${img.id}.jpg`),
           {
-            caption: message.content?.text || message.text || undefined,
+            caption: msg.content?.text || message.text || undefined,
             parse_mode: "Markdown",
             ...(threadId ? { message_thread_id: threadId } : {}),
           },
@@ -145,10 +150,10 @@ export class TelegramAdapter implements ChannelAdapter {
       } else {
         // Multiple images: sendMediaGroup
         const { InputFile } = await import("grammy");
-        const media = images.map((img, i) => ({
+        const media = images.map((img: { id: string; data: string }, i: number) => ({
           type: "photo" as const,
           media: new InputFile(Buffer.from(img.data, "base64"), `${img.id}.jpg`),
-          ...(i === 0 ? { caption: message.content?.text || message.text || undefined, parse_mode: "Markdown" as const } : {}),
+          ...(i === 0 ? { caption: msg.content?.text || message.text || undefined, parse_mode: "Markdown" as const } : {}),
         }));
         await this.bot.api.sendMediaGroup(chatId, media, {
           ...(threadId ? { message_thread_id: threadId } : {}),

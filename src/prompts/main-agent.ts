@@ -3,6 +3,19 @@
  *
  * Compiles a Persona + dynamic metadata into the full system prompt for the
  * MainAgent (inner monologue mode) or a minimal prompt for Task Agents.
+ *
+ * PROMPT STABILITY CONTRACT (MainAgent only):
+ *   MainAgent's system prompt is built once (at start()) and cached as a string.
+ *   This enables LLM provider-side prompt caching, which significantly reduces
+ *   latency and token costs. The prompt is ONLY rebuilt when:
+ *     - Skills change (via reload_skills tool → MainAgent._reloadSkills())
+ *     - Session restarts
+ *   Do NOT rebuild on every _think() cycle — that defeats prompt caching.
+ *   If you need to add dynamic per-turn data, use message injection, not prompt changes.
+ *
+ *   Note: Task-mode Agents (including Project Workers) rebuild their prompt on
+ *   each iteration via Thinker.run(). This is acceptable because task conversations
+ *   are short-lived and don't benefit from cross-turn prompt caching.
  */
 import type { Persona } from "../identity/persona.ts";
 import {
@@ -248,6 +261,11 @@ export function buildSystemPrompt(options: PromptOptions): string {
     // Task Agent: append AI task type-specific prompt
     if (options.aiTaskPrompt) {
       lines.push("", options.aiTaskPrompt);
+    }
+
+    // Task Agent: append skill metadata (if available, e.g. for Project agents)
+    if (options.skillMetadata) {
+      lines.push("", options.skillMetadata);
     }
   }
 

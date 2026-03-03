@@ -36,6 +36,7 @@ export class Thinker {
    * @param overrideToolRegistry - Optional per-task-type tool registry (overrides instance default)
    * @param aiTaskPrompt - Optional AI task type-specific prompt to append to system prompt
    * @param overrideModel - Optional per-task-type model (overrides instance default)
+   * @param skillMetadata - Optional skill metadata to include in system prompt
    */
   async run(
     context: TaskContext,
@@ -43,11 +44,12 @@ export class Thinker {
     overrideToolRegistry?: ToolRegistry,
     aiTaskPrompt?: string,
     overrideModel?: LanguageModel,
+    skillMetadata?: string,
   ): Promise<Record<string, unknown>> {
     logger.info({ iteration: context.iteration, taskType: context.taskType }, "think_start");
 
     // Build system prompt: base persona + optional AI task type-specific prompt
-    const system = buildSystemPrompt({ persona: this.persona, aiTaskPrompt });
+    const system = buildSystemPrompt({ persona: this.persona, aiTaskPrompt, skillMetadata });
 
     // Build conversation history for multi-turn support
     const messages: Message[] = context.messages.map((m) => ({

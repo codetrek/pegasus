@@ -545,6 +545,37 @@ describe("dispatchMessage", () => {
   it("should handle unknown message types gracefully", async () => {
     await dispatchMessage({ type: "unknown_type" });
   }, 5_000);
+
+  it("should handle skills_reload message", async () => {
+    // Set up a skill registry with dirs
+    const { mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+    const path = await import("node:path");
+    const { SkillRegistry } = await import("@pegasus/skills/registry.ts");
+
+    const tmpDir = path.join("/tmp", `dispatch-skills-reload-${Date.now()}`);
+    mkdirSync(tmpDir, { recursive: true });
+    const skillDir = path.join(tmpDir, "test-skill");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(
+      path.join(skillDir, "SKILL.md"),
+      "---\nname: test-skill\ndescription: test\n---\nInstructions.\n",
+    );
+
+    const registry = new SkillRegistry();
+    _testState.setSkillRegistry(registry);
+    _testState.setSkillDirs([{ dir: tmpDir, source: "user" }]);
+
+    // Dispatch skills_reload
+    await dispatchMessage({ type: "skills_reload" });
+
+    // Verify the registry was reloaded
+    expect(registry.has("test-skill")).toBe(true);
+
+    // Cleanup
+    _testState.setSkillRegistry(null);
+    _testState.setSkillDirs([]);
+    rmSync(tmpDir, { recursive: true, force: true });
+  }, 5_000);
 });
 
 // ── handleInit ──────────────────────────────────────────

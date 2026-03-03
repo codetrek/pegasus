@@ -129,6 +129,8 @@ export interface AgentDeps {
   aiTaskTypeRegistry?: AITaskTypeRegistry;
   /** Extra tools to register in both global and per-type registries (e.g. spawn_task for SubAgent). */
   additionalTools?: import("../tools/types.ts").Tool[];
+  /** Optional SkillRegistry for skill metadata in system prompt (e.g. for Project agents). */
+  skillRegistry?: import("../skills/registry.ts").SkillRegistry;
   /** Explicit storage paths for this Agent instance. */
   storePaths: AgentStorePaths;
   /** Whether to run PostTaskReflector after task completion. Default: true. */
@@ -165,6 +167,7 @@ export class Agent {
   private additionalTools: import("../tools/types.ts").Tool[] = [];
   private extractModel: LanguageModel | null = null;
   private modelRegistry: ModelRegistry | null = null;
+  private skillRegistry: import("../skills/registry.ts").SkillRegistry | null = null;
   private backgroundTaskManager: BackgroundTaskManager;
   private browserManager: BrowserManager | null = null;
 
@@ -190,6 +193,7 @@ export class Agent {
     this.typeToolRegistries = new Map();
     this.aiTaskTypeRegistry = deps.aiTaskTypeRegistry ?? null;
     this.modelRegistry = deps.modelRegistry ?? null;
+    this.skillRegistry = deps.skillRegistry ?? null;
 
     // Resolve extract model: prefer "fast" tier from registry, fallback to default model
     this.extractModel = deps.modelRegistry?.getForTier("fast") ?? null;
@@ -521,11 +525,14 @@ export class Agent {
     // Get AI task type-specific system prompt from registry
     const aiTaskTypePrompt = this.aiTaskTypeRegistry?.getPrompt(task.context.taskType) ?? undefined;
 
+    // Get skill metadata for system prompt (if SkillRegistry available)
+    const skillMetadata = this.skillRegistry?.getMetadataForPrompt(16_000) || undefined;
+
     // Resolve per-type model (from AITASK.md model field or fallback to default)
     const typeModel = this._resolveTypeModel(task.context.taskType);
 
     const reasoning = await this.llmSemaphore.use(() =>
-      this.thinker.run(task.context, memoryIndex, typeRegistry, aiTaskTypePrompt, typeModel),
+      this.thinker.run(task.context, memoryIndex, typeRegistry, aiTaskTypePrompt, typeModel, skillMetadata),
     );
     task.context.reasoning = reasoning;
 
