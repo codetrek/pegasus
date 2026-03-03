@@ -30,16 +30,18 @@ export class SkillRegistry {
   }
 
   /**
-   * Clear and reload skills from multiple directories with priority.
+   * Reload skills from multiple directories with priority.
    * Directories listed later have higher priority (their skills override earlier ones).
+   * Uses build-swap pattern: builds a new map first, then swaps atomically.
    */
   reloadFromDirs(dirs: Array<{ dir: string; source: "builtin" | "user" }>): void {
-    this.skills.clear();
-    const allSkills: SkillDefinition[] = [];
+    const next = new Map<string, SkillDefinition>();
     for (const { dir, source } of dirs) {
-      allSkills.push(...scanSkillDir(dir, source));
+      for (const skill of scanSkillDir(dir, source)) {
+        next.set(skill.name, skill); // later dirs override earlier (by insertion order)
+      }
     }
-    this.registerMany(allSkills);
+    this.skills = next;
     logger.info({ count: this.skills.size }, "skills_reloaded");
   }
 

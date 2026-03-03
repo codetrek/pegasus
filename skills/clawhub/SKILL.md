@@ -61,7 +61,7 @@ mkdir -p <target-dir>
 clawhub install <slug> --workdir . --dir <target-dir> [--version X.Y.Z]
 ```
 
-After success, call `reload_skills()` to make the new skill available immediately.
+After success, use the `reload_skills` tool to make the new skill available immediately.
 Then confirm to the user which skill was installed and where.
 
 ### update [--all | \<slug\>] [--scope \<scope\>]
@@ -74,7 +74,7 @@ clawhub update <slug> --workdir . --dir <target-dir>
 clawhub update --all --workdir . --dir <target-dir> --no-input
 ```
 
-After success, call `reload_skills()` to refresh the skill registry.
+After success, use the `reload_skills` tool to refresh the skill registry.
 
 ### list [--scope \<scope\>]
 
@@ -88,25 +88,23 @@ Also show the user which local skill directories exist and how many skills each 
 
 ### remove \<slug\> [--scope \<scope\>]
 
-Resolve the target directory from scope. Verify the slug exists in that directory first, then remove it via the clawhub CLI:
+Resolve the target directory from scope. Verify the slug exists before removing:
 
 ```bash
-clawhub list --workdir . --dir <target-dir>
-# Verify <slug> exists in the list, then:
-clawhub update <slug> --workdir . --dir <target-dir> --force
+ls <target-dir>/<slug>/SKILL.md
 ```
 
-If clawhub does not support removal directly, use shell to remove the skill directory only after confirming it exists:
+If it exists, remove the directory:
 
 ```bash
-ls <target-dir>/<slug>/SKILL.md && rm -rf <target-dir>/<slug>
+rm -rf <target-dir>/<slug>
 ```
 
-After removal, call `reload_skills()` to update the skill registry.
+After removal, use the `reload_skills` tool to update the skill registry.
 
-## Important: Always call reload_skills()
+## Important: Always use reload_skills
 
-After ANY install, update, or remove operation, you MUST call the `reload_skills()` tool.
+After ANY install, update, or remove operation, you MUST use the `reload_skills` tool (with no parameters).
 This reloads the skill registry and updates the system prompt so new skills are immediately available.
 
 ## Notes
