@@ -235,12 +235,14 @@ describe("sendNotify", () => {
     cleanup = capture.cleanup;
     _testState.setChannelType("test-channel");
     _testState.setChannelId("ch_123");
+    _testState.setLastInboundChannel(null);
   });
 
   afterEach(() => {
     cleanup();
     _testState.setChannelType("unknown");
     _testState.setChannelId("unknown");
+    _testState.setLastInboundChannel(null);
   });
 
   it("should send notify message with channel info", () => {
@@ -267,6 +269,76 @@ describe("sendNotify", () => {
     const inner = msg.message as Record<string, unknown>;
     expect(inner.metadata).toBeUndefined();
   });
+
+  it("should use original channel info for channel Project (channel:* workerChannelId)", () => {
+    _testState.setChannelType("project");
+    _testState.setChannelId("channel:telegram");
+    _testState.setLastInboundChannel({
+      type: "telegram",
+      channelId: "-100123",
+      userId: "456",
+      replyTo: "789",
+    });
+
+    sendNotify("Reply to user");
+    expect(messages).toHaveLength(1);
+    const msg = messages[0] as Record<string, unknown>;
+    const inner = msg.message as Record<string, unknown>;
+    expect(inner.text).toBe("Reply to user");
+    // Should use the ORIGINAL channel info, not the project channel
+    expect(inner.channel).toEqual({
+      type: "telegram",
+      channelId: "-100123",
+      userId: "456",
+      replyTo: "789",
+    });
+    // Should include channelProjectResponse metadata
+    expect((inner.metadata as any)?.channelProjectResponse).toBe(true);
+  });
+
+  it("should merge channelProjectResponse with existing metadata for channel Project", () => {
+    _testState.setChannelType("project");
+    _testState.setChannelId("channel:telegram");
+    _testState.setLastInboundChannel({
+      type: "telegram",
+      channelId: "-100123",
+    });
+
+    sendNotify("Done", { subagentDone: "completed" });
+    const msg = messages[0] as Record<string, unknown>;
+    const inner = msg.message as Record<string, unknown>;
+    expect((inner.metadata as any)?.channelProjectResponse).toBe(true);
+    expect((inner.metadata as any)?.subagentDone).toBe("completed");
+  });
+
+  it("should fall back to project channel when no lastInboundChannel for channel Project", () => {
+    _testState.setChannelType("project");
+    _testState.setChannelId("channel:telegram");
+    _testState.setLastInboundChannel(null);
+
+    sendNotify("Fallback reply");
+    const msg = messages[0] as Record<string, unknown>;
+    const inner = msg.message as Record<string, unknown>;
+    // Should use the project channel when no inbound channel stored
+    expect(inner.channel).toEqual({ type: "project", channelId: "channel:telegram" });
+    expect(inner.metadata).toBeUndefined();
+  });
+
+  it("should NOT use original channel for non-channel projects", () => {
+    _testState.setChannelType("project");
+    _testState.setChannelId("regular-project");
+    _testState.setLastInboundChannel({
+      type: "telegram",
+      channelId: "-100123",
+    });
+
+    sendNotify("Regular project notify");
+    const msg = messages[0] as Record<string, unknown>;
+    const inner = msg.message as Record<string, unknown>;
+    // Should use normal project channel, not the inbound channel
+    expect(inner.channel).toEqual({ type: "project", channelId: "regular-project" });
+    expect(inner.metadata).toBeUndefined();
+  });
 });
 
 // ── handleMessage ───────────────────────────────────────
@@ -274,6 +346,7 @@ describe("sendNotify", () => {
 describe("handleMessage", () => {
   afterEach(() => {
     _testState.setAgent(null);
+    _testState.setLastInboundChannel(null);
   });
 
   it("should do nothing when agent is null", () => {
@@ -310,6 +383,47 @@ describe("handleMessage", () => {
     handleMessage("raw string" as any);
     expect(submitCalls).toHaveLength(1);
     expect(submitCalls[0]).toBe("raw string");
+  });
+
+  it("should store channel info in lastInboundChannel when provided", () => {
+    const fakeAgent = {
+      submit: (_text: string, _source: string) => "task_1",
+    };
+    _testState.setAgent(fakeAgent as any);
+
+    handleMessage({
+      text: "hello from telegram",
+      channel: { type: "telegram", channelId: "-100123", userId: "456", replyTo: "789" },
+    });
+
+    const stored = _testState.getLastInboundChannel();
+    expect(stored).not.toBeNull();
+    expect(stored!.type).toBe("telegram");
+    expect(stored!.channelId).toBe("-100123");
+    expect(stored!.userId).toBe("456");
+    expect(stored!.replyTo).toBe("789");
+  });
+
+  it("should NOT store channel info for string messages (legacy)", () => {
+    const fakeAgent = {
+      submit: (_text: string, _source: string) => "task_1",
+    };
+    _testState.setAgent(fakeAgent as any);
+
+    _testState.setLastInboundChannel(null);
+    handleMessage("raw string" as any);
+    expect(_testState.getLastInboundChannel()).toBeNull();
+  });
+
+  it("should NOT store channel info when message has no channel field", () => {
+    const fakeAgent = {
+      submit: (_text: string, _source: string) => "task_1",
+    };
+    _testState.setAgent(fakeAgent as any);
+
+    _testState.setLastInboundChannel(null);
+    handleMessage({ text: "no channel" });
+    expect(_testState.getLastInboundChannel()).toBeNull();
   });
 });
 
@@ -991,6 +1105,7 @@ describe("_testState", () => {
     _testState.setProxyModel(null);
     _testState.setChannelType("unknown");
     _testState.setChannelId("unknown");
+    _testState.setLastInboundChannel(null);
   });
 
   it("should get and set agent", () => {
@@ -1018,6 +1133,15 @@ describe("_testState", () => {
     _testState.setChannelId("tg_42");
     expect(_testState.getChannelType()).toBe("telegram");
     expect(_testState.getChannelId()).toBe("tg_42");
+  });
+
+  it("should get and set lastInboundChannel", () => {
+    expect(_testState.getLastInboundChannel()).toBeNull();
+    const channel = { type: "telegram", channelId: "-100123", userId: "456" };
+    _testState.setLastInboundChannel(channel);
+    expect(_testState.getLastInboundChannel()).toEqual(channel);
+    _testState.setLastInboundChannel(null);
+    expect(_testState.getLastInboundChannel()).toBeNull();
   });
 });
 

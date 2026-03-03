@@ -397,6 +397,22 @@ export class MainAgent {
 
   /** Send a message to Main Agent (fire-and-forget, queued). */
   send(message: InboundMessage): void {
+    // Channel Project responses carry external channel info + metadata flag.
+    // Forward directly to the external channel without re-classification.
+    // Without this, the reply would be classified as "untrusted" (since the
+    // userId is a non-owner) and routed back to the channel Project — infinite loop.
+    if (message.metadata?.channelProjectResponse && this.replyCallback) {
+      this.replyCallback({
+        text: message.text,
+        channel: message.channel,
+      });
+      logger.info(
+        { channelType: message.channel.type, channelId: message.channel.channelId },
+        "channel_project_response_forwarded",
+      );
+      return;
+    }
+
     const classification = classifyMessage(message, this.ownerStore);
 
     switch (classification.type) {
@@ -1104,7 +1120,8 @@ export class MainAgent {
             `Handle messages from non-owner users on the ${channelType} channel. ` +
             `Respond politely and helpfully. You are a public-facing assistant. ` +
             `Do NOT reveal personal information about the owner. ` +
-            `Do NOT execute shell commands or access the filesystem.`,
+            `Do NOT execute shell commands or access the filesystem. ` +
+            `When you receive a message, reply using the channel info provided in the metadata line.`,
         });
         const project = this.projectManager.get(projectName);
         if (project) {
@@ -1120,8 +1137,18 @@ export class MainAgent {
       }
     }
 
+    // Prepend channel metadata so the Project Worker knows the source context.
+    // This mirrors how MainAgent formats messages in _handleMessage() — the LLM
+    // sees the channel info and can reference it in replies.
+    const now = formatTimestamp(Date.now());
+    const metaLine = `[${now} | channel: ${message.channel.type} | id: ${message.channel.channelId}${message.channel.userId ? ` | user: ${message.channel.userId}` : ""}${message.channel.replyTo ? ` | thread: ${message.channel.replyTo}` : ""}]`;
+    const enrichedMessage: InboundMessage = {
+      ...message,
+      text: `${metaLine}\n${message.text}`,
+    };
+
     // Route to channel Project
-    this.projectAdapter.sendToProject(projectName, message);
+    this.projectAdapter.sendToProject(projectName, enrichedMessage);
 
     logger.info(
       { channelType, userId: message.channel.userId, project: projectName },
