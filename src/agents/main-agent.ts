@@ -27,7 +27,8 @@ import { Agent } from "./agent.ts";
 import type { TaskNotification } from "./agent.ts";
 import type { ToolCall } from "../models/tool.ts";
 import { EstimateCounter } from "../infra/token-counter.ts";
-import { computeTokenBudget, calculateMaxToolResultChars, truncateToolResult, summarizeMessages, isContextOverflowError, MAX_OVERFLOW_COMPACT_RETRIES, ModelLimitsCache } from "../context/index.ts";
+import { computeTokenBudget, calculateMaxToolResultChars, truncateToolResult, summarizeMessages, isContextOverflowError, MAX_OVERFLOW_COMPACT_RETRIES, ModelLimitsCache, CopilotModelFetcher, OpenRouterModelFetcher } from "../context/index.ts";
+import type { ProviderModelFetcher } from "../context/index.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import path from "node:path";
 import os from "node:os";
@@ -108,6 +109,8 @@ export class MainAgent {
   private modelLimitsCache!: ModelLimitsCache;
   private _codexCredPath: string;
   private _copilotCredPath: string;
+  private _copilotBaseURL?: string;
+  private _copilotTokenProvider?: () => Promise<string>;
   private _mcpAuthDir: string;
   private _tickTimer: ReturnType<typeof setTimeout> | null = null;
   private _tickFirstIntervalMs = 30_000; // first tick after 30s
@@ -183,6 +186,9 @@ export class MainAgent {
     // Initialize model limits cache for provider-aware token budget resolution
     const modelLimitsCacheDir = path.join(os.homedir(), ".pegasus", "model-limits");
     this.modelLimitsCache = new ModelLimitsCache(modelLimitsCacheDir);
+
+    // Fetch model limits from provider APIs
+    await this._initModelLimits();
 
     // Task execution engine — created AFTER codex auth so models can resolve codex models
     try {
@@ -1527,6 +1533,69 @@ export class MainAgent {
   }
 
   /**
+   * Fetch model limits from enabled providers.
+   * First-run (no disk cache): await fetch (blocking).
+   * Subsequent (disk cache exists): background refresh (non-blocking).
+   */
+  private async _initModelLimits(): Promise<void> {
+    const awaitable: Promise<void>[] = [];
+    const background: Promise<void>[] = [];
+
+    const doFetch = (fetcher: ProviderModelFetcher) => () => {
+      return fetcher.fetch().then((models) => {
+        if (models.size > 0) {
+          this.modelLimitsCache.update(fetcher.provider, models);
+          logger.info({ provider: fetcher.provider, count: models.size }, "model_limits_updated");
+        }
+      });
+    };
+
+    // Copilot
+    if (this._copilotTokenProvider && this._copilotBaseURL) {
+      const fetcher = new CopilotModelFetcher(this._copilotTokenProvider, this._copilotBaseURL);
+      const task = doFetch(fetcher);
+      if (this.modelLimitsCache.hasProviderCache("copilot")) {
+        background.push(task().catch(err =>
+          logger.warn({ provider: "copilot", error: String(err) }, "model_limits_bg_refresh_failed")
+        ));
+      } else {
+        awaitable.push(task().catch(err =>
+          logger.warn({ provider: "copilot", error: String(err) }, "model_limits_first_fetch_failed")
+        ));
+      }
+    }
+
+    // OpenRouter
+    const orConfig = this.settings.llm?.openrouter;
+    if (orConfig?.enabled && orConfig?.apiKey) {
+      const fetcher = new OpenRouterModelFetcher(orConfig.apiKey);
+      const task = doFetch(fetcher);
+      if (this.modelLimitsCache.hasProviderCache("openrouter")) {
+        background.push(task().catch(err =>
+          logger.warn({ provider: "openrouter", error: String(err) }, "model_limits_bg_refresh_failed")
+        ));
+      } else {
+        awaitable.push(task().catch(err =>
+          logger.warn({ provider: "openrouter", error: String(err) }, "model_limits_first_fetch_failed")
+        ));
+      }
+    }
+
+    // Await first-run fetches (blocking — adds seconds to first startup)
+    if (awaitable.length > 0) {
+      logger.info({ count: awaitable.length }, "model_limits_first_run_awaiting");
+      await Promise.all(awaitable);
+    }
+
+    // Background refreshes fire-and-forget
+    if (background.length > 0) {
+      Promise.all(background).then(() =>
+        logger.info("model_limits_bg_refresh_complete")
+      );
+    }
+  }
+
+  /**
    * Async Copilot auth — runs GitHub device code login if no stored credentials.
    * Called from start() so it can do async operations (token exchange, interactive login).
    * Uses pi-ai's loginGitHubCopilot and refreshGitHubCopilotToken.
@@ -1582,6 +1651,20 @@ export class MainAgent {
         this._copilotCredPath,
       );
       logger.info("copilot_auth_ready");
+
+      // Store connection info for model limits fetching
+      this._copilotBaseURL = baseURL;
+      this._copilotTokenProvider = async () => {
+        // Read fresh credentials from disk (they may have been refreshed)
+        const freshCreds = this._loadOAuthCredentials(this._copilotCredPath);
+        if (!freshCreds) throw new Error("No Copilot credentials");
+        if (Date.now() >= freshCreds.expires) {
+          const refreshed = await refreshGitHubCopilotToken(freshCreds.refresh);
+          this._saveOAuthCredentials(this._copilotCredPath, refreshed);
+          return refreshed.access;
+        }
+        return freshCreds.access;
+      };
     } catch (err) {
       logger.error(
         { error: errorToString(err) },
