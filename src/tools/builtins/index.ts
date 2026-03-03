@@ -114,6 +114,12 @@ const archive_project = projectToolsModule.archive_project;
 export { create_project, list_projects, suspend_project, resume_project, complete_project, archive_project };
 export { projectTools } from "./project-tools.ts";
 
+// Trust tool (for Main Agent — owner identity management)
+import * as trustToolModule from "./trust-tool.ts";
+const trust = trustToolModule.trust;
+
+export { trust };
+
 // Notify tool (for Task Agent → MainAgent communication)
 import * as notifyToolModule from "./notify-tool.ts";
 const notify = notifyToolModule.notify;
@@ -264,6 +270,7 @@ export const mainAgentTools: Tool[] = [
   resume_project,
   complete_project,
   archive_project,
+  trust,
 ];
 
 /** Memory tools available to PostTaskReflector (no memory_list — info is pre-loaded). */

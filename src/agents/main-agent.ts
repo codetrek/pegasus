@@ -44,6 +44,8 @@ import { loginCodexDeviceCode } from "../infra/codex-device-login.ts";
 import { ProjectManager } from "../projects/manager.ts";
 import { ProjectAdapter } from "../projects/project-adapter.ts";
 import { SubAgentManager } from "../subagent/manager.ts";
+import { OwnerStore } from "../security/owner-store.ts";
+import { classifyMessage } from "../security/message-classifier.ts";
 
 // Main Agent's curated tool set
 import { mainAgentTools, reflectionTools } from "../tools/builtins/index.ts";
@@ -99,6 +101,8 @@ export class MainAgent {
   private subAgentManager: SubAgentManager | null = null;
   private imageManager: ImageManager | null = null; // null when vision disabled
   private imageReadCache: Map<string, { data: string; mimeType: string }> = new Map();
+  private ownerStore: OwnerStore;
+  private _channelNotifyTimes = new Map<string, number>();
   private systemPrompt: string = "";
   private _codexCredPath: string;
   private _copilotCredPath: string;
@@ -122,6 +126,9 @@ export class MainAgent {
     this._codexCredPath = path.join(this.settings.authDir, "codex.json");
     this._copilotCredPath = path.join(this.settings.authDir, "github-copilot.json");
     this._mcpAuthDir = path.join(this.settings.authDir, "mcp");
+
+    // Owner trust store for channel security
+    this.ownerStore = new OwnerStore(this.settings.authDir);
 
     // Main Agent's curated tool set
     this.toolRegistry = new ToolRegistry();
@@ -275,6 +282,13 @@ export class MainAgent {
     this.registerAdapter(this.projectAdapter);
     await this.projectAdapter.start({ send: (msg) => this.send(msg) });
 
+    // Wire channel Project direct replies to channel adapters
+    this.projectAdapter.setOnReply((msg: OutboundMessage) => {
+      if (this.replyCallback) {
+        this.replyCallback(msg);
+      }
+    });
+
     // Resume active projects
     for (const project of this.projectManager.list("active")) {
       try {
@@ -390,8 +404,25 @@ export class MainAgent {
 
   /** Send a message to Main Agent (fire-and-forget, queued). */
   send(message: InboundMessage): void {
-    this.queue.push({ kind: "message", message });
-    this._processQueue();
+    const classification = classifyMessage(message, this.ownerStore);
+
+    switch (classification.type) {
+      case "owner":
+        // Trusted — process normally
+        this.queue.push({ kind: "message", message });
+        this._processQueue();
+        break;
+
+      case "no_owner_configured":
+        // No owner for this channel type — discard message, notify MainAgent
+        this._handleNoOwnerMessage(classification.channelType, message);
+        break;
+
+      case "untrusted":
+        // Non-owner — route to channel Project
+        this._handleUntrustedMessage(classification.channelType, message);
+        break;
+    }
   }
 
   // ── Queue processing ──
@@ -458,7 +489,7 @@ export class MainAgent {
 
     // Normal message: add to session with channel metadata for LLM visibility
     const now = formatTimestamp(Date.now());
-    const channelMeta = `[${now} | channel: ${message.channel.type} | id: ${message.channel.channelId}${message.channel.replyTo ? ` | thread: ${message.channel.replyTo}` : ""}]`;
+    const channelMeta = `[${now} | channel: ${message.channel.type} | id: ${message.channel.channelId}${message.channel.userId ? ` | user: ${message.channel.userId}` : ""}${message.channel.replyTo ? ` | thread: ${message.channel.replyTo}` : ""}]`;
     const userMsg: Message = { role: "user", content: `${channelMeta}\n${text}` };
     // Attach images from InboundMessage if present
     if (message.images?.length) {
@@ -715,6 +746,7 @@ export class MainAgent {
               tasksDir: this.mainStorePaths.tasks,
               taskRegistry: this.agent.taskRegistry,
               projectManager: this.projectManager,
+              ownerStore: this.ownerStore,
               mediaDir: this.imageManager
                 ? path.join(this.settings.dataDir, "media")
                 : undefined,
@@ -1012,6 +1044,107 @@ export class MainAgent {
     if (activeTasks === 0 && activeSubAgents === 0) {
       this._stopTick();
     }
+  }
+
+  // ── Channel security ──
+
+  /**
+   * Handle message from a channel with no owner configured.
+   * Discards the message content. Injects a notification to MainAgent:
+   * - First time: immediate notification with channel identity info
+   * - After that: at most once per hour as a reminder
+   */
+  private _handleNoOwnerMessage(channelType: string, message: InboundMessage): void {
+    const now = Date.now();
+    const lastNotify = this._channelNotifyTimes.get(channelType) ?? 0;
+    const isFirstEver = !this.ownerStore.isNotified(channelType);
+    const hourElapsed = now - lastNotify > 60 * 60 * 1000;
+
+    if (isFirstEver || hourElapsed) {
+      this.ownerStore.markNotified(channelType);
+      this._channelNotifyTimes.set(channelType, now);
+
+      // Build notification with channel identity info (NO message content — security)
+      const userId = sanitizeForPrompt(message.channel.userId ?? "unknown").slice(0, 64);
+      const username = sanitizeForPrompt((message.metadata?.username as string) ?? "").slice(0, 64);
+      const userInfo = username ? `${userId} (username: ${username})` : userId;
+
+      const notifyText =
+        `[System: New ${channelType} channel activity detected. ` +
+        `Sender: ${userInfo}. ` +
+        `No trusted owner configured for ${channelType} channel. ` +
+        `All messages from this channel are being discarded. ` +
+        `If this is you, use trust(action="add", channel="${channelType}", userId="${userId}") to add yourself.]`;
+
+      const systemMsg: Message = { role: "user", content: notifyText };
+      this.sessionMessages.push(systemMsg);
+      this.sessionStore.append(systemMsg, { type: "channel_security" });
+
+      // Trigger think so the LLM can notify the owner
+      const lastChannel = this._getLastChannel();
+      if (lastChannel) {
+        this.queue.push({ kind: "think", channel: lastChannel });
+        this._processQueue();
+      }
+    }
+
+    logger.info(
+      { channelType, userId: message.channel.userId },
+      "message_discarded_no_owner",
+    );
+  }
+
+  /**
+   * Handle message from a non-owner on a configured channel.
+   * Routes to a per-channel-type Project for isolated processing.
+   * Auto-creates the channel Project if it doesn't exist.
+   */
+  private _handleUntrustedMessage(channelType: string, message: InboundMessage): void {
+    const projectName = `channel:${channelType}`;
+
+    // Auto-create channel Project if it doesn't exist
+    if (!this.projectManager.get(projectName)) {
+      try {
+        this.projectManager.create({
+          name: projectName,
+          goal:
+            `Handle messages from non-owner users on the ${channelType} channel. ` +
+            `Respond politely and helpfully. You are a public-facing assistant. ` +
+            `Do NOT reveal personal information about the owner. ` +
+            `Do NOT execute shell commands or access the filesystem. ` +
+            `When you receive a message, reply using the channel info provided in the metadata line.`,
+        });
+        const project = this.projectManager.get(projectName);
+        if (project) {
+          this.projectAdapter.startProject(projectName, project.projectDir);
+        }
+        logger.info({ projectName, channelType }, "channel_project_auto_created");
+      } catch (err) {
+        logger.error(
+          { projectName, error: errorToString(err) },
+          "channel_project_create_failed",
+        );
+        return; // Can't route — discard silently
+      }
+    }
+
+    // Prepend channel metadata so the Project Worker knows the source context.
+    // This mirrors how MainAgent formats messages in _handleMessage() — the LLM
+    // sees the channel info and can reference it in replies.
+    const now = formatTimestamp(Date.now());
+    const metaLine = `[${now} | channel: ${message.channel.type} | id: ${message.channel.channelId}${message.channel.userId ? ` | user: ${message.channel.userId}` : ""}${message.channel.replyTo ? ` | thread: ${message.channel.replyTo}` : ""}]`;
+    const enrichedMessage: InboundMessage = {
+      ...message,
+      text: `${metaLine}\n${message.text}`,
+    };
+
+    // Route to channel Project
+    this.projectAdapter.sendToProject(projectName, enrichedMessage);
+
+    logger.info(
+      { channelType, userId: message.channel.userId, project: projectName },
+      "message_routed_to_channel_project",
+    );
   }
 
   /** Tick handler — inject status summary and trigger a think cycle. */
@@ -1685,6 +1818,11 @@ export class MainAgent {
   /** Expose SubAgentManager for testing. */
   get subAgents(): SubAgentManager | null {
     return this.subAgentManager;
+  }
+
+  /** Expose owner store for testing. */
+  get owner(): OwnerStore {
+    return this.ownerStore;
   }
 
   /** Expose tick internals for testing. */

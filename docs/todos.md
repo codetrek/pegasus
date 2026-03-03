@@ -90,6 +90,11 @@ Tracked features, improvements, and ideas — what's done and what's next.
 - [ ] Owner ID hashing: HMAC-SHA256 hashes instead of raw IDs in system prompt
 - [ ] Authorized senders: allowlisted sender hashes for owner vs guest distinction
 - [ ] Per-user permission model: different tool access levels per user
+- [ ] `hasChannel` empty array edge case: `OwnerStore.hasChannel()` uses `in` operator which returns true for `"telegram": []`. Should check array length > 0.
+
+### Security — Channel Projects
+- [ ] Channel Project tool restriction: Channel Projects currently have full tool access (including shell_exec, write_file). The PROJECT.md goal says "Do NOT execute shell commands" but this is only a prompt-level constraint. Should add code-level tool filtering for channel Projects.
+- [ ] Sanitize channelType in notification: `channelType` is not sanitized in notification text (currently only userId and username are sanitized).
 
 ### Multi-Channel — Remaining
 - [ ] Telegram 要支持发图片/voice

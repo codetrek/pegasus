@@ -505,6 +505,7 @@ export function notificationToText(notification: TaskNotification): string {
  * Send a notify message to the main thread as InboundMessage.
  * Includes channel info so MainAgent knows the source.
  * Optional metadata can be attached (e.g., subagentDone status).
+ *
  * Exported for unit testing.
  */
 export function sendNotify(text: string, metadata?: Record<string, unknown>): void {

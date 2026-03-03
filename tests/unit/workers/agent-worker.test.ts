@@ -792,6 +792,8 @@ describe("initProject", () => {
   }, 10_000);
 });
 
+// ── initProject — channel Project behavior ──────────────
+
 // ── initSubAgent ────────────────────────────────────────
 
 describe("initSubAgent", () => {

@@ -22,9 +22,13 @@ function createMockWorkerAdapter() {
     activeCount: 0,
     _onNotify: null as ((msg: InboundMessage) => void) | null,
     _onWorkerClose: null as ((channelType: string, channelId: string) => void) | null,
+    _onReply: null as ((msg: import("@pegasus/channels/types.ts").OutboundMessage) => void) | null,
     setModelRegistry: mock(() => {}),
     setOnNotify: mock((cb: (msg: InboundMessage) => void) => {
       mockAdapter._onNotify = cb;
+    }),
+    setOnReply: mock((cb: (msg: import("@pegasus/channels/types.ts").OutboundMessage) => void) => {
+      mockAdapter._onReply = cb;
     }),
     setOnWorkerClose: mock((cb: (channelType: string, channelId: string) => void) => {
       mockAdapter._onWorkerClose = cb;
@@ -38,6 +42,7 @@ function createMockWorkerAdapter() {
   } as unknown as WorkerAdapter & {
     _onNotify: ((msg: InboundMessage) => void) | null;
     _onWorkerClose: ((channelType: string, channelId: string) => void) | null;
+    _onReply: ((msg: import("@pegasus/channels/types.ts").OutboundMessage) => void) | null;
   };
 
   return mockAdapter;
@@ -288,6 +293,17 @@ describe("ProjectAdapter — callback wiring", () => {
     wa._onWorkerClose!("subagent", "sa_1");
 
     expect(received).toHaveLength(0);
+  });
+
+  it("setOnReply should delegate to WorkerAdapter.setOnReply", () => {
+    const wa = createMockWorkerAdapter();
+    const adapter = new ProjectAdapter(wa);
+
+    const replyCb = (_msg: import("@pegasus/channels/types.ts").OutboundMessage) => {};
+    adapter.setOnReply(replyCb);
+
+    expect((wa.setOnReply as ReturnType<typeof mock>).mock.calls).toHaveLength(1);
+    expect(wa._onReply).toBe(replyCb);
   });
 });
 

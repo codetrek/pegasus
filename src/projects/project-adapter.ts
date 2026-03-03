@@ -20,6 +20,7 @@ import type {
   OutboundMessage,
 } from "../channels/types.ts";
 import { WorkerAdapter } from "../workers/worker-adapter.ts";
+import type { OnReplyCallback } from "../workers/worker-adapter.ts";
 
 const logger = getLogger("project_adapter");
 
@@ -53,6 +54,11 @@ export class ProjectAdapter implements ChannelAdapter {
   /** Set ModelRegistry for LLM proxy handling — delegates to WorkerAdapter. */
   setModelRegistry(models: import("../infra/model-registry.ts").ModelRegistry): void {
     this.workerAdapter.setModelRegistry(models);
+  }
+
+  /** Set direct reply callback for channel Projects. */
+  setOnReply(callback: OnReplyCallback): void {
+    this.workerAdapter.setOnReply(callback);
   }
 
   /**
@@ -91,6 +97,25 @@ export class ProjectAdapter implements ChannelAdapter {
     }
 
     this.workerAdapter.deliver("project", projectId, message);
+  }
+
+  /**
+   * Send an InboundMessage to a specific project Worker.
+   * Used by the security layer to route untrusted messages to channel Projects.
+   * If the project Worker doesn't exist, it's auto-started first by MainAgent.
+   */
+  sendToProject(projectId: string, message: InboundMessage): void {
+    if (!this.projectIds.has(projectId)) {
+      logger.warn({ projectId }, "send_to_unknown_project");
+      return;
+    }
+    // Pass text AND channel info so the Worker knows the source context
+    // for direct reply routing (channel Projects need to know where to reply).
+    this.workerAdapter.deliver("project", projectId, {
+      text: message.text,
+      channel: message.channel,
+      ...(message.metadata != null && { metadata: message.metadata }),
+    } as unknown as OutboundMessage);
   }
 
   /**
