@@ -547,3 +547,59 @@ describe("TelegramAdapter", () => {
     }, 10_000);
   });
 });
+
+// ── splitMessage tests ──
+
+import { splitMessage } from "@pegasus/channels/telegram.ts";
+
+describe("splitMessage", () => {
+  it("returns single chunk for short messages", () => {
+    const result = splitMessage("hello world", 4096);
+    expect(result).toEqual(["hello world"]);
+  });
+
+  it("returns single chunk for exactly-at-limit messages", () => {
+    const text = "x".repeat(4096);
+    const result = splitMessage(text, 4096);
+    expect(result).toEqual([text]);
+  });
+
+  it("splits long messages into multiple chunks", () => {
+    const text = "x".repeat(10000);
+    const result = splitMessage(text, 4096);
+    expect(result.length).toBeGreaterThan(1);
+    // Reconstruct original
+    expect(result.join("")).toBe(text);
+    // Each chunk within limit
+    for (const chunk of result) {
+      expect(chunk.length).toBeLessThanOrEqual(4096);
+    }
+  });
+
+  it("prefers newline boundaries for splitting", () => {
+    // Create text with a newline near the 80% mark
+    const line1 = "a".repeat(3500) + "\n";  // 3501 chars
+    const line2 = "b".repeat(3000);
+    const text = line1 + line2;  // 6501 chars total
+    const result = splitMessage(text, 4096);
+    expect(result.length).toBe(2);
+    // First chunk should break at the newline
+    expect(result[0]).toBe(line1);
+    expect(result[1]).toBe(line2);
+  });
+
+  it("handles empty string", () => {
+    expect(splitMessage("", 4096)).toEqual([""]);
+  });
+
+  it("does not exceed maxLength when newline is at exact boundary", () => {
+    // Newline at position maxLength (0-indexed) — lastIndexOf must not include it
+    const before = "x".repeat(4096);
+    const text = before + "\n" + "y".repeat(100);
+    const result = splitMessage(text, 4096);
+    for (const chunk of result) {
+      expect(chunk.length).toBeLessThanOrEqual(4096);
+    }
+    expect(result.join("")).toBe(text);
+  });
+});
