@@ -209,7 +209,7 @@ llm:
 |-----|---------|-------------|
 | `agent.maxActiveTasks` | `5` | Max concurrent tasks |
 | `agent.maxConcurrentTools` | `3` | Max parallel tool executions |
-| `agent.maxCognitiveIterations` | `10` | Max cognitive loop iterations per task |
+| `agent.maxCognitiveIterations` | `100` | Max cognitive loop iterations per task |
 | `agent.heartbeatInterval` | `60` | Heartbeat interval in seconds |
 | `agent.taskTimeout` | `300` | Max wait time for task completion (seconds) |
 
