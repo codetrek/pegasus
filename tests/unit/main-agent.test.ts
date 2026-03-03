@@ -15,6 +15,7 @@ import type { LLMConfig } from "@pegasus/infra/config-schema.ts";
 import { ProjectAdapter } from "@pegasus/projects/project-adapter.ts";
 import { WorkerAdapter } from "@pegasus/workers/worker-adapter.ts";
 import { mock } from "bun:test";
+import { OwnerStore } from "@pegasus/security/owner-store.ts";
 
 let testSeq = 0;
 let testDataDir = "/tmp/pegasus-test-main-agent";
@@ -2781,5 +2782,277 @@ describe("MainAgent", () => {
 
       await agent.stop();
     }, 15_000);
+  });
+
+  // ── Trust-based routing tests ──
+
+  describe("trust-based message routing", () => {
+    let authDir: string;
+
+    beforeEach(async () => {
+      authDir = `/tmp/pegasus-test-auth-trust-${process.pid}-${testSeq}`;
+      await mkdir(authDir, { recursive: true });
+    });
+    afterEach(async () => {
+      await rm(authDir, { recursive: true, force: true }).catch(() => {});
+    });
+
+    function trustSettings() {
+      return SettingsSchema.parse({
+        dataDir: testDataDir,
+        logLevel: "warn",
+        llm: { maxConcurrentCalls: 3 },
+        agent: { maxActiveTasks: 10 },
+        authDir,
+      });
+    }
+
+    it("should allow CLI messages to reach the queue (bypass trust check)", async () => {
+      const model = createReplyModel("Hello from CLI!");
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: trustSettings(),
+      });
+
+      await agent.start();
+
+      const replies: OutboundMessage[] = [];
+      agent.onReply((msg) => replies.push(msg));
+
+      agent.send({ text: "hello", channel: { type: "cli", channelId: "main" } });
+      await Bun.sleep(300);
+
+      expect(replies.length).toBeGreaterThanOrEqual(1);
+      expect(replies[0]!.text).toBe("Hello from CLI!");
+
+      await agent.stop();
+    }, 10_000);
+
+    it("should allow internal channel messages (project, subagent) to bypass trust check", async () => {
+      const model = createReplyModel("Project update received!");
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: trustSettings(),
+      });
+
+      await agent.start();
+
+      const replies: OutboundMessage[] = [];
+      agent.onReply((msg) => replies.push(msg));
+
+      // project channel — should bypass trust
+      agent.send({
+        text: "project progress update",
+        channel: { type: "project", channelId: "my-project" },
+      });
+      await Bun.sleep(300);
+
+      expect(replies.length).toBeGreaterThanOrEqual(1);
+
+      await agent.stop();
+    }, 10_000);
+
+    it("should allow owner messages to reach the queue", async () => {
+      // Pre-register an owner for telegram
+      const store = new OwnerStore(authDir);
+      store.add("telegram", "user123");
+
+      const model = createReplyModel("Hello, owner!");
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: trustSettings(),
+      });
+
+      await agent.start();
+
+      const replies: OutboundMessage[] = [];
+      agent.onReply((msg) => replies.push(msg));
+
+      agent.send({
+        text: "hello from telegram",
+        channel: { type: "telegram", channelId: "chat123", userId: "user123" },
+      });
+      await Bun.sleep(300);
+
+      expect(replies.length).toBeGreaterThanOrEqual(1);
+      expect(replies[0]!.text).toBe("Hello, owner!");
+
+      await agent.stop();
+    }, 10_000);
+
+    it("should discard messages from no-owner-configured channels and inject notification", async () => {
+      // No owners registered for any channel type
+      const model = createMonologueModel("Processing notification...");
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: trustSettings(),
+      });
+
+      await agent.start();
+      agent.onReply(() => {});
+
+      agent.send({
+        text: "secret message that should be discarded",
+        channel: { type: "telegram", channelId: "chat123", userId: "stranger" },
+        metadata: { username: "StrangerBot" },
+      });
+      await Bun.sleep(300);
+
+      // The original message text should NOT be in session
+      const content = await Bun.file(
+        `${testDataDir}/agents/main/session/current.jsonl`,
+      ).text();
+      expect(content).not.toContain("secret message that should be discarded");
+
+      // Instead, a system notification should be injected
+      expect(content).toContain("No trusted owner configured for telegram channel");
+      expect(content).toContain("stranger");
+      expect(content).toContain("StrangerBot");
+
+      await agent.stop();
+    }, 10_000);
+
+    it("should rate-limit no-owner notifications to once per hour", async () => {
+      const model = createMonologueModel("thinking...");
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: trustSettings(),
+      });
+
+      await agent.start();
+      agent.onReply(() => {});
+
+      // First message — should inject notification
+      agent.send({
+        text: "msg1",
+        channel: { type: "telegram", channelId: "chat1", userId: "user1" },
+      });
+      await Bun.sleep(200);
+
+      // Second message — should NOT inject another notification (rate-limited)
+      agent.send({
+        text: "msg2",
+        channel: { type: "telegram", channelId: "chat2", userId: "user2" },
+      });
+      await Bun.sleep(200);
+
+      const content = await Bun.file(
+        `${testDataDir}/agents/main/session/current.jsonl`,
+      ).text();
+
+      // Count notification occurrences
+      const matches = content.match(/No trusted owner configured for telegram channel/g);
+      expect(matches).toHaveLength(1); // Only the first one
+
+      await agent.stop();
+    }, 10_000);
+
+    it("should route untrusted messages to channel project (not reach MainAgent queue)", async () => {
+      // Register an owner for telegram, but send from a different userId
+      const store = new OwnerStore(authDir);
+      store.add("telegram", "owner123");
+
+      const model = createMonologueModel("thinking...");
+      const mockWA = {
+        shutdownTimeoutMs: 30_000,
+        activeCount: 0,
+        startWorker: mock(() => {}),
+        stopWorker: mock(async () => {}),
+        stopAll: mock(async () => {}),
+        deliver: mock(() => true),
+        has: mock(() => false),
+        hasByKey: mock(() => false),
+        setModelRegistry: mock(() => {}),
+        setOnNotify: mock(() => {}),
+        setOnWorkerClose: mock(() => {}),
+        addOnWorkerClose: mock(() => {}),
+      } as unknown as WorkerAdapter;
+      const projectAdapter = new ProjectAdapter(mockWA);
+
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: trustSettings(),
+        _projectAdapter: projectAdapter,
+      });
+
+      await agent.start();
+      agent.onReply(() => {});
+
+      // Send from a non-owner userId
+      agent.send({
+        text: "hello from stranger",
+        channel: { type: "telegram", channelId: "chat456", userId: "stranger" },
+      });
+      await Bun.sleep(300);
+
+      // The stranger's message should NOT be in MainAgent session
+      const sessionFile = Bun.file(
+        `${testDataDir}/agents/main/session/current.jsonl`,
+      );
+      if (await sessionFile.exists()) {
+        const content = await sessionFile.text();
+        expect(content).not.toContain("hello from stranger");
+      }
+
+      // A channel project should have been auto-created
+      const channelProject = agent.projects.get("channel:telegram");
+      expect(channelProject).toBeDefined();
+
+      // The message should have been delivered to the channel project via WorkerAdapter
+      expect(mockWA.deliver).toHaveBeenCalled();
+
+      await agent.stop();
+    }, 10_000);
+
+    it("should expose owner store via getter", () => {
+      const model = createReplyModel("ok");
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: trustSettings(),
+      });
+
+      expect(agent.owner).toBeDefined();
+      expect(agent.owner).toBeInstanceOf(OwnerStore);
+    });
+
+    it("should include trust tool description in system prompt", async () => {
+      let capturedSystem = "";
+      const model: LanguageModel = {
+        provider: "test",
+        modelId: "test-model",
+        async generate(options: { system?: string }): Promise<GenerateTextResult> {
+          capturedSystem = options.system ?? "";
+          return {
+            text: "thinking...",
+            finishReason: "stop",
+            usage: { promptTokens: 10, completionTokens: 10 },
+          };
+        },
+      };
+
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: trustSettings(),
+      });
+
+      await agent.start();
+      agent.onReply(() => {});
+
+      agent.send({ text: "hi", channel: { type: "cli", channelId: "test" } });
+      await Bun.sleep(300);
+
+      expect(capturedSystem).toContain("trust(action");
+      expect(capturedSystem).toContain("Security");
+
+      await agent.stop();
+    }, 10_000);
   });
 });

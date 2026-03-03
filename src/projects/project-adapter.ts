@@ -94,6 +94,23 @@ export class ProjectAdapter implements ChannelAdapter {
   }
 
   /**
+   * Send an InboundMessage to a specific project Worker.
+   * Used by the security layer to route untrusted messages to channel Projects.
+   * If the project Worker doesn't exist, it's auto-started first by MainAgent.
+   */
+  sendToProject(projectId: string, message: InboundMessage): void {
+    if (!this.projectIds.has(projectId)) {
+      logger.warn({ projectId }, "send_to_unknown_project");
+      return;
+    }
+    this.workerAdapter.deliver("project", projectId, {
+      text: message.text,
+      channel: message.channel,
+      ...(message.metadata != null && { metadata: message.metadata }),
+    } as unknown as OutboundMessage);
+  }
+
+  /**
    * Spawn a Worker for a project — delegates to WorkerAdapter.
    *
    * Passes serialized Settings in the config so the Worker thread can

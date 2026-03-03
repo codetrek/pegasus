@@ -1,7 +1,7 @@
 /**
  * Tests for multi-channel adapter routing in MainAgent.
  */
-import { describe, it, expect, afterEach } from "bun:test";
+import { describe, it, expect, afterEach, beforeEach } from "bun:test";
 import { MainAgent } from "@pegasus/agents/main-agent.ts";
 import type {
   LanguageModel,
@@ -16,8 +16,11 @@ import type {
 import { rm } from "node:fs/promises";
 import { ModelRegistry } from "@pegasus/infra/model-registry.ts";
 import type { LLMConfig } from "@pegasus/infra/config-schema.ts";
+import { OwnerStore } from "@pegasus/security/owner-store.ts";
+import { mkdir } from "node:fs/promises";
 
 const testDataDir = "/tmp/pegasus-test-routing";
+const testAuthDir = "/tmp/pegasus-test-routing-auth";
 
 const testPersona: Persona = {
   name: "TestBot",
@@ -51,7 +54,7 @@ function testSettings() {
     logLevel: "warn",
     llm: { maxConcurrentCalls: 3 },
     agent: { maxActiveTasks: 10 },
-    authDir: "/tmp/pegasus-test-auth",
+    authDir: testAuthDir,
   });
 }
 
@@ -72,8 +75,18 @@ function createMockAdapter(
 }
 
 describe("Multi-channel routing", () => {
+  beforeEach(async () => {
+    await mkdir(testAuthDir, { recursive: true });
+    // Pre-register owners for channel types used in routing tests
+    // so trust-based routing allows messages through
+    const store = new OwnerStore(testAuthDir);
+    store.add("telegram", "any");
+    store.add("sms", "any");
+    store.add("broken", "any");
+  });
   afterEach(async () => {
     await rm(testDataDir, { recursive: true, force: true }).catch(() => {});
+    await rm(testAuthDir, { recursive: true, force: true }).catch(() => {});
   });
 
   it("should route replies to correct adapter by channel.type", async () => {
@@ -114,7 +127,7 @@ describe("Multi-channel routing", () => {
     // Send from telegram channel
     agent.send({
       text: "hello",
-      channel: { type: "telegram", channelId: "tg-123" },
+      channel: { type: "telegram", channelId: "tg-123", userId: "any" },
     });
     await Bun.sleep(500);
 
@@ -163,7 +176,7 @@ describe("Multi-channel routing", () => {
     // Send from "sms" which has no adapter registered
     agent.send({
       text: "hello",
-      channel: { type: "sms", channelId: "unknown-123" },
+      channel: { type: "sms", channelId: "unknown-123", userId: "any" },
     });
     await Bun.sleep(500);
 
@@ -236,7 +249,7 @@ describe("Multi-channel routing", () => {
     // Send from Telegram
     agent.send({
       text: "hello from telegram",
-      channel: { type: "telegram", channelId: "tg-456" },
+      channel: { type: "telegram", channelId: "tg-456", userId: "any" },
     });
     await Bun.sleep(500);
 
@@ -293,7 +306,7 @@ describe("Multi-channel routing", () => {
     // Should not crash
     agent.send({
       text: "hello",
-      channel: { type: "broken", channelId: "broken-123" },
+      channel: { type: "broken", channelId: "broken-123", userId: "any" },
     });
     await Bun.sleep(500);
 
