@@ -771,29 +771,6 @@ describe("WorkerAdapter — broadcast", () => {
     }
   });
 
-  it("broadcastAll sends to all Workers regardless of type", () => {
-    const { FakeWorker, instances } = createFakeWorkerClass();
-    globalThis.Worker = FakeWorker as any;
-
-    try {
-      const adapter = new WorkerAdapter("/fake-worker.ts");
-      adapter.setOnNotify(() => {});
-
-      adapter.startWorker("project", "proj-a", "project", {});
-      adapter.startWorker("subagent", "sa-1", "subagent", {});
-
-      adapter.broadcastAll({ type: "skills_reload" });
-
-      // Both workers receive the broadcast
-      expect(instances[0]!.posted).toHaveLength(2);  // init + broadcast
-      expect(instances[1]!.posted).toHaveLength(2);  // init + broadcast
-      expect((instances[0]!.posted[1] as any).type).toBe("skills_reload");
-      expect((instances[1]!.posted[1] as any).type).toBe("skills_reload");
-    } finally {
-      globalThis.Worker = OriginalWorker;
-    }
-  });
-
   it("broadcast with no matching workers is a no-op", () => {
     const { FakeWorker } = createFakeWorkerClass();
     globalThis.Worker = FakeWorker as any;

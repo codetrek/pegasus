@@ -38,6 +38,8 @@ For install/update/remove, determine where to operate. The user may specify `--s
 
 If no scope is specified, use `global`.
 
+**Important**: Validate the project name — it must match an existing project directory. Do NOT allow path separators (`/`, `..`) in project names.
+
 Create the target directory if it does not exist before running clawhub commands.
 
 ## Commands
@@ -59,7 +61,8 @@ mkdir -p <target-dir>
 clawhub install <slug> --workdir . --dir <target-dir> [--version X.Y.Z]
 ```
 
-After success, confirm which skill was installed, where, and that it is now available.
+After success, call `reload_skills()` to make the new skill available immediately.
+Then confirm to the user which skill was installed and where.
 
 ### update [--all | \<slug\>] [--scope \<scope\>]
 
@@ -70,6 +73,8 @@ clawhub update <slug> --workdir . --dir <target-dir>
 # or for all:
 clawhub update --all --workdir . --dir <target-dir> --no-input
 ```
+
+After success, call `reload_skills()` to refresh the skill registry.
 
 ### list [--scope \<scope\>]
 
@@ -83,16 +88,28 @@ Also show the user which local skill directories exist and how many skills each 
 
 ### remove \<slug\> [--scope \<scope\>]
 
-Resolve the target directory from scope, then remove the skill directory:
+Resolve the target directory from scope. Verify the slug exists in that directory first, then remove it via the clawhub CLI:
 
 ```bash
-rm -rf <target-dir>/<slug>
+clawhub list --workdir . --dir <target-dir>
+# Verify <slug> exists in the list, then:
+clawhub update <slug> --workdir . --dir <target-dir> --force
 ```
 
-If `.clawhub/lock.json` exists in the workdir, note that the lock file may need manual cleanup.
+If clawhub does not support removal directly, use shell to remove the skill directory only after confirming it exists:
+
+```bash
+ls <target-dir>/<slug>/SKILL.md && rm -rf <target-dir>/<slug>
+```
+
+After removal, call `reload_skills()` to update the skill registry.
+
+## Important: Always call reload_skills()
+
+After ANY install, update, or remove operation, you MUST call the `reload_skills()` tool.
+This reloads the skill registry and updates the system prompt so new skills are immediately available.
 
 ## Notes
 
 - Default registry: https://clawhub.com (override with CLAWHUB_REGISTRY env var)
-- Skills are auto-detected by Pegasus after install/update/remove — no restart needed
 - Use `clawhub login` for publishing (not covered by this skill)

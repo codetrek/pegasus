@@ -38,11 +38,6 @@ export interface OutboundMessage {
   channel: ChannelInfo;
   content?: OutboundContent;  // Structured content (when images present)
   metadata?: Record<string, unknown>;
-  /** Rich content (images, structured text). Currently used by Telegram adapter. */
-  content?: {
-    text?: string;
-    images?: Array<{ id: string; data: string; mimeType?: string }>;
-  };
 }
 
 /** Channel adapter interface. */

@@ -39,7 +39,7 @@ import {
   getGitHubCopilotBaseUrl,
   type OAuthCredentials,
 } from "@mariozechner/pi-ai";
-import { readFileSync, writeFileSync, existsSync, statSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { loginCodexDeviceCode } from "../infra/codex-device-login.ts";
 import { ProjectManager } from "../projects/manager.ts";
 import { ProjectAdapter } from "../projects/project-adapter.ts";
@@ -92,7 +92,6 @@ export class MainAgent {
   private tokenCounter = new EstimateCounter();
   private skillRegistry: SkillRegistry;
   private skillDirs: Array<{ dir: string; source: "builtin" | "user" }> = [];
-  private skillsDirMtimes: Map<string, number> = new Map();
   private aiTaskTypeRegistry: AITaskTypeRegistry;
   private projectManager: ProjectManager;
   private projectAdapter: ProjectAdapter;
@@ -259,7 +258,6 @@ export class MainAgent {
       { dir: mainSkillDir, source: "user" },
     ];
     this.skillRegistry.reloadFromDirs(this.skillDirs);
-    this._snapshotSkillMtimes();
     logger.info({ skillCount: this.skillRegistry.listAll().length }, "skills_loaded");
 
     // Load AI task type definitions from builtin and user directories
@@ -525,9 +523,6 @@ export class MainAgent {
    * which will trigger another _think when processed.
    */
   private async _think(channel: { type: string; channelId: string; replyTo?: string }): Promise<void> {
-    // Check if skill directories changed (e.g. after clawhub install)
-    this._checkSkillsReload();
-
     // Check if compact is needed before LLM call
     await this._checkAndCompact();
 
@@ -692,6 +687,21 @@ export class MainAgent {
             await this.sessionStore.append(toolMsg);
             needsFollowUp = true; // LLM needs to follow skill instructions
           }
+        } else if (tc.name === "reload_skills") {
+          // Reload skill registry, rebuild system prompt, notify project Workers.
+          // Called explicitly by skills (e.g. clawhub) after modifying skill files.
+          this._reloadSkills();
+          const toolMsg: Message = {
+            role: "tool",
+            content: JSON.stringify({
+              reloaded: true,
+              skillCount: this.skillRegistry.listAll().length,
+            }),
+            toolCallId: tc.id,
+          };
+          this.sessionMessages.push(toolMsg);
+          await this.sessionStore.append(toolMsg);
+          needsFollowUp = true;
         } else {
           // Execute simple tool directly — results need LLM follow-up
           needsFollowUp = true;
@@ -1637,46 +1647,29 @@ export class MainAgent {
     return this.agent;
   }
 
-  // ── Skill auto-reload ──────────────────────────────
-
-  /** Snapshot current mtimes for all skill directories. */
-  private _snapshotSkillMtimes(): void {
-    for (const { dir } of this.skillDirs) {
-      try {
-        this.skillsDirMtimes.set(dir, statSync(dir).mtimeMs);
-      } catch {
-        // Directory may not exist yet — that's fine
-      }
-    }
-  }
+  // ── Skill reload (event-driven, NOT polling) ────────
+  //
+  // DESIGN NOTE — Prompt Stability:
+  //   The system prompt (this.systemPrompt) is built once in start() and cached.
+  //   This is intentional: a stable system prompt enables LLM provider-side
+  //   prompt caching, which significantly reduces latency and token cost.
+  //   The prompt is ONLY rebuilt when skills explicitly change (via reload_skills
+  //   tool). Do NOT rebuild the prompt on every _think() cycle.
+  //
 
   /**
-   * Check if any skill directory has changed since last snapshot.
-   * If so, reload SkillRegistry and notify project Workers.
+   * Reload skills from disk, rebuild the system prompt, and notify project Workers.
+   *
+   * Called by the reload_skills tool handler — NOT on a timer or polling loop.
+   * Triggers: clawhub install/update/remove, or any operation that changes skill files.
    */
-  private _checkSkillsReload(): void {
-    let changed = false;
-    for (const { dir } of this.skillDirs) {
-      try {
-        const mtime = statSync(dir).mtimeMs;
-        if (mtime !== this.skillsDirMtimes.get(dir)) {
-          this.skillsDirMtimes.set(dir, mtime);
-          changed = true;
-        }
-      } catch {
-        // Directory doesn't exist — check if it was previously tracked
-        if (this.skillsDirMtimes.has(dir)) {
-          this.skillsDirMtimes.delete(dir);
-          changed = true;
-        }
-      }
-    }
-    if (changed) {
-      this.skillRegistry.reloadFromDirs(this.skillDirs);
-      // Notify all project Workers to reload their skills too
-      this.projectAdapter.getWorkerAdapter().broadcast("project", { type: "skills_reload" });
-      logger.info("skills_auto_reloaded");
-    }
+  private _reloadSkills(): void {
+    this.skillRegistry.reloadFromDirs(this.skillDirs);
+    // Rebuild system prompt so LLM sees updated skill metadata
+    this.systemPrompt = this._buildSystemPrompt();
+    // Notify all project Workers to reload their skills too
+    this.projectAdapter.getWorkerAdapter().broadcast("project", { type: "skills_reload" });
+    logger.info({ skillCount: this.skillRegistry.listAll().length }, "skills_reloaded");
   }
 
   /** Expose skill registry for testing. */

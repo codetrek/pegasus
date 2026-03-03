@@ -276,13 +276,6 @@ export class WorkerAdapter {
     }
   }
 
-  /** Send a message to all Workers. */
-  broadcastAll(message: WorkerInbound): void {
-    for (const worker of this.workers.values()) {
-      worker.postMessage(message);
-    }
-  }
-
   /**
    * Handle an LLM proxy request from a Worker.
    *
