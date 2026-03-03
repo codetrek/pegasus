@@ -118,6 +118,12 @@ const notify = notifyToolModule.notify;
 
 export { notify };
 
+// Task status tool (runtime task query)
+import * as taskStatusModule from "./task-status-tool.ts";
+const task_status = taskStatusModule.task_status;
+
+export { task_status };
+
 // Session tools
 import * as sessionToolsModule from "./session-tools.ts";
 const session_archive_read = sessionToolsModule.session_archive_read;
@@ -223,10 +229,11 @@ export const allTaskTools: Tool[] = [
   notify,
 ];
 
-/** Tools for SubAgent Workers — task tools + spawn_task for orchestration. */
+/** Tools for SubAgent Workers — task tools + spawn_task + task_status for orchestration. */
 export const subAgentTools: Tool[] = [
   ...allTaskTools,
   spawn_task,
+  task_status,
 ];
 
 /** Tools for Main Agent (curated simple tools + spawn_task + resume_task + reply + project tools). */
@@ -239,6 +246,7 @@ export const mainAgentTools: Tool[] = [
   memory_append,
   task_list,
   task_replay,
+  task_status,
   session_archive_read,
   image_read,
   spawn_task,

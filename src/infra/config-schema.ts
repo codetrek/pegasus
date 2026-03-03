@@ -71,7 +71,7 @@ export const MemoryConfigSchema = z.object({});
 export const AgentConfigSchema = z.object({
   maxActiveTasks: z.coerce.number().int().positive().default(5),
   maxConcurrentTools: z.coerce.number().int().positive().default(3),
-  maxCognitiveIterations: z.coerce.number().int().positive().default(10),
+  maxCognitiveIterations: z.coerce.number().int().positive().default(100),
   heartbeatInterval: z.coerce.number().positive().default(60),
   taskTimeout: z.coerce.number().int().positive().default(120), // seconds, default 2 minutes
 });

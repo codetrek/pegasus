@@ -36,7 +36,7 @@ const DEFAULT_CONFIG = {
   agent: {
     maxActiveTasks: 5,
     maxConcurrentTools: 3,
-    maxCognitiveIterations: 10,
+    maxCognitiveIterations: 100,
     heartbeatInterval: 60,
     taskTimeout: 120,
   },

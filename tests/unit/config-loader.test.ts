@@ -59,7 +59,7 @@ describe("config-loader", () => {
       expect(settings.llm.timeout).toBe(120);
       expect(settings.agent.maxActiveTasks).toBe(5);
       expect(settings.agent.maxConcurrentTools).toBe(3);
-      expect(settings.agent.maxCognitiveIterations).toBe(10);
+      expect(settings.agent.maxCognitiveIterations).toBe(100);
       expect(settings.agent.heartbeatInterval).toBe(60);
       expect(settings.agent.taskTimeout).toBe(120);
       expect(settings.identity.personaPath).toBe("data/personas/default.json");
