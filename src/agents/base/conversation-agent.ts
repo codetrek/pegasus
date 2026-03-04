@@ -318,4 +318,11 @@ export abstract class ConversationAgent extends BaseAgent {
 
   /** Build the system prompt for this conversation agent. */
   protected abstract override buildSystemPrompt(): string;
+
+  /** Stub for processStep engine — ConversationAgent uses _think() + runToolUseLoop(). */
+  protected override async onTaskComplete(
+    _taskId: string,
+    _text: string,
+    _finishReason: "complete" | "max_iterations" | "interrupted" | "error",
+  ): Promise<void> {}
 }

@@ -7,6 +7,10 @@
  *   - notify() tool is intercepted and calls onNotify callback
  *   - mode getter returns correct mode
  *   - buildSystemPrompt includes task description
+ *   - onTaskComplete emits TASK_COMPLETED / TASK_FAILED events
+ *   - subscribeEvents subscribes to correct event types
+ *   - handleEvent TASK_SUSPENDED sets abort flag
+ *   - worker mode persists session via onTaskComplete
  */
 
 import { describe, test, expect, mock, beforeEach } from "bun:test";
@@ -18,6 +22,9 @@ import type {
   LanguageModel,
 } from "../../../../src/infra/llm-types.ts";
 import { ToolRegistry } from "../../../../src/tools/registry.ts";
+import { EventBus } from "../../../../src/events/bus.ts";
+import { EventType, createEvent } from "../../../../src/events/types.ts";
+import type { Event } from "../../../../src/events/types.ts";
 import { mkdtemp, readFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -113,7 +120,7 @@ describe("ExecutionAgent", () => {
       const result = await agent.run();
 
       expect(result.success).toBe(false);
-      expect(result.error).toBe("LLM connection failed");
+      expect(result.error).toBe("LLM call failed");
     });
 
     test("task mode does not persist session", async () => {
@@ -378,6 +385,194 @@ describe("ExecutionAgent", () => {
 
       expect(capturedSystem).toBeDefined();
       expect(capturedSystem!).not.toContain("## Context");
+    });
+  });
+
+  describe("onTaskComplete emits events", () => {
+    test("emits TASK_COMPLETED on success", async () => {
+      const eventBus = new EventBus();
+      const emittedEvents: Event[] = [];
+      const originalEmit = eventBus.emit.bind(eventBus);
+      eventBus.emit = async (event: Event) => {
+        emittedEvents.push(event);
+        return originalEmit(event);
+      };
+
+      const model = createMockModel(
+        mock(async () => ({
+          text: "success result",
+          finishReason: "stop",
+          usage: { promptTokens: 10, completionTokens: 5 },
+        })),
+      );
+
+      const agent = new ExecutionAgent(
+        createTaskDeps({ model, eventBus }),
+      );
+      const result = await agent.run();
+
+      expect(result.success).toBe(true);
+
+      // Check captured events for TASK_COMPLETED
+      const completedEvents = emittedEvents.filter(
+        (e) => e.type === EventType.TASK_COMPLETED,
+      );
+      expect(completedEvents.length).toBe(1);
+      expect(completedEvents[0]!.source).toBe("exec-agent-1");
+      expect(completedEvents[0]!.payload.finishReason).toBe("complete");
+      expect(completedEvents[0]!.payload.result).toBe("success result");
+    });
+
+    test("emits TASK_FAILED on error", async () => {
+      const eventBus = new EventBus();
+      const emittedEvents: Event[] = [];
+      const originalEmit = eventBus.emit.bind(eventBus);
+      eventBus.emit = async (event: Event) => {
+        emittedEvents.push(event);
+        return originalEmit(event);
+      };
+
+      const model = createMockModel(
+        mock(async () => {
+          throw new Error("model crashed");
+        }),
+      );
+
+      const agent = new ExecutionAgent(
+        createTaskDeps({ model, eventBus }),
+      );
+      const result = await agent.run();
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("LLM call failed");
+
+      // Check captured events for TASK_FAILED
+      const failedEvents = emittedEvents.filter(
+        (e) => e.type === EventType.TASK_FAILED,
+      );
+      expect(failedEvents.length).toBe(1);
+      expect(failedEvents[0]!.source).toBe("exec-agent-1");
+      expect(failedEvents[0]!.payload.finishReason).toBe("error");
+    });
+  });
+
+  describe("subscribeEvents registers correct handlers", () => {
+    test("subscribes to TASK_CREATED, TASK_SUSPENDED, TASK_RESUMED", async () => {
+      const eventBus = new EventBus();
+
+      // Track subscribe calls
+      const subscribedTypes: (EventType | null)[] = [];
+      const originalSubscribe = eventBus.subscribe.bind(eventBus);
+      eventBus.subscribe = (type: EventType | null, handler: any) => {
+        subscribedTypes.push(type);
+        return originalSubscribe(type, handler);
+      };
+
+      const agent = new ExecutionAgent(
+        createTaskDeps({ eventBus }),
+      );
+
+      // start() calls subscribeEvents()
+      await agent.start();
+
+      expect(subscribedTypes).toContain(EventType.TASK_CREATED);
+      expect(subscribedTypes).toContain(EventType.TASK_SUSPENDED);
+      expect(subscribedTypes).toContain(EventType.TASK_RESUMED);
+
+      await agent.stop();
+    });
+  });
+
+  describe("handleEvent TASK_SUSPENDED sets abort", () => {
+    test("sets aborted flag on task state when TASK_SUSPENDED received", async () => {
+      const eventBus = new EventBus();
+
+      // Model that blocks until we signal it — gives us time to suspend
+      let callCount = 0;
+      const model = createMockModel(
+        mock(async () => {
+          callCount++;
+          if (callCount === 1) {
+            // First call returns a tool call so we stay in the loop
+            return {
+              text: "",
+              finishReason: "tool_calls",
+              toolCalls: [
+                {
+                  id: "tc-1",
+                  name: "some_tool",
+                  arguments: {},
+                },
+              ],
+              usage: { promptTokens: 10, completionTokens: 5 },
+            };
+          }
+          // Subsequent calls — just complete
+          return {
+            text: "done",
+            finishReason: "stop",
+            usage: { promptTokens: 10, completionTokens: 5 },
+          };
+        }),
+      );
+
+      const agent = new ExecutionAgent(
+        createTaskDeps({ model, eventBus, agentId: "suspend-test" }),
+      );
+
+      // Manually create task state and call handleEvent
+      const state = (agent as any).createTaskExecutionState("suspend-test", [
+        { role: "user", content: "test" },
+      ]);
+
+      expect(state.aborted).toBe(false);
+
+      // Simulate TASK_SUSPENDED event
+      const suspendEvent = createEvent(EventType.TASK_SUSPENDED, {
+        source: "suspend-test",
+        taskId: "suspend-test",
+        payload: { reason: "user requested" },
+      });
+
+      await (agent as any).handleEvent(suspendEvent);
+
+      expect(state.aborted).toBe(true);
+    });
+  });
+
+  describe("worker mode persists session via onTaskComplete", () => {
+    test("session file has content after run() in worker mode", async () => {
+      const workerDir = await createTempDir();
+      const model = createMockModel(
+        mock(async () => ({
+          text: "worker result",
+          finishReason: "stop",
+          usage: { promptTokens: 10, completionTokens: 5 },
+        })),
+      );
+
+      const agent = new ExecutionAgent(
+        createWorkerDeps({ model, sessionDir: workerDir }),
+      );
+      const result = await agent.run();
+
+      expect(result.success).toBe(true);
+      expect(result.result).toBe("worker result");
+
+      // Verify session file exists and has content
+      const content = await readFile(
+        path.join(workerDir, "current.jsonl"),
+        "utf-8",
+      );
+      expect(content.length).toBeGreaterThan(0);
+
+      const lines = content.trim().split("\n");
+      // Should have user message (from run()) + messages from onTaskComplete persistence
+      expect(lines.length).toBeGreaterThanOrEqual(2);
+
+      // First line should be user message
+      const first = JSON.parse(lines[0]!);
+      expect(first.role).toBe("user");
     });
   });
 });

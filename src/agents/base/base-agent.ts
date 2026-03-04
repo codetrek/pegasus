@@ -16,13 +16,14 @@
  *   - Override onLoopComplete()     — handle results (persist, reply)
  */
 
-import type { LanguageModel, GenerateTextResult } from "../../infra/llm-types.ts";
+import type { LanguageModel, GenerateTextResult, Message } from "../../infra/llm-types.ts";
 import type { Event } from "../../events/types.ts";
+import { EventType, createEvent } from "../../events/types.ts";
 import { EventBus } from "../../events/bus.ts";
 import { ToolRegistry } from "../../tools/registry.ts";
 import { ToolExecutor } from "../../tools/executor.ts";
 import type { ToolCall, ToolDefinition } from "../../models/tool.ts";
-import type { ToolContext } from "../../tools/types.ts";
+import type { ToolResult, ToolContext } from "../../tools/types.ts";
 import {
   AgentStateManager,
   type PendingWorkResult,
@@ -33,6 +34,8 @@ import {
   type ToolUseLoopResult,
   type ToolCallInterceptResult,
 } from "./tool-use-loop.ts";
+import { ToolCallCollector, type ToolCallResult } from "./tool-call-collector.ts";
+import { createTaskState, type TaskExecutionState, type CreateTaskStateOptions } from "./task-execution-state.ts";
 import { getLogger } from "../../infra/logger.ts";
 
 const logger = getLogger("base_agent");
@@ -54,6 +57,35 @@ export interface BaseAgentDeps {
   maxIterations?: number;
 }
 
+// ── Helpers ──────────────────────────────────────────
+
+/**
+ * Convert a ToolResult (from ToolExecutor) to a ToolCallResult (for ToolCallCollector).
+ * Adapted from tool-use-loop.ts formatToolResult but returns ToolCallResult instead of Message.
+ */
+export function formatToolResult(
+  toolCallId: string,
+  _toolName: string,
+  result: ToolResult,
+): ToolCallResult {
+  const content = result.success
+    ? typeof result.result === "string"
+      ? result.result
+      : JSON.stringify(result.result)
+    : `Error: ${result.error}`;
+
+  const tcResult: ToolCallResult = {
+    toolCallId,
+    content,
+  };
+
+  if (result.images?.length) {
+    tcResult.images = result.images;
+  }
+
+  return tcResult;
+}
+
 // ── BaseAgent ────────────────────────────────────────
 
 export abstract class BaseAgent {
@@ -65,6 +97,9 @@ export abstract class BaseAgent {
   protected toolRegistry: ToolRegistry;
   protected toolExecutor: ToolExecutor;
   protected maxIterations: number;
+
+  /** Per-task execution state for event-driven processStep engine. */
+  protected taskStates = new Map<string, TaskExecutionState>();
 
   /** Queue for events that arrive while agent is BUSY. */
   private _eventQueue: Event[] = [];
@@ -209,8 +244,8 @@ export abstract class BaseAgent {
   // Subclass Hooks
   // ═══════════════════════════════════════════════════
 
-  /** Build the system prompt. Called before each tool-use loop. */
-  protected abstract buildSystemPrompt(): string;
+  /** Build the system prompt. Called before each tool-use loop or processStep. */
+  protected abstract buildSystemPrompt(taskId?: string): string;
 
   /** Subscribe to EventBus events. Called during start(). */
   protected abstract subscribeEvents(): void;
@@ -253,4 +288,197 @@ export abstract class BaseAgent {
 
   /** Called during stop(). Subclasses can do async cleanup. */
   protected async onStop(): Promise<void> {}
+
+  // ═══════════════════════════════════════════════════
+  // Event-Driven processStep Engine
+  // ═══════════════════════════════════════════════════
+
+  /**
+   * Execute one LLM turn: call LLM, then dispatch tools (fire-and-forget) or complete.
+   * NON-BLOCKING: returns after dispatching tools. Next turn triggered by _onAllToolsDone.
+   */
+  protected async processStep(taskId: string): Promise<void> {
+    const state = this.taskStates.get(taskId);
+    if (!state || state.aborted) return;
+
+    if (state.iteration >= state.maxIterations) {
+      await this.onTaskComplete(taskId, "", "max_iterations");
+      return;
+    }
+
+    this.stateManager.markBusy();
+    await this.beforeLLMCall(taskId);
+
+    try {
+      const result = await this.model.generate({
+        system: this.buildSystemPrompt(taskId),
+        messages: state.messages,
+        tools: this.getTools().length ? this.getTools() : undefined,
+        toolChoice: this.getTools().length ? "auto" : undefined,
+      });
+
+      state.iteration++;
+      await this.onLLMUsage(result);
+
+      // No tool calls → task complete
+      if (!result.toolCalls?.length) {
+        if (result.text) {
+          state.messages.push({ role: "assistant", content: result.text });
+        }
+        await this.eventBus.emit(createEvent(EventType.STEP_COMPLETED, {
+          source: this.agentId, taskId,
+          payload: { iteration: state.iteration, hasToolCalls: false },
+        }));
+        this.stateManager.markIdle();
+        await this.onTaskComplete(taskId, result.text, "complete");
+        return;
+      }
+
+      // Has tool calls → append assistant msg, dispatch tools
+      const assistantMsg: Message = {
+        role: "assistant",
+        content: result.text ?? "",
+        toolCalls: result.toolCalls,
+      };
+      state.messages.push(assistantMsg);
+
+      await this.eventBus.emit(createEvent(EventType.STEP_COMPLETED, {
+        source: this.agentId, taskId,
+        payload: { iteration: state.iteration, hasToolCalls: true, toolCount: result.toolCalls.length },
+      }));
+
+      // Create collector, dispatch tools in parallel (fire-and-forget)
+      const collector = new ToolCallCollector(
+        result.toolCalls.length,
+        () => { this._onAllToolsDone(taskId); },
+      );
+      state.activeCollector = collector;
+
+      for (let i = 0; i < result.toolCalls.length; i++) {
+        this._executeToolAsync(taskId, result.toolCalls[i]!, i, collector);
+      }
+
+      this.stateManager.markIdle();
+      // Return immediately — _onAllToolsDone will trigger next step
+    } catch (err) {
+      this.stateManager.markIdle();
+      logger.error({ err, taskId, agentId: this.agentId }, "process_step_error");
+      await this.onTaskComplete(taskId, "", "error");
+    }
+  }
+
+  /**
+   * Called by ToolCallCollector when all tools in a batch complete.
+   * Appends results to messages, then triggers next processStep.
+   */
+  private async _onAllToolsDone(taskId: string): Promise<void> {
+    const state = this.taskStates.get(taskId);
+    if (!state) return;
+
+    // Check abort
+    if (state.aborted) {
+      await this.eventBus.emit(createEvent(EventType.TASK_SUSPENDED, {
+        source: this.agentId, taskId,
+        payload: { reason: "externally suspended" },
+      }));
+      await this.onTaskComplete(taskId, "", "interrupted");
+      return;
+    }
+
+    // Append tool result messages
+    const results = state.activeCollector!.getResults();
+    state.activeCollector = null;
+    for (const r of results) {
+      const msg: Message = { role: "tool", content: r.content, toolCallId: r.toolCallId };
+      if (r.images?.length) {
+        msg.images = r.images;
+      }
+      state.messages.push(msg);
+    }
+
+    // Trigger next LLM call
+    await this.processStep(taskId);
+  }
+
+  /**
+   * Execute a single tool call asynchronously. Fire-and-forget.
+   */
+  private _executeToolAsync(
+    taskId: string,
+    tc: ToolCall,
+    index: number,
+    collector: ToolCallCollector,
+  ): void {
+    (async () => {
+      const state = this.taskStates.get(taskId);
+      if (state?.aborted) {
+        collector.addResult(index, {
+          toolCallId: tc.id,
+          content: JSON.stringify({ cancelled: true }),
+        });
+        return;
+      }
+
+      const intercept = await this.onToolCall(tc);
+      let toolResult: ToolCallResult;
+
+      switch (intercept.action) {
+        case "skip":
+          toolResult = intercept.result;
+          break;
+        case "intercept":
+          toolResult = intercept.result;
+          if (intercept.pendingWork) {
+            this.stateManager.addPendingWork(intercept.pendingWork);
+          }
+          break;
+        case "execute": {
+          const result = await this.toolExecutor.execute(
+            tc.name,
+            tc.arguments,
+            { taskId } as ToolContext,
+          );
+          toolResult = formatToolResult(tc.id, tc.name, result);
+          break;
+        }
+      }
+
+      collector.addResult(index, toolResult!);
+    })().catch((err) => {
+      logger.error({ err, taskId, toolName: tc.name }, "execute_tool_async_error");
+      collector.addResult(index, {
+        toolCallId: tc.id,
+        content: JSON.stringify({ error: err instanceof Error ? err.message : String(err) }),
+      });
+    });
+  }
+
+  /** Abstract hook: called when task completes. Subclasses emit events, persist results. */
+  protected abstract onTaskComplete(
+    taskId: string,
+    text: string,
+    finishReason: "complete" | "max_iterations" | "interrupted" | "error",
+  ): Promise<void>;
+
+  /** Hook called before each LLM call. Override for context window management. */
+  protected async beforeLLMCall(_taskId: string): Promise<void> {}
+
+  /** Create and register a TaskExecutionState. */
+  protected createTaskExecutionState(
+    taskId: string,
+    messages: Message[],
+    opts?: CreateTaskStateOptions,
+  ): TaskExecutionState {
+    const state = createTaskState(taskId, messages, {
+      maxIterations: opts?.maxIterations ?? this.maxIterations,
+      ...opts,
+    });
+    this.taskStates.set(taskId, state);
+    return state;
+  }
+
+  /** Remove a task execution state. */
+  protected removeTaskState(taskId: string): void {
+    this.taskStates.delete(taskId);
+  }
 }

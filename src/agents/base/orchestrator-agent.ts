@@ -316,4 +316,11 @@ export class OrchestratorAgent extends BaseAgent {
   protected override async handleEvent(_event: Event): Promise<void> {
     // No-op: OrchestratorAgent doesn't process external events
   }
+
+  /** Stub for processStep engine — OrchestratorAgent uses run() + runToolUseLoop(). */
+  protected override async onTaskComplete(
+    _taskId: string,
+    _text: string,
+    _finishReason: "complete" | "max_iterations" | "interrupted" | "error",
+  ): Promise<void> {}
 }
