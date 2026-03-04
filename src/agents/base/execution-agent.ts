@@ -24,11 +24,10 @@
  *        → _runReason → Thinker → REASON_DONE → transition(ACTING) → _runAct
  *        → Actor → ToolExecutor → TOOL_CALL_COMPLETED → transition(REASONING) → ...
  *
- *   New: ExecutionAgent.run() → toolUseLoop() → done.
+ *   New: ExecutionAgent.run() → processStep() → done.
  */
 
-import { BaseAgent, type BaseAgentDeps } from "./base-agent.ts";
-import type { ToolCallInterceptResult } from "./tool-use-loop.ts";
+import { BaseAgent, type BaseAgentDeps, type ToolCallInterceptResult } from "./base-agent.ts";
 import type { Message } from "../../infra/llm-types.ts";
 import type { Event } from "../../events/types.ts";
 import { EventType, createEvent } from "../../events/types.ts";

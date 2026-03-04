@@ -15,8 +15,7 @@
  *   - MCP servers
  */
 
-import { BaseAgent, type BaseAgentDeps } from "./base-agent.ts";
-import type { ToolCallInterceptResult } from "./tool-use-loop.ts";
+import { BaseAgent, type BaseAgentDeps, type ToolCallInterceptResult } from "./base-agent.ts";
 import type { PendingWork, PendingWorkResult } from "./agent-state.ts";
 import type { Message } from "../../infra/llm-types.ts";
 import type { Event } from "../../events/types.ts";

@@ -4,7 +4,7 @@
  * Provides:
  *   1. EventBus integration (subscribe/emit events)
  *   2. 3-state model (IDLE/BUSY/WAITING) via AgentStateManager
- *   3. Unified tool-use loop (replaces Thinker+Planner+Actor)
+ *   3. Event-driven processStep engine (non-blocking tool dispatch)
  *   4. Concurrency control (event queue for BUSY state)
  *   5. Hooks for subclass customization
  *
@@ -13,7 +13,7 @@
  *   - Override subscribeEvents()    — which EventBus events to handle
  *   - Override handleEvent()        — process a single event
  *   - Override onToolCall()         — intercept special tools (reply, spawn_task)
- *   - Override onLoopComplete()     — handle results (persist, reply)
+ *   - Override onTaskComplete()     — handle task completion
  */
 
 import type { LanguageModel, GenerateTextResult, Message } from "../../infra/llm-types.ts";
@@ -26,14 +26,9 @@ import type { ToolCall, ToolDefinition } from "../../models/tool.ts";
 import type { ToolResult, ToolContext } from "../../tools/types.ts";
 import {
   AgentStateManager,
+  type PendingWork,
   type PendingWorkResult,
 } from "./agent-state.ts";
-import {
-  toolUseLoop,
-  type ToolUseLoopOptions,
-  type ToolUseLoopResult,
-  type ToolCallInterceptResult,
-} from "./tool-use-loop.ts";
 import { ToolCallCollector, type ToolCallResult } from "./tool-call-collector.ts";
 import { createTaskState, type TaskExecutionState, type CreateTaskStateOptions } from "./task-execution-state.ts";
 import { getLogger } from "../../infra/logger.ts";
@@ -61,7 +56,6 @@ export interface BaseAgentDeps {
 
 /**
  * Convert a ToolResult (from ToolExecutor) to a ToolCallResult (for ToolCallCollector).
- * Adapted from tool-use-loop.ts formatToolResult but returns ToolCallResult instead of Message.
  */
 export function formatToolResult(
   toolCallId: string,
@@ -85,6 +79,20 @@ export function formatToolResult(
 
   return tcResult;
 }
+
+// ── Types ────────────────────────────────────────────
+
+/**
+ * How a tool call should be handled.
+ *
+ *   "execute"   — proceed with normal tool execution via ToolExecutor
+ *   "skip"      — skip execution, inject the provided synthetic result
+ *   "intercept" — subclass handled it, inject the provided result + optional pending work
+ */
+export type ToolCallInterceptResult =
+  | { action: "execute" }
+  | { action: "skip"; result: ToolCallResult }
+  | { action: "intercept"; result: ToolCallResult; pendingWork?: PendingWork };
 
 // ── BaseAgent ────────────────────────────────────────
 
@@ -144,58 +152,6 @@ export abstract class BaseAgent {
   }
 
   // ═══════════════════════════════════════════════════
-  // Core: Run Tool-Use Loop with State Management
-  // ═══════════════════════════════════════════════════
-
-  /**
-   * Run a tool-use loop with automatic state management.
-   *
-   * - Transitions to BUSY on entry
-   * - Transitions to WAITING if pending work dispatched
-   * - Transitions to IDLE on completion (if no pending work)
-   * - Drains queued events after loop completes
-   */
-  protected async runToolUseLoop(
-    options: Omit<ToolUseLoopOptions, "model" | "toolExecutor" | "toolContext" | "onToolCall" | "onLLMUsage"> & {
-      model?: LanguageModel;
-      toolContext?: ToolContext;
-    },
-  ): Promise<ToolUseLoopResult> {
-    this.stateManager.markBusy();
-
-    try {
-      const result = await toolUseLoop({
-        ...options,
-        model: options.model ?? this.model,
-        toolExecutor: this.toolExecutor,
-        toolContext: options.toolContext ?? { taskId: this.agentId },
-        tools: options.tools ?? this.getTools(),
-        maxIterations: options.maxIterations ?? this.maxIterations,
-        onToolCall: (tc) => this.onToolCall(tc),
-        onLLMUsage: (r) => this.onLLMUsage(r),
-      });
-
-      // Register any pending work from the loop
-      for (const pw of result.pendingWork) {
-        this.stateManager.addPendingWork(pw);
-      }
-
-      // Notify subclass
-      await this.onLoopComplete(result);
-
-      return result;
-    } finally {
-      // If we have pending work, stay WAITING. Otherwise, go IDLE.
-      if (this.stateManager.pendingCount === 0) {
-        this.stateManager.markIdle();
-      }
-
-      // Drain any events that arrived while we were BUSY
-      await this.drainEventQueue();
-    }
-  }
-
-  // ═══════════════════════════════════════════════════
   // Event Queue Management
   // ═══════════════════════════════════════════════════
 
@@ -244,7 +200,7 @@ export abstract class BaseAgent {
   // Subclass Hooks
   // ═══════════════════════════════════════════════════
 
-  /** Build the system prompt. Called before each tool-use loop or processStep. */
+  /** Build the system prompt. Called before each processStep LLM call. */
   protected abstract buildSystemPrompt(taskId?: string): string;
 
   /** Subscribe to EventBus events. Called during start(). */
@@ -273,9 +229,6 @@ export abstract class BaseAgent {
   ): Promise<ToolCallInterceptResult> {
     return { action: "execute" };
   }
-
-  /** Called when a tool-use loop completes. Subclasses persist results, send replies. */
-  protected async onLoopComplete(_result: ToolUseLoopResult): Promise<void> {}
 
   /** Called after each LLM call. Subclasses track usage, trigger compaction. */
   protected async onLLMUsage(_result: GenerateTextResult): Promise<void> {}

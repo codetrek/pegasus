@@ -5,7 +5,6 @@
  *   - Constructor wiring (agentId, model, toolRegistry)
  *   - Lifecycle (start/stop, isRunning)
  *   - State manager accessibility
- *   - Tool-use loop state transitions (BUSY→IDLE, BUSY→WAITING)
  *   - Event queue (immediate processing, queuing when BUSY, drain on complete)
  *   - processStep event-driven engine (non-blocking tool dispatch, task completion)
  */
@@ -13,7 +12,6 @@
 import { describe, test, expect, mock } from "bun:test";
 import { BaseAgent, type BaseAgentDeps } from "../../../../src/agents/base/base-agent.ts";
 import { AgentState } from "../../../../src/agents/base/agent-state.ts";
-import type { ToolUseLoopResult } from "../../../../src/agents/base/tool-use-loop.ts";
 import type { Event } from "../../../../src/events/types.ts";
 import { EventType, createEvent } from "../../../../src/events/types.ts";
 import type { LanguageModel, Message } from "../../../../src/infra/llm-types.ts";
@@ -69,17 +67,6 @@ class TestAgent extends BaseAgent {
     finishReason: "complete" | "max_iterations" | "interrupted" | "error",
   ): Promise<void> {
     await this.onTaskCompleteMock(taskId, text, finishReason);
-  }
-
-  /** Expose protected runToolUseLoop for testing. */
-  async testRunToolUseLoop(
-    opts?: Partial<Parameters<BaseAgent["runToolUseLoop"]>[0]>,
-  ): Promise<ToolUseLoopResult> {
-    return this.runToolUseLoop({
-      systemPrompt: "test prompt",
-      messages: [],
-      ...opts,
-    });
   }
 
   /** Expose protected queueEvent for testing. */
@@ -224,91 +211,6 @@ describe("BaseAgent", () => {
 
       agent.stateManager.markIdle();
       expect(agent.stateManager.canAcceptWork).toBe(true);
-    });
-  });
-
-  describe("runToolUseLoop() transitions BUSY → IDLE", () => {
-    test("transitions to IDLE when loop completes with no pending work", async () => {
-      const model = createMockModel({
-        generate: mock(async () => ({
-          text: "done",
-          finishReason: "stop",
-          usage: { promptTokens: 10, completionTokens: 5 },
-        })),
-      });
-      const agent = createTestAgent({ model });
-
-      expect(agent.stateManager.state).toBe(AgentState.IDLE);
-
-      const result = await agent.testRunToolUseLoop();
-
-      expect(result.finishReason).toBe("complete");
-      expect(result.text).toBe("done");
-      expect(agent.stateManager.state).toBe(AgentState.IDLE);
-    });
-  });
-
-  describe("runToolUseLoop() transitions BUSY → WAITING when pendingWork dispatched", () => {
-    test("transitions to WAITING when loop has pending work", async () => {
-      // Model returns a tool call that gets intercepted with pendingWork
-      let callCount = 0;
-      const model = createMockModel({
-        generate: mock(async () => {
-          callCount++;
-          if (callCount === 1) {
-            return {
-              text: "",
-              finishReason: "tool_calls",
-              toolCalls: [
-                { id: "tc-1", name: "spawn_task", arguments: { description: "test" } },
-              ],
-              usage: { promptTokens: 10, completionTokens: 5 },
-            };
-          }
-          // Second call: no tool calls, loop ends
-          return {
-            text: "waiting for child",
-            finishReason: "stop",
-            usage: { promptTokens: 10, completionTokens: 5 },
-          };
-        }),
-      });
-
-      // Create an agent that intercepts spawn_task with pendingWork
-      class PendingWorkAgent extends TestAgent {
-        protected override async onToolCall(tc: any) {
-          if (tc.name === "spawn_task") {
-            return {
-              action: "intercept" as const,
-              result: {
-                toolCallId: tc.id,
-                content: JSON.stringify({ childId: "child-1" }),
-              },
-              pendingWork: {
-                id: "child-1",
-                kind: "child_agent" as const,
-                description: "test child",
-                dispatchedAt: Date.now(),
-              },
-            };
-          }
-          return { action: "execute" as const };
-        }
-      }
-
-      const agent = new PendingWorkAgent({
-        agentId: "pending-agent",
-        model,
-        toolRegistry: createMockRegistry(),
-      });
-
-      const result = await agent.testRunToolUseLoop();
-
-      // Loop completed, but pending work was dispatched
-      expect(result.pendingWork).toHaveLength(1);
-      expect(result.pendingWork[0]!.id).toBe("child-1");
-      // State should be WAITING because there's pending work
-      expect(agent.stateManager.state).toBe(AgentState.WAITING);
     });
   });
 
@@ -459,7 +361,6 @@ describe("BaseAgent", () => {
     test("getTools returns toLLMTools from registry", () => {
       const registry = createMockRegistry();
       const agent = createTestAgent({ toolRegistry: registry });
-      // getTools is called internally by runToolUseLoop; verify via public method
       const tools = (agent as any).getTools();
       expect(Array.isArray(tools)).toBe(true);
       expect(tools).toHaveLength(0); // empty registry
