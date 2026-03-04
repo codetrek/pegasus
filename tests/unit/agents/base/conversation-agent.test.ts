@@ -21,6 +21,8 @@ import type {
 import type { InboundMessage, ChannelInfo } from "../../../../src/channels/types.ts";
 import type { Persona } from "../../../../src/identity/persona.ts";
 import { ToolRegistry } from "../../../../src/tools/registry.ts";
+import { EventBus } from "../../../../src/events/bus.ts";
+import { EventType, createEvent } from "../../../../src/events/types.ts";
 import { mkdtemp } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -68,6 +70,11 @@ class TestConversationAgent extends ConversationAgent {
   /** Expose lastChannel for assertions. */
   getLastChannel(): ChannelInfo {
     return this.lastChannel;
+  }
+
+  /** Expose taskStates for assertions. */
+  getTaskStates(): Map<string, unknown> {
+    return this.taskStates;
   }
 }
 
@@ -409,90 +416,304 @@ describe("ConversationAgent", () => {
     });
   });
 
-  describe("queue processes items sequentially (processing lock)", () => {
-    test("concurrent sends are serialized via processing lock", async () => {
-      const callOrder: number[] = [];
-      let callIndex = 0;
-
-      const model = createMockModel(
-        mock(async () => {
-          callIndex++;
-          callOrder.push(callIndex);
-          // Add a small delay to simulate LLM processing
-          await new Promise((r) => setTimeout(r, 30));
-          return {
-            text: `response-${callIndex}`,
-            finishReason: "stop" as const,
-            usage: { promptTokens: 10, completionTokens: 5 },
-          };
-        }),
-      );
-
+  describe("_think() completes via processStep", () => {
+    test("_think() uses processStep and updates session messages with text response", async () => {
+      const generateMock = mock(async () => ({
+        text: "thinking result",
+        finishReason: "stop" as const,
+        usage: { promptTokens: 10, completionTokens: 5 },
+      }));
+      const model = createMockModel(generateMock);
       const agent = new TestConversationAgent(createTestDeps({ model }));
       await agent.start();
 
-      // Send multiple messages rapidly
-      agent.send(makeInboundMessage("msg-1"));
-      agent.send(makeInboundMessage("msg-2"));
-      agent.send(makeInboundMessage("msg-3"));
+      agent.send(makeInboundMessage("trigger thinking"));
 
-      // Wait for all to process
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 300));
 
-      // All messages should have been processed
       const msgs = agent.getSessionMessages();
-      const userMsgs = msgs.filter((m) => m.role === "user");
-      expect(userMsgs.length).toBe(3);
+      // Should have: user message + assistant response
+      expect(msgs.length).toBeGreaterThanOrEqual(2);
+      expect(msgs[0]!.role).toBe("user");
+      expect(msgs[0]!.content).toBe("trigger thinking");
+      // The assistant message is appended by processStep
+      const assistantMsg = msgs.find((m) => m.role === "assistant");
+      expect(assistantMsg).toBeDefined();
+      expect(assistantMsg!.content).toBe("thinking result");
 
-      // Call order should be sequential (1, 2, 3)
-      expect(callOrder).toEqual([1, 2, 3]);
+      // LLM should have been called exactly once (no tool calls → complete)
+      expect(generateMock).toHaveBeenCalledTimes(1);
 
       await agent.stop();
     });
 
-    test("second send() returns immediately while first is processing", async () => {
-      let resolveFirst: (() => void) | null = null;
-      let firstCallStarted = false;
+    test("_think() handles tool calls via processStep", async () => {
       let callIndex = 0;
-
-      const model = createMockModel(
-        mock(async () => {
-          callIndex++;
-          if (callIndex === 1) {
-            firstCallStarted = true;
-            // Block until we release
-            await new Promise<void>((r) => {
-              resolveFirst = r;
-            });
-          }
+      const generateMock = mock(async () => {
+        callIndex++;
+        if (callIndex === 1) {
+          // First call: LLM returns a reply tool call (intercepted)
           return {
-            text: `r-${callIndex}`,
-            finishReason: "stop" as const,
+            text: "",
+            finishReason: "tool_calls" as const,
+            toolCalls: [
+              {
+                id: "tc-proc-1",
+                name: "reply",
+                arguments: { text: "Step result!" },
+              },
+            ],
             usage: { promptTokens: 10, completionTokens: 5 },
           };
-        }),
-      );
+        }
+        // Second call: LLM finishes
+        return {
+          text: "all done",
+          finishReason: "stop" as const,
+          usage: { promptTokens: 10, completionTokens: 5 },
+        };
+      });
 
+      const model = createMockModel(generateMock);
       const agent = new TestConversationAgent(createTestDeps({ model }));
       await agent.start();
 
-      // First send will block on LLM
-      agent.send(makeInboundMessage("first"));
-      await new Promise((r) => setTimeout(r, 50));
-      expect(firstCallStarted).toBe(true);
+      const replyCb = mock((_msg: any) => {});
+      agent.onReply(replyCb);
 
-      // Second send should not block (returns immediately, queued)
-      agent.send(makeInboundMessage("second"));
+      agent.send(makeInboundMessage("do something"));
 
-      // Only 1 LLM call so far (second is queued)
-      expect(callIndex).toBe(1);
+      await new Promise((r) => setTimeout(r, 500));
 
-      // Release first
-      resolveFirst!();
+      // reply callback should have been triggered
+      expect(replyCb).toHaveBeenCalled();
+      expect(replyCb.mock.calls[0]![0].text).toBe("Step result!");
+
+      // LLM should have been called twice (tool call → finish)
+      expect(generateMock).toHaveBeenCalledTimes(2);
+
+      await agent.stop();
+    });
+
+    test("_think() creates and cleans up task state", async () => {
+      const generateMock = mock(async () => ({
+        text: "done",
+        finishReason: "stop" as const,
+        usage: { promptTokens: 10, completionTokens: 5 },
+      }));
+      const model = createMockModel(generateMock);
+      const agent = new TestConversationAgent(createTestDeps({ model }));
+      await agent.start();
+
+      agent.send(makeInboundMessage("check state"));
+
       await new Promise((r) => setTimeout(r, 300));
 
-      // Now both should be processed
-      expect(callIndex).toBe(2);
+      // After completion, task state should be cleaned up
+      expect(agent.getTaskStates().has("session")).toBe(false);
+
+      await agent.stop();
+    });
+  });
+
+  describe("subscribeEvents registers child event handlers", () => {
+    test("subscribeEvents subscribes to TASK_COMPLETED and TASK_FAILED", async () => {
+      const eventBus = new EventBus();
+      const agent = new TestConversationAgent(
+        createTestDeps({ eventBus }),
+      );
+
+      // start() calls subscribeEvents()
+      await agent.start();
+
+      // Add pending work so the event filter matches
+      agent.stateManager.markBusy();
+      agent.stateManager.addPendingWork({
+        id: "child-ev-1",
+        kind: "child_agent",
+        description: "test child",
+        dispatchedAt: Date.now(),
+      });
+
+      // Emit a TASK_COMPLETED event for the pending child
+      const completedEvent = createEvent(EventType.TASK_COMPLETED, {
+        source: "child-ev-1",
+        taskId: "child-ev-1",
+        payload: { result: "child done" },
+      });
+
+      // The event should be queued/handled (agent is WAITING, can accept work)
+      await eventBus.emit(completedEvent);
+
+      await new Promise((r) => setTimeout(r, 300));
+
+      // Child result should be injected into session
+      const msgs = agent.getSessionMessages();
+      const childMsg = msgs.find(
+        (m) => typeof m.content === "string" && m.content.includes("Child agent child-ev-1 completed"),
+      );
+      expect(childMsg).toBeDefined();
+
+      await agent.stop();
+    });
+
+    test("subscribeEvents ignores events for non-pending tasks", async () => {
+      const eventBus = new EventBus();
+      const generateMock = mock(async () => ({
+        text: "response",
+        finishReason: "stop" as const,
+        usage: { promptTokens: 10, completionTokens: 5 },
+      }));
+      const model = createMockModel(generateMock);
+      const agent = new TestConversationAgent(
+        createTestDeps({ model, eventBus }),
+      );
+      await agent.start();
+
+      // Emit event for a task ID that is NOT in pendingWork
+      const unknownEvent = createEvent(EventType.TASK_COMPLETED, {
+        source: "unknown-child",
+        taskId: "unknown-child",
+        payload: { result: "should be ignored" },
+      });
+
+      await eventBus.emit(unknownEvent);
+
+      await new Promise((r) => setTimeout(r, 200));
+
+      // No child result message should appear in session
+      const msgs = agent.getSessionMessages();
+      const childMsg = msgs.find(
+        (m) => typeof m.content === "string" && m.content.includes("unknown-child"),
+      );
+      expect(childMsg).toBeUndefined();
+
+      await agent.stop();
+    });
+  });
+
+  describe("handleEvent processes child completion", () => {
+    test("handleEvent processes TASK_COMPLETED for pending child", async () => {
+      const generateMock = mock(async () => ({
+        text: "processed child result",
+        finishReason: "stop" as const,
+        usage: { promptTokens: 10, completionTokens: 5 },
+      }));
+      const model = createMockModel(generateMock);
+      const eventBus = new EventBus();
+      const agent = new TestConversationAgent(
+        createTestDeps({ model, eventBus }),
+      );
+      await agent.start();
+
+      // Add pending work
+      agent.stateManager.markBusy();
+      agent.stateManager.addPendingWork({
+        id: "child-handle-1",
+        kind: "child_agent",
+        description: "test child handle",
+        dispatchedAt: Date.now(),
+      });
+
+      // Emit TASK_COMPLETED
+      await eventBus.emit(
+        createEvent(EventType.TASK_COMPLETED, {
+          source: "child-handle-1",
+          taskId: "child-handle-1",
+          payload: { result: "task output data" },
+        }),
+      );
+
+      await new Promise((r) => setTimeout(r, 500));
+
+      // Child result should be injected into session
+      const msgs = agent.getSessionMessages();
+      const childMsg = msgs.find(
+        (m) => typeof m.content === "string" && m.content.includes("Child agent child-handle-1 completed"),
+      );
+      expect(childMsg).toBeDefined();
+      expect(childMsg!.content).toContain("task output data");
+
+      // Pending work should be removed
+      expect(agent.stateManager.pendingWork.has("child-handle-1")).toBe(false);
+
+      // LLM should have been called to process the result
+      expect(generateMock).toHaveBeenCalled();
+
+      await agent.stop();
+    });
+
+    test("handleEvent processes TASK_FAILED for pending child", async () => {
+      const generateMock = mock(async () => ({
+        text: "handled failure",
+        finishReason: "stop" as const,
+        usage: { promptTokens: 10, completionTokens: 5 },
+      }));
+      const model = createMockModel(generateMock);
+      const eventBus = new EventBus();
+      const agent = new TestConversationAgent(
+        createTestDeps({ model, eventBus }),
+      );
+      await agent.start();
+
+      // Add pending work
+      agent.stateManager.markBusy();
+      agent.stateManager.addPendingWork({
+        id: "child-fail-1",
+        kind: "child_agent",
+        description: "failing child handle",
+        dispatchedAt: Date.now(),
+      });
+
+      // Emit TASK_FAILED
+      await eventBus.emit(
+        createEvent(EventType.TASK_FAILED, {
+          source: "child-fail-1",
+          taskId: "child-fail-1",
+          payload: { error: "out of memory" },
+        }),
+      );
+
+      await new Promise((r) => setTimeout(r, 500));
+
+      // Error result should be injected into session
+      const msgs = agent.getSessionMessages();
+      const errMsg = msgs.find(
+        (m) => typeof m.content === "string" && m.content.includes("Child agent child-fail-1 failed"),
+      );
+      expect(errMsg).toBeDefined();
+      expect(errMsg!.content).toContain("Error: out of memory");
+
+      // Pending work should be removed
+      expect(agent.stateManager.pendingWork.has("child-fail-1")).toBe(false);
+
+      await agent.stop();
+    });
+  });
+
+  describe("onTaskComplete resolves completion promise", () => {
+    test("onTaskComplete resolves the promise and cleans up task state", async () => {
+      const generateMock = mock(async () => ({
+        text: "final answer",
+        finishReason: "stop" as const,
+        usage: { promptTokens: 10, completionTokens: 5 },
+      }));
+      const model = createMockModel(generateMock);
+      const agent = new TestConversationAgent(createTestDeps({ model }));
+      await agent.start();
+
+      // Send a message which triggers _think -> processStep -> onTaskComplete
+      agent.send(makeInboundMessage("complete me"));
+
+      await new Promise((r) => setTimeout(r, 300));
+
+      // Task state should be cleaned up after completion
+      expect(agent.getTaskStates().size).toBe(0);
+
+      // Session should have both user and assistant messages
+      const msgs = agent.getSessionMessages();
+      expect(msgs.some((m) => m.role === "user" && m.content === "complete me")).toBe(true);
+      expect(msgs.some((m) => m.role === "assistant" && m.content === "final answer")).toBe(true);
 
       await agent.stop();
     });
