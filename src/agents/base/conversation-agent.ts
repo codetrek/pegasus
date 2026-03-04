@@ -1,0 +1,321 @@
+/**
+ * ConversationAgent — manages persistent conversations with users.
+ *
+ * Key responsibilities:
+ *   1. Session management (persist conversation history to JSONL)
+ *   2. Reply routing (send responses to the right channel)
+ *   3. Spawning child agents (delegate complex work)
+ *   4. Queue-based message processing (one think() at a time)
+ *
+ * MainAgent is a specialized ConversationAgent with additional capabilities:
+ *   - Multi-channel routing (CLI, Telegram, etc.)
+ *   - Security (owner verification)
+ *   - Project/SubAgent management
+ *   - Memory system
+ *   - MCP servers
+ */
+
+import { BaseAgent, type BaseAgentDeps } from "./base-agent.ts";
+import type { ToolCallInterceptResult } from "./tool-use-loop.ts";
+import type { PendingWork, PendingWorkResult } from "./agent-state.ts";
+import type { Message } from "../../infra/llm-types.ts";
+import type { Event } from "../../events/types.ts";
+import type { ToolCall } from "../../models/tool.ts";
+import type { Persona } from "../../identity/persona.ts";
+import type {
+  ChannelInfo,
+  InboundMessage,
+  OutboundMessage,
+} from "../../channels/types.ts";
+import { SessionStore } from "../../session/store.ts";
+import { getLogger } from "../../infra/logger.ts";
+
+const logger = getLogger("conversation_agent");
+
+// ── Types ────────────────────────────────────────────
+
+export interface ConversationAgentDeps extends BaseAgentDeps {
+  /** Agent persona (identity + personality). */
+  persona: Persona;
+  /** Session directory for JSONL persistence. */
+  sessionDir: string;
+}
+
+/** Callback for sending replies to channel adapters. */
+export type ReplyCallback = (msg: OutboundMessage) => void;
+
+/**
+ * Callback for spawning child agents.
+ * Returns the child agent ID.
+ */
+export type SpawnAgentCallback = (
+  kind: "orchestrator" | "execution",
+  config: Record<string, unknown>,
+) => string;
+
+/** Queue item — what arrives from the outside world. */
+type QueueItem =
+  | { kind: "message"; message: InboundMessage }
+  | { kind: "child_complete"; childId: string; result: PendingWorkResult }
+  | { kind: "think"; channel: ChannelInfo };
+
+// ── ConversationAgent ────────────────────────────────
+
+export abstract class ConversationAgent extends BaseAgent {
+  protected persona: Persona;
+  protected sessionStore: SessionStore;
+  protected sessionMessages: Message[] = [];
+
+  private _onReply: ReplyCallback | null = null;
+  private _onSpawnAgent: SpawnAgentCallback | null = null;
+
+  private queue: QueueItem[] = [];
+  private processing = false;
+  protected lastChannel: ChannelInfo = { type: "cli", channelId: "main" };
+
+  constructor(deps: ConversationAgentDeps) {
+    super(deps);
+    this.persona = deps.persona;
+    this.sessionStore = new SessionStore(deps.sessionDir);
+  }
+
+  // ═══════════════════════════════════════════════════
+  // Public API
+  // ═══════════════════════════════════════════════════
+
+  /** Register callback for outbound replies. */
+  onReply(callback: ReplyCallback): void {
+    this._onReply = callback;
+  }
+
+  /** Register callback for spawning child agents. */
+  onSpawnAgent(callback: SpawnAgentCallback): void {
+    this._onSpawnAgent = callback;
+  }
+
+  /** Send an inbound message to this conversation agent. */
+  send(message: InboundMessage): void {
+    this.queue.push({ kind: "message", message });
+    this._processQueue();
+  }
+
+  /** Notify that a child agent completed. */
+  childComplete(childId: string, result: PendingWorkResult): void {
+    this.queue.push({ kind: "child_complete", childId, result });
+    this._processQueue();
+  }
+
+  // ═══════════════════════════════════════════════════
+  // Lifecycle
+  // ═══════════════════════════════════════════════════
+
+  protected override async onStart(): Promise<void> {
+    // Load existing session history
+    this.sessionMessages = await this.sessionStore.load();
+    logger.info(
+      { agentId: this.agentId, messageCount: this.sessionMessages.length },
+      "session_loaded",
+    );
+  }
+
+  // ═══════════════════════════════════════════════════
+  // Queue Processing
+  // ═══════════════════════════════════════════════════
+
+  private _processQueue(): void {
+    if (this.processing) return;
+    this.processing = true;
+    this._drainQueue().finally(() => {
+      this.processing = false;
+    });
+  }
+
+  private async _drainQueue(): Promise<void> {
+    while (this.queue.length > 0) {
+      const item = this.queue.shift()!;
+      try {
+        switch (item.kind) {
+          case "message":
+            await this._handleMessage(item.message);
+            break;
+          case "child_complete":
+            await this._handleChildComplete(item.childId, item.result);
+            break;
+          case "think":
+            await this._think(item.channel);
+            break;
+        }
+      } catch (err) {
+        logger.error({ error: err, agentId: this.agentId, kind: item.kind }, "queue_item_error");
+        // Try to send error reply for user messages
+        if (item.kind === "message" && this._onReply) {
+          this._onReply({
+            text: `Internal error: ${err instanceof Error ? err.message : String(err)}`,
+            channel: item.message.channel,
+          });
+        }
+      }
+    }
+  }
+
+  // ═══════════════════════════════════════════════════
+  // Message Handling
+  // ═══════════════════════════════════════════════════
+
+  private async _handleMessage(message: InboundMessage): Promise<void> {
+    this.lastChannel = message.channel;
+
+    // Add user message to session
+    const userMsg: Message = { role: "user", content: message.text };
+    if (message.images?.length) userMsg.images = message.images;
+    this.sessionMessages.push(userMsg);
+    await this.sessionStore.append(userMsg, { channel: message.channel });
+
+    // Run thinking
+    await this._think(message.channel);
+  }
+
+  private async _handleChildComplete(
+    childId: string,
+    result: PendingWorkResult,
+  ): Promise<void> {
+    // Remove from pending work tracking
+    await this.completePendingWork(result);
+
+    // Inject child result as a system message into session
+    const resultText = result.success
+      ? typeof result.result === "string"
+        ? result.result
+        : JSON.stringify(result.result)
+      : `Error: ${result.error}`;
+
+    const systemMsg: Message = {
+      role: "user",
+      content: `[Child agent ${childId} ${result.success ? "completed" : "failed"}]\n${resultText}`,
+    };
+    this.sessionMessages.push(systemMsg);
+    await this.sessionStore.append(systemMsg);
+
+    // Trigger thinking to process the result
+    await this._think(this.lastChannel);
+  }
+
+  /**
+   * Run one step of thinking via the tool-use loop.
+   *
+   * Unlike the old FSM-driven approach, this is direct:
+   *   Call runToolUseLoop() → persist new messages → done.
+   */
+  protected async _think(_channel: ChannelInfo): Promise<void> {
+    const result = await this.runToolUseLoop({
+      systemPrompt: this.buildSystemPrompt(),
+      messages: this.sessionMessages,
+    });
+
+    // Persist new messages to session
+    for (const msg of result.newMessages) {
+      // Skip messages already in sessionMessages (trigger message)
+      if (!this.sessionMessages.includes(msg)) {
+        this.sessionMessages.push(msg);
+      }
+      await this.sessionStore.append(msg);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════
+  // Tool Call Interception
+  // ═══════════════════════════════════════════════════
+
+  protected override async onToolCall(tc: ToolCall): Promise<ToolCallInterceptResult> {
+    if (tc.name === "reply") {
+      return this._interceptReply(tc);
+    }
+    if (tc.name === "spawn_task" || tc.name === "spawn_subagent") {
+      return this._interceptSpawn(tc);
+    }
+    // Everything else: normal execution
+    return { action: "execute" };
+  }
+
+  private _interceptReply(tc: ToolCall): ToolCallInterceptResult {
+    if (!this._onReply) {
+      return {
+        action: "skip",
+        result: {
+          toolCallId: tc.id,
+          content: JSON.stringify({ error: "No reply callback configured" }),
+        },
+      };
+    }
+
+    const args = tc.arguments as Record<string, unknown>;
+    const text = (args.text as string) ?? "";
+    const channelId = (args.channelId as string) ?? this.lastChannel.channelId;
+    const channelType = (args.channelType as string) ?? this.lastChannel.type;
+    const replyTo = args.replyTo as string | undefined;
+
+    this._onReply({
+      text,
+      channel: { type: channelType, channelId, replyTo },
+    });
+
+    return {
+      action: "skip",
+      result: {
+        toolCallId: tc.id,
+        content: JSON.stringify({ delivered: true }),
+      },
+    };
+  }
+
+  private _interceptSpawn(tc: ToolCall): ToolCallInterceptResult {
+    if (!this._onSpawnAgent) {
+      return {
+        action: "skip",
+        result: {
+          toolCallId: tc.id,
+          content: JSON.stringify({ error: "Agent spawning not configured" }),
+        },
+      };
+    }
+
+    const kind = tc.name === "spawn_subagent" ? "orchestrator" : "execution";
+    const childId = this._onSpawnAgent(kind, tc.arguments as Record<string, unknown>);
+
+    const pendingWork: PendingWork = {
+      id: childId,
+      kind: "child_agent",
+      description: (tc.arguments as Record<string, unknown>).description as string ?? tc.name,
+      dispatchedAt: Date.now(),
+    };
+
+    return {
+      action: "intercept",
+      result: {
+        toolCallId: tc.id,
+        content: JSON.stringify({ childId, status: "spawned" }),
+      },
+      pendingWork,
+    };
+  }
+
+  // ═══════════════════════════════════════════════════
+  // EventBus (ConversationAgent uses queue, not EventBus)
+  // ═══════════════════════════════════════════════════
+
+  protected override subscribeEvents(): void {
+    // ConversationAgent primarily uses queue-based message processing.
+    // Subclasses (MainAgent) may override to subscribe to specific events.
+  }
+
+  protected override async handleEvent(_event: Event): Promise<void> {
+    // Default: no-op. MainAgent overrides this.
+  }
+
+  // ═══════════════════════════════════════════════════
+  // Abstract: subclasses must implement
+  // ═══════════════════════════════════════════════════
+
+  /** Build the system prompt for this conversation agent. */
+  protected abstract override buildSystemPrompt(): string;
+}
