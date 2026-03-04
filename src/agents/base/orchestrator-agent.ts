@@ -1,19 +1,17 @@
 /**
  * OrchestratorAgent — decomposes complex tasks and coordinates execution.
  *
- * Lifecycle:
- *   1. Receives task description + input from parent
- *   2. Runs tool-use loop with planning tools + spawn_task
- *   3. LLM decomposes work, spawns ExecutionAgents
- *   4. Collects results from child agents
- *   5. Synthesizes final result
- *   6. Notifies parent of completion
+ * Lifecycle (event-driven):
+ *   1. Receives TASK_CREATED event → starts orchestration via processStep
+ *   2. LLM decomposes work, spawns ExecutionAgents via spawn_task tool
+ *   3. Child task IDs tracked in childTaskIds set
+ *   4. TASK_COMPLETED/TASK_FAILED events for children → collect results
+ *   5. When all children done → synthesize final result via processStep
+ *   6. Notify parent of completion
  *
- * Key design: OrchestratorAgent uses the SAME tool-use loop as
- * ConversationAgent and ExecutionAgent. The difference is:
- *   - Its tool set includes spawn_task (for delegation) + notify (for progress)
- *   - It does NOT have reply (cannot talk to users)
- *   - Its onToolCall() intercepts spawn_task to create child ExecutionAgents
+ * Key change from old design:
+ *   Old: _waitForChildren() polling with 100ms setTimeout loop
+ *   New: EventBus subscription — child completion events drive synthesis
  */
 
 import { BaseAgent, type BaseAgentDeps } from "./base-agent.ts";
@@ -21,6 +19,7 @@ import type { ToolCallInterceptResult } from "./tool-use-loop.ts";
 import type { PendingWork } from "./agent-state.ts";
 import type { Message } from "../../infra/llm-types.ts";
 import type { Event } from "../../events/types.ts";
+import { EventType, createEvent } from "../../events/types.ts";
 import type { ToolCall } from "../../models/tool.ts";
 import { SessionStore } from "../../session/store.ts";
 import { getLogger } from "../../infra/logger.ts";
@@ -83,6 +82,12 @@ export class OrchestratorAgent extends BaseAgent {
   private onNotifyParent: (notification: OrchestratorNotification) => void;
   private childResults = new Map<string, { success: boolean; result?: unknown; error?: string }>();
 
+  /** Track spawned child task IDs for event-driven completion. */
+  private childTaskIds = new Set<string>();
+
+  /** Holds the last orchestration result for backward-compat run() to resolve. */
+  private _lastResult: OrchestratorResult | null = null;
+
   constructor(deps: OrchestratorAgentDeps) {
     super(deps);
     this.taskDescription = deps.taskDescription;
@@ -94,16 +99,29 @@ export class OrchestratorAgent extends BaseAgent {
   }
 
   // ═══════════════════════════════════════════════════
-  // Execution
+  // Execution (backward-compat wrapper)
   // ═══════════════════════════════════════════════════
 
   /**
    * Run the orchestration to completion.
    *
-   * Unlike ConversationAgent (event-driven, long-lived),
-   * OrchestratorAgent runs to completion and returns.
+   * Backward-compatible wrapper: creates a TaskExecutionState,
+   * drives processStep(), and resolves when onTaskComplete fires.
    */
   async run(): Promise<OrchestratorResult> {
+    return new Promise<OrchestratorResult>((resolve) => {
+      // Load session, create state, start orchestration
+      this._initAndStart(resolve).catch((err) => {
+        const errorResult: OrchestratorResult = {
+          success: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+        resolve(errorResult);
+      });
+    });
+  }
+
+  private async _initAndStart(resolve: (result: OrchestratorResult) => void): Promise<void> {
     // Load session history (for resume support)
     this.sessionMessages = await this.sessionStore.load();
 
@@ -114,50 +132,77 @@ export class OrchestratorAgent extends BaseAgent {
       await this.sessionStore.append(userMsg);
     }
 
-    // Main orchestration loop
-    const result = await this.runToolUseLoop({
-      systemPrompt: this.buildSystemPrompt(),
-      messages: this.sessionMessages,
+    // Create task state with completion promise
+    this.createTaskExecutionState(this.agentId, [...this.sessionMessages], {
+      maxIterations: this.maxIterations,
+      metadata: { description: this.taskDescription },
+      onComplete: () => {
+        resolve(this._lastResult!);
+      },
     });
 
-    // Persist new messages
-    for (const msg of result.newMessages) {
-      await this.sessionStore.append(msg);
+    // Subscribe to child events if EventBus is running
+    this.subscribeEvents();
+
+    // Start the EventBus if not already running
+    if (!this.eventBus.isRunning) {
+      await this.eventBus.start();
     }
 
-    // Wait for any pending child agents
-    if (result.pendingWork.length > 0) {
-      await this._waitForChildren(result.pendingWork);
+    // Start orchestration
+    await this._startOrchestration();
+  }
 
-      // Run one more loop to synthesize results
-      const synthesisResult = await this.runToolUseLoop({
-        systemPrompt: this.buildSystemPrompt(),
-        messages: [...this.sessionMessages, ...result.newMessages],
-        triggerMessage: {
-          role: "user",
-          content: this._formatChildResults(),
-        },
-        maxIterations: 5, // Synthesis shouldn't need many iterations
-      });
+  // ═══════════════════════════════════════════════════
+  // Event-Driven: _startOrchestration
+  // ═══════════════════════════════════════════════════
 
-      for (const msg of synthesisResult.newMessages) {
-        await this.sessionStore.append(msg);
+  /**
+   * Start orchestration from an event trigger (TASK_CREATED) or run().
+   * Loads session if needed, creates TaskExecutionState, kicks off processStep.
+   */
+  private async _startOrchestration(): Promise<void> {
+    // If no task state yet (event-driven path), create one
+    if (!this.taskStates.has(this.agentId)) {
+      this.sessionMessages = await this.sessionStore.load();
+      if (this.sessionMessages.length === 0) {
+        const userMsg: Message = { role: "user", content: this.input };
+        this.sessionMessages.push(userMsg);
+        await this.sessionStore.append(userMsg);
       }
 
-      const finalResult: OrchestratorResult = { success: true, result: synthesisResult.text };
-      this.onNotifyParent({ type: "completed", result: finalResult.result });
-      return finalResult;
+      this.createTaskExecutionState(this.agentId, [...this.sessionMessages], {
+        maxIterations: this.maxIterations,
+        metadata: { description: this.taskDescription },
+      });
     }
 
-    if (result.finishReason === "error") {
-      const failResult: OrchestratorResult = { success: false, error: result.error };
-      this.onNotifyParent({ type: "failed", error: result.error ?? "unknown error" });
-      return failResult;
-    }
+    await this.processStep(this.agentId);
+  }
 
-    const finalResult: OrchestratorResult = { success: true, result: result.text };
-    this.onNotifyParent({ type: "completed", result: finalResult.result });
-    return finalResult;
+  // ═══════════════════════════════════════════════════
+  // Synthesis
+  // ═══════════════════════════════════════════════════
+
+  /**
+   * All children completed — inject results as user message and run
+   * one more processStep round for synthesis.
+   */
+  private async _synthesize(): Promise<void> {
+    const state = this.taskStates.get(this.agentId);
+    if (!state) return;
+
+    // Inject child results as a user message
+    const synthesisMsg: Message = {
+      role: "user",
+      content: this._formatChildResults(),
+    };
+    state.messages.push(synthesisMsg);
+
+    // Use limited iterations for synthesis (current + 5)
+    state.maxIterations = state.iteration + 5;
+
+    await this.processStep(this.agentId);
   }
 
   // ═══════════════════════════════════════════════════
@@ -184,7 +229,10 @@ export class OrchestratorAgent extends BaseAgent {
       mode: "task",
     });
 
-    // Track child result collection
+    // Track child task ID for event-driven completion
+    this.childTaskIds.add(handle.id);
+
+    // Track child result collection (backward-compat for handle.promise)
     handle.promise.then((result) => {
       this.childResults.set(handle.id, result);
     }).catch((err) => {
@@ -229,35 +277,8 @@ export class OrchestratorAgent extends BaseAgent {
   }
 
   // ═══════════════════════════════════════════════════
-  // Child Management
+  // Child Result Formatting
   // ═══════════════════════════════════════════════════
-
-  private async _waitForChildren(pendingWork: PendingWork[]): Promise<void> {
-    // Wait for all child promises to settle
-    const promises = pendingWork.map(async (pw) => {
-      try {
-        // The promise was stored in the ExecutionHandle;
-        // childResults will be populated via the .then() in _interceptSpawnTask
-        // We wait for the state manager to clear all pending work
-        const waitForId = async (id: string, timeoutMs: number = 300_000) => {
-          const start = Date.now();
-          while (this.stateManager.pendingWork.has(id)) {
-            if (Date.now() - start > timeoutMs) {
-              this.childResults.set(id, { success: false, error: "timeout" });
-              this.stateManager.removePendingWork(id);
-              return;
-            }
-            await new Promise((r) => setTimeout(r, 100));
-          }
-        };
-        await waitForId(pw.id, pw.timeoutMs);
-      } catch (err) {
-        logger.error({ err, childId: pw.id }, "child_wait_error");
-      }
-    });
-
-    await Promise.allSettled(promises);
-  }
 
   private _formatChildResults(): string {
     const lines = ["All child tasks completed. Results:"];
@@ -306,21 +327,148 @@ export class OrchestratorAgent extends BaseAgent {
   }
 
   // ═══════════════════════════════════════════════════
-  // EventBus (OrchestratorAgent runs to completion)
+  // EventBus Integration
   // ═══════════════════════════════════════════════════
 
   protected override subscribeEvents(): void {
-    // OrchestratorAgent runs to completion via run(), not event-driven
+    // TASK_CREATED: start orchestration when our task is created
+    this.eventBus.subscribe(EventType.TASK_CREATED, async (event: Event) => {
+      if (event.taskId === this.agentId || event.source === this.agentId) {
+        await this.handleEvent(event);
+      }
+    });
+
+    // TASK_COMPLETED: child task finished successfully
+    this.eventBus.subscribe(EventType.TASK_COMPLETED, async (event: Event) => {
+      if (event.taskId && this.childTaskIds.has(event.taskId)) {
+        await this.handleEvent(event);
+      }
+    });
+
+    // TASK_FAILED: child task failed
+    this.eventBus.subscribe(EventType.TASK_FAILED, async (event: Event) => {
+      if (event.taskId && this.childTaskIds.has(event.taskId)) {
+        await this.handleEvent(event);
+      }
+    });
+
+    // TASK_SUSPENDED: abort this orchestration
+    this.eventBus.subscribe(EventType.TASK_SUSPENDED, async (event: Event) => {
+      if (event.taskId === this.agentId || event.source === this.agentId) {
+        await this.handleEvent(event);
+      }
+    });
   }
 
-  protected override async handleEvent(_event: Event): Promise<void> {
-    // No-op: OrchestratorAgent doesn't process external events
+  protected override async handleEvent(event: Event): Promise<void> {
+    switch (event.type) {
+      case EventType.TASK_CREATED:
+        await this._startOrchestration();
+        break;
+
+      case EventType.TASK_COMPLETED:
+      case EventType.TASK_FAILED: {
+        const childId = event.taskId;
+        if (!childId || !this.childTaskIds.has(childId)) return;
+
+        // Store the result
+        const payload = event.payload as { result?: unknown; finishReason?: string };
+        const success = event.type === EventType.TASK_COMPLETED;
+        this.childResults.set(childId, {
+          success,
+          result: success ? payload.result : undefined,
+          error: !success ? String(payload.result ?? "child task failed") : undefined,
+        });
+
+        // Remove from tracking
+        this.childTaskIds.delete(childId);
+        this.stateManager.removePendingWork(childId);
+
+        logger.info(
+          { childId, remaining: this.childTaskIds.size, success },
+          "child_task_completed",
+        );
+
+        // If all children done → synthesize
+        if (this.childTaskIds.size === 0) {
+          await this._synthesize();
+        }
+        break;
+      }
+
+      case EventType.TASK_SUSPENDED: {
+        const state = this.taskStates.get(this.agentId);
+        if (state) {
+          state.aborted = true;
+        }
+        break;
+      }
+    }
   }
 
-  /** Stub for processStep engine — OrchestratorAgent uses run() + runToolUseLoop(). */
+  // ═══════════════════════════════════════════════════
+  // Task Completion
+  // ═══════════════════════════════════════════════════
+
   protected override async onTaskComplete(
-    _taskId: string,
-    _text: string,
-    _finishReason: "complete" | "max_iterations" | "interrupted" | "error",
-  ): Promise<void> {}
+    taskId: string,
+    text: string,
+    finishReason: "complete" | "max_iterations" | "interrupted" | "error",
+  ): Promise<void> {
+    const state = this.taskStates.get(taskId);
+
+    // If there are pending children, don't complete yet — wait for them
+    if (this.childTaskIds.size > 0 && finishReason === "complete") {
+      logger.info(
+        { taskId, childCount: this.childTaskIds.size },
+        "waiting_for_children",
+      );
+      return;
+    }
+
+    // Persist session
+    if (state) {
+      for (const msg of state.messages) {
+        await this.sessionStore.append(msg);
+      }
+    }
+
+    // Build result
+    const success = finishReason === "complete";
+    this._lastResult = {
+      success,
+      result: success ? text : undefined,
+      error: !success
+        ? finishReason === "error"
+          ? "LLM call failed"
+          : `Task ${finishReason}`
+        : undefined,
+    };
+
+    // Emit event
+    await this.eventBus.emit(
+      createEvent(
+        success ? EventType.TASK_COMPLETED : EventType.TASK_FAILED,
+        {
+          source: this.agentId,
+          taskId,
+          payload: { result: text, finishReason },
+        },
+      ),
+    );
+
+    // Notify parent
+    if (success) {
+      this.onNotifyParent({ type: "completed", result: this._lastResult.result });
+    } else {
+      this.onNotifyParent({ type: "failed", error: this._lastResult.error ?? "unknown error" });
+    }
+
+    // Resolve completion promise
+    state?.onComplete?.();
+
+    // Cleanup
+    this.removeTaskState(taskId);
+    this.stateManager.markIdle();
+  }
 }
