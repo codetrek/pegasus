@@ -25,7 +25,13 @@ import type {
 
 const log = getLogger("mcp.auth.provider-factory");
 
-const RETRY_DELAY_MS = 2000;
+/** Retry delay for client_credentials token fetch. */
+let retryDelayMs = 2000;
+
+/** Override retry delay (for testing only). */
+export function setRetryDelayMs(ms: number): void {
+  retryDelayMs = ms;
+}
 
 // ── Public API ──
 
@@ -242,7 +248,7 @@ async function fetchClientCredentialsToken(
   for (let attempt = 0; attempt < 2; attempt++) {
     if (attempt > 0) {
       log.debug({ serverName, attempt }, "Retrying client_credentials token fetch");
-      await sleep(RETRY_DELAY_MS);
+      await sleep(retryDelayMs);
     }
 
     try {

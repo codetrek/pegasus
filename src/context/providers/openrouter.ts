@@ -49,9 +49,11 @@ function stripProviderPrefix(id: string): string {
 export class OpenRouterModelFetcher implements ProviderModelFetcher {
   readonly provider = "openrouter";
   private readonly apiKey: string;
+  private readonly retryDelayMs: number;
 
-  constructor(apiKey: string) {
+  constructor(apiKey: string, options?: { retryDelayMs?: number }) {
     this.apiKey = apiKey;
+    this.retryDelayMs = options?.retryDelayMs ?? RETRY_DELAY_MS;
   }
 
   async fetch(): Promise<Map<string, ModelLimits>> {
@@ -71,7 +73,7 @@ export class OpenRouterModelFetcher implements ProviderModelFetcher {
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
         if (attempt > 0) {
-          await Bun.sleep(RETRY_DELAY_MS);
+          await Bun.sleep(this.retryDelayMs);
         }
 
         const response = await fetch(OPENROUTER_API_URL, {

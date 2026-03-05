@@ -36,11 +36,15 @@ interface CopilotModelEntry {
  */
 export class CopilotModelFetcher implements ProviderModelFetcher {
   readonly provider = "copilot";
+  private readonly retryDelayMs: number;
 
   constructor(
     private readonly tokenProvider: () => Promise<string>,
     private readonly baseURL: string,
-  ) {}
+    options?: { retryDelayMs?: number },
+  ) {
+    this.retryDelayMs = options?.retryDelayMs ?? RETRY_DELAY_MS;
+  }
 
   async fetch(): Promise<Map<string, ModelLimits>> {
     const maxAttempts = 2; // 1 initial + 1 retry
@@ -57,7 +61,7 @@ export class CopilotModelFetcher implements ProviderModelFetcher {
       if (attempt + 1 >= maxAttempts) break;
 
       // Wait before retry
-      await Bun.sleep(RETRY_DELAY_MS);
+      await Bun.sleep(this.retryDelayMs);
     }
 
     return new Map();
