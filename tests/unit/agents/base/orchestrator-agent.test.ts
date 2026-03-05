@@ -651,6 +651,138 @@ describe("OrchestratorAgent", () => {
     }, 10000);
   });
 
+  describe("imageRefs collection in onTaskComplete", () => {
+    test("collects imageRefs from messages and includes in completed notification", async () => {
+      const model = createMockModel();
+      const notifyCb = mock((_n: OrchestratorNotification) => {});
+      const agent = new OrchestratorAgent(
+        createOrchestratorDeps({ model, onNotify: notifyCb }),
+      );
+      const agentAny = agent as any;
+
+      // Create task state with a message containing image refs
+      agentAny.createTaskExecutionState("orch-agent-1", [
+        { role: "user", content: "take screenshot" },
+        {
+          role: "tool",
+          content: "Screenshot taken",
+          toolCallId: "call_1",
+          images: [{ id: "img_abc123", mimeType: "image/png" }],
+        },
+      ], {
+        onComplete: () => {},
+      });
+
+      // Call onTaskComplete directly
+      await agentAny.onTaskComplete("orch-agent-1", "screenshot done", "complete");
+
+      // Find the completed notification
+      const completedCalls = notifyCb.mock.calls.filter(
+        (call: any) => call[0].type === "completed",
+      );
+      expect(completedCalls.length).toBe(1);
+      const completedNotif = completedCalls[0]![0] as OrchestratorNotification & { type: "completed" };
+      expect(completedNotif.imageRefs).toEqual([{ id: "img_abc123", mimeType: "image/png" }]);
+    }, 5000);
+
+    test("deduplicates imageRefs across multiple messages", async () => {
+      const model = createMockModel();
+      const notifyCb = mock((_n: OrchestratorNotification) => {});
+      const agent = new OrchestratorAgent(
+        createOrchestratorDeps({ model, onNotify: notifyCb }),
+      );
+      const agentAny = agent as any;
+
+      // Create task state with messages containing duplicate images
+      agentAny.createTaskExecutionState("orch-agent-1", [
+        { role: "user", content: "do screenshots" },
+        {
+          role: "tool",
+          content: "First screenshot",
+          toolCallId: "call_1",
+          images: [
+            { id: "img_aaa", mimeType: "image/png" },
+            { id: "img_bbb", mimeType: "image/jpeg" },
+          ],
+        },
+        {
+          role: "tool",
+          content: "Second screenshot with duplicate",
+          toolCallId: "call_2",
+          images: [
+            { id: "img_aaa", mimeType: "image/png" }, // duplicate
+            { id: "img_ccc", mimeType: "image/webp" },
+          ],
+        },
+      ], {
+        onComplete: () => {},
+      });
+
+      // Call onTaskComplete directly
+      await agentAny.onTaskComplete("orch-agent-1", "done", "complete");
+
+      // Find the completed notification
+      const completedCalls = notifyCb.mock.calls.filter(
+        (call: any) => call[0].type === "completed",
+      );
+      expect(completedCalls.length).toBe(1);
+      const completedNotif = completedCalls[0]![0] as OrchestratorNotification & { type: "completed" };
+      expect(completedNotif.imageRefs).toEqual([
+        { id: "img_aaa", mimeType: "image/png" },
+        { id: "img_bbb", mimeType: "image/jpeg" },
+        { id: "img_ccc", mimeType: "image/webp" },
+      ]);
+    }, 5000);
+
+    test("does not include imageRefs when no messages have images", async () => {
+      const model = createMockModel(
+        mock(async () => ({
+          text: "no images here",
+          finishReason: "stop",
+          usage: { promptTokens: 10, completionTokens: 5 },
+        })),
+      );
+
+      const notifyCb = mock((_n: OrchestratorNotification) => {});
+      const agent = new OrchestratorAgent(
+        createOrchestratorDeps({ model, onNotify: notifyCb }),
+      );
+
+      const result = await agent.run();
+
+      expect(result.success).toBe(true);
+
+      const completedCalls = notifyCb.mock.calls.filter(
+        (call: any) => call[0].type === "completed",
+      );
+      expect(completedCalls.length).toBe(1);
+      const completedNotif = completedCalls[0]![0] as OrchestratorNotification & { type: "completed" };
+      expect(completedNotif.imageRefs).toBeUndefined();
+    }, 5000);
+
+    test("does not include imageRefs on failed notification", async () => {
+      const model = createMockModel(
+        mock(async () => {
+          throw new Error("LLM down");
+        }),
+      );
+
+      const notifyCb = mock((_n: OrchestratorNotification) => {});
+      const agent = new OrchestratorAgent(
+        createOrchestratorDeps({ model, onNotify: notifyCb }),
+      );
+
+      const result = await agent.run();
+      expect(result.success).toBe(false);
+
+      const failedCalls = notifyCb.mock.calls.filter(
+        (call: any) => call[0].type === "failed",
+      );
+      expect(failedCalls.length).toBe(1);
+      expect((failedCalls[0]![0] as any).imageRefs).toBeUndefined();
+    }, 5000);
+  });
+
   describe("handleEvent TASK_SUSPENDED sets abort", () => {
     test("sets aborted flag on task state when TASK_SUSPENDED received", async () => {
       const agent = new OrchestratorAgent(createOrchestratorDeps());

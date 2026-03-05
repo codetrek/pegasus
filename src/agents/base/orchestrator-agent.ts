@@ -59,7 +59,7 @@ export interface ExecutionHandle {
 /** Notifications sent to the parent agent. */
 export type OrchestratorNotification =
   | { type: "progress"; message: string }
-  | { type: "completed"; result: unknown }
+  | { type: "completed"; result: unknown; imageRefs?: Array<{ id: string; mimeType: string }> }
   | { type: "failed"; error: string };
 
 /** Result of the orchestration. */
@@ -440,6 +440,23 @@ export class OrchestratorAgent extends BaseAgent {
 
     // Build result
     const success = finishReason === "complete";
+
+    // Collect unique image refs from tool result messages (same logic as ExecutionAgent)
+    const imageRefs: Array<{ id: string; mimeType: string }> = [];
+    if (state) {
+      const seen = new Set<string>();
+      for (const msg of state.messages) {
+        if (msg.images) {
+          for (const img of msg.images) {
+            if (!seen.has(img.id)) {
+              seen.add(img.id);
+              imageRefs.push({ id: img.id, mimeType: img.mimeType });
+            }
+          }
+        }
+      }
+    }
+
     this._lastResult = {
       success,
       result: success ? text : undefined,
@@ -464,7 +481,11 @@ export class OrchestratorAgent extends BaseAgent {
 
     // Notify parent
     if (success) {
-      this.onNotifyParent({ type: "completed", result: this._lastResult.result });
+      this.onNotifyParent({
+        type: "completed",
+        result: this._lastResult.result,
+        ...(imageRefs.length > 0 ? { imageRefs } : {}),
+      });
     } else {
       this.onNotifyParent({ type: "failed", error: this._lastResult.error ?? "unknown error" });
     }
