@@ -3,7 +3,8 @@
  *
  * Exports:
  *   - AgentState, AgentStateManager — 3-state model (IDLE/BUSY/WAITING)
- *   - toolUseLoop — core execution engine replacing Thinker+Planner+Actor
+ *   - ToolCallCollector — parallel tool execution coordinator
+ *   - TaskExecutionState — per-task state tracking
  *   - BaseAgent — abstract base class for all agents
  *   - ConversationAgent — persistent conversation management
  *   - OrchestratorAgent — complex task decomposition and coordination
@@ -18,20 +19,25 @@ export {
   type PendingWorkResult,
 } from "./agent-state.ts";
 
-// Core engine
+// Tool call coordination
 export {
-  toolUseLoop,
-  formatToolResult,
-  type ToolUseLoopOptions,
-  type ToolUseLoopResult,
-  type ToolCallInterceptResult,
+  ToolCallCollector,
   type ToolCallResult,
-} from "./tool-use-loop.ts";
+} from "./tool-call-collector.ts";
+
+// Task execution state
+export {
+  type TaskExecutionState,
+  createTaskState,
+  type CreateTaskStateOptions,
+} from "./task-execution-state.ts";
 
 // Base class
 export {
   BaseAgent,
   type BaseAgentDeps,
+  formatToolResult,
+  type ToolCallInterceptResult,
 } from "./base-agent.ts";
 
 // Agent types

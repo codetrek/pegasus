@@ -15,11 +15,11 @@
  *   - MCP servers
  */
 
-import { BaseAgent, type BaseAgentDeps } from "./base-agent.ts";
-import type { ToolCallInterceptResult } from "./tool-use-loop.ts";
+import { BaseAgent, type BaseAgentDeps, type ToolCallInterceptResult } from "./base-agent.ts";
 import type { PendingWork, PendingWorkResult } from "./agent-state.ts";
 import type { Message } from "../../infra/llm-types.ts";
 import type { Event } from "../../events/types.ts";
+import { EventType } from "../../events/types.ts";
 import type { ToolCall } from "../../models/tool.ts";
 import type { Persona } from "../../identity/persona.ts";
 import type {
@@ -201,24 +201,32 @@ export abstract class ConversationAgent extends BaseAgent {
   }
 
   /**
-   * Run one step of thinking via the tool-use loop.
+   * Run thinking via processStep with a completion Promise.
    *
-   * Unlike the old FSM-driven approach, this is direct:
-   *   Call runToolUseLoop() → persist new messages → done.
+   * processStep is non-blocking: it returns after each LLM call + tool dispatch.
+   * The completion Promise resolves when onTaskComplete fires (all steps done).
+   * Between steps, the agent goes IDLE so it can handle external events (e.g. TASK_SUSPENDED).
    */
   protected async _think(_channel: ChannelInfo): Promise<void> {
-    const result = await this.runToolUseLoop({
-      systemPrompt: this.buildSystemPrompt(),
-      messages: this.sessionMessages,
+    const previousLength = this.sessionMessages.length;
+
+    // Create or reuse task state for the session
+    const completionPromise = new Promise<void>((resolve) => {
+      this.createTaskExecutionState("session", this.sessionMessages, {
+        maxIterations: this.maxIterations,
+        onComplete: resolve,
+      });
     });
 
+    // Start processing (returns after first LLM call or tool dispatch)
+    await this.processStep("session");
+
+    // Wait for full cycle to complete (onTaskComplete resolves this)
+    await completionPromise;
+
     // Persist new messages to session
-    for (const msg of result.newMessages) {
-      // Skip messages already in sessionMessages (trigger message)
-      if (!this.sessionMessages.includes(msg)) {
-        this.sessionMessages.push(msg);
-      }
-      await this.sessionStore.append(msg);
+    for (let i = previousLength; i < this.sessionMessages.length; i++) {
+      await this.sessionStore.append(this.sessionMessages[i]!);
     }
   }
 
@@ -300,16 +308,53 @@ export abstract class ConversationAgent extends BaseAgent {
   }
 
   // ═══════════════════════════════════════════════════
-  // EventBus (ConversationAgent uses queue, not EventBus)
+  // EventBus (child task completion events)
   // ═══════════════════════════════════════════════════
 
   protected override subscribeEvents(): void {
-    // ConversationAgent primarily uses queue-based message processing.
-    // Subclasses (MainAgent) may override to subscribe to specific events.
+    // Subscribe to child task completions
+    this.eventBus.subscribe(EventType.TASK_COMPLETED, async (event) => {
+      if (event.taskId && this.stateManager.pendingWork.has(event.taskId)) {
+        this.queueEvent(event);
+      }
+    });
+
+    this.eventBus.subscribe(EventType.TASK_FAILED, async (event) => {
+      if (event.taskId && this.stateManager.pendingWork.has(event.taskId)) {
+        this.queueEvent(event);
+      }
+    });
   }
 
-  protected override async handleEvent(_event: Event): Promise<void> {
-    // Default: no-op. MainAgent overrides this.
+  protected override async handleEvent(event: Event): Promise<void> {
+    if (event.type === EventType.TASK_COMPLETED || event.type === EventType.TASK_FAILED) {
+      const childId = event.taskId;
+      if (childId) {
+        await this.completePendingWork({
+          id: childId,
+          success: event.type === EventType.TASK_COMPLETED,
+          result: event.payload["result"],
+          error: event.payload["error"] as string | undefined,
+        });
+
+        // Inject child result into session
+        const resultText = event.type === EventType.TASK_COMPLETED
+          ? typeof event.payload["result"] === "string"
+            ? event.payload["result"]
+            : JSON.stringify(event.payload["result"])
+          : `Error: ${event.payload["error"]}`;
+
+        const systemMsg: Message = {
+          role: "user",
+          content: `[Child agent ${childId} ${event.type === EventType.TASK_COMPLETED ? "completed" : "failed"}]\n${resultText}`,
+        };
+        this.sessionMessages.push(systemMsg);
+        await this.sessionStore.append(systemMsg);
+
+        // Trigger thinking to process the result
+        await this._think(this.lastChannel);
+      }
+    }
   }
 
   // ═══════════════════════════════════════════════════
@@ -318,4 +363,16 @@ export abstract class ConversationAgent extends BaseAgent {
 
   /** Build the system prompt for this conversation agent. */
   protected abstract override buildSystemPrompt(): string;
+
+  protected override async onTaskComplete(
+    taskId: string,
+    _text: string,
+    _finishReason: "complete" | "max_iterations" | "interrupted" | "error",
+  ): Promise<void> {
+    const state = this.taskStates.get(taskId);
+    // Resolve the completion promise so _think() can continue
+    state?.onComplete?.();
+    // Cleanup
+    this.removeTaskState(taskId);
+  }
 }

@@ -24,13 +24,13 @@
  *        → _runReason → Thinker → REASON_DONE → transition(ACTING) → _runAct
  *        → Actor → ToolExecutor → TOOL_CALL_COMPLETED → transition(REASONING) → ...
  *
- *   New: ExecutionAgent.run() → toolUseLoop() → done.
+ *   New: ExecutionAgent.run() → processStep() → done.
  */
 
-import { BaseAgent, type BaseAgentDeps } from "./base-agent.ts";
-import type { ToolCallInterceptResult } from "./tool-use-loop.ts";
+import { BaseAgent, type BaseAgentDeps, type ToolCallInterceptResult } from "./base-agent.ts";
 import type { Message } from "../../infra/llm-types.ts";
 import type { Event } from "../../events/types.ts";
+import { EventType, createEvent } from "../../events/types.ts";
 import type { ToolCall } from "../../models/tool.ts";
 import { SessionStore } from "../../session/store.ts";
 
@@ -84,10 +84,11 @@ export class ExecutionAgent extends BaseAgent {
     return this._mode;
   }
   private sessionStore: SessionStore | null;
-  private memoryDir: string | undefined;
-  private tasksDir: string | undefined;
   private contextPrompt: string;
   private onNotifyParent: ((message: string) => void) | null;
+
+  /** Holds the last execution result for backward-compat run() to resolve. */
+  private _lastResult: ExecutionResult | null = null;
 
   constructor(deps: ExecutionAgentDeps) {
     super({
@@ -97,8 +98,6 @@ export class ExecutionAgent extends BaseAgent {
     this.input = deps.input;
     this.description = deps.description;
     this._mode = deps.mode;
-    this.memoryDir = deps.memoryDir;
-    this.tasksDir = deps.tasksDir;
     this.contextPrompt = deps.contextPrompt ?? "";
     this.onNotifyParent = deps.onNotify ?? null;
 
@@ -109,64 +108,77 @@ export class ExecutionAgent extends BaseAgent {
   }
 
   // ═══════════════════════════════════════════════════
-  // Execution
+  // Execution (backward-compat wrapper)
   // ═══════════════════════════════════════════════════
 
   /**
    * Run the execution to completion.
    *
-   * taskMode:   runs inline, returns result directly.
-   * workerMode: loads session for resume, persists messages.
+   * Backward-compatible wrapper: creates a TaskExecutionState,
+   * drives processStep(), and resolves when onTaskComplete fires.
    */
   async run(): Promise<ExecutionResult> {
+    // Load session for worker mode
     let messages: Message[] = [];
-
-    // In worker mode, load existing session for resume
     if (this.sessionStore) {
       messages = await this.sessionStore.load();
     }
-
-    // Add input as user message (if starting fresh)
     if (messages.length === 0) {
-      const userMsg: Message = { role: "user", content: this.input };
-      messages.push(userMsg);
+      messages.push({ role: "user", content: this.input });
       if (this.sessionStore) {
-        await this.sessionStore.append(userMsg);
+        await this.sessionStore.append({ role: "user", content: this.input });
       }
     }
 
-    const result = await this.runToolUseLoop({
-      systemPrompt: this.buildSystemPrompt(),
-      messages,
-      toolContext: {
-        taskId: this.agentId,
-        memoryDir: this.memoryDir,
-        tasksDir: this.tasksDir,
-      },
+    // Create task state with completion promise
+    return new Promise<ExecutionResult>((resolve) => {
+      const state = this.createTaskExecutionState(this.agentId, messages, {
+        maxIterations: this.maxIterations,
+        metadata: { description: this.description },
+        onComplete: () => {
+          // onTaskComplete will set this._lastResult
+          resolve(this._lastResult!);
+        },
+      });
+
+      // Start processing
+      this.processStep(this.agentId).catch((err) => {
+        resolve({
+          success: false,
+          error: err instanceof Error ? err.message : String(err),
+          llmCallCount: state.iteration,
+          toolCallCount: 0,
+        });
+      });
+    });
+  }
+
+  // ═══════════════════════════════════════════════════
+  // Event-Driven: _startExecution
+  // ═══════════════════════════════════════════════════
+
+  /**
+   * Start execution from an event trigger (TASK_CREATED).
+   * Creates TaskExecutionState, loads session for worker mode, kicks off processStep.
+   */
+  private async _startExecution(): Promise<void> {
+    let messages: Message[] = [];
+    if (this.sessionStore) {
+      messages = await this.sessionStore.load();
+    }
+    if (messages.length === 0) {
+      messages.push({ role: "user", content: this.input });
+      if (this.sessionStore) {
+        await this.sessionStore.append({ role: "user", content: this.input });
+      }
+    }
+
+    this.createTaskExecutionState(this.agentId, messages, {
+      maxIterations: this.maxIterations,
+      metadata: { description: this.description },
     });
 
-    // Persist in worker mode
-    if (this.sessionStore) {
-      for (const msg of result.newMessages) {
-        await this.sessionStore.append(msg);
-      }
-    }
-
-    if (result.finishReason === "error") {
-      return {
-        success: false,
-        error: result.error,
-        llmCallCount: result.llmCallCount,
-        toolCallCount: result.toolCallCount,
-      };
-    }
-
-    return {
-      success: true,
-      result: result.text,
-      llmCallCount: result.llmCallCount,
-      toolCallCount: result.toolCallCount,
-    };
+    await this.processStep(this.agentId);
   }
 
   // ═══════════════════════════════════════════════════
@@ -218,14 +230,100 @@ export class ExecutionAgent extends BaseAgent {
   }
 
   // ═══════════════════════════════════════════════════
-  // EventBus (ExecutionAgent runs to completion)
+  // EventBus Integration
   // ═══════════════════════════════════════════════════
 
   protected override subscribeEvents(): void {
-    // ExecutionAgent runs to completion via run(), not event-driven
+    this.eventBus.subscribe(EventType.TASK_CREATED, async (event: Event) => {
+      if (event.taskId === this.agentId || event.source === this.agentId) {
+        await this.handleEvent(event);
+      }
+    });
+
+    this.eventBus.subscribe(EventType.TASK_SUSPENDED, async (event: Event) => {
+      if (event.taskId === this.agentId || event.source === this.agentId) {
+        await this.handleEvent(event);
+      }
+    });
+
+    this.eventBus.subscribe(EventType.TASK_RESUMED, async (event: Event) => {
+      if (event.taskId === this.agentId || event.source === this.agentId) {
+        await this.handleEvent(event);
+      }
+    });
   }
 
-  protected override async handleEvent(_event: Event): Promise<void> {
-    // No-op: ExecutionAgent doesn't process external events
+  protected override async handleEvent(event: Event): Promise<void> {
+    switch (event.type) {
+      case EventType.TASK_CREATED:
+        await this._startExecution();
+        break;
+
+      case EventType.TASK_SUSPENDED: {
+        const state = this.taskStates.get(this.agentId);
+        if (state) {
+          state.aborted = true;
+        }
+        break;
+      }
+
+      case EventType.TASK_RESUMED: {
+        // Resume from session — re-start execution
+        await this._startExecution();
+        break;
+      }
+    }
+  }
+
+  // ═══════════════════════════════════════════════════
+  // Task Completion
+  // ═══════════════════════════════════════════════════
+
+  protected override async onTaskComplete(
+    taskId: string,
+    text: string,
+    finishReason: "complete" | "max_iterations" | "interrupted" | "error",
+  ): Promise<void> {
+    const state = this.taskStates.get(taskId);
+
+    // Persist in worker mode
+    if (this.sessionStore && state) {
+      for (const msg of state.messages) {
+        await this.sessionStore.append(msg);
+      }
+    }
+
+    // Build result
+    const success = finishReason === "complete";
+    this._lastResult = {
+      success,
+      result: success ? text : undefined,
+      error: !success
+        ? finishReason === "error"
+          ? "LLM call failed"
+          : `Task ${finishReason}`
+        : undefined,
+      llmCallCount: state?.iteration ?? 0,
+      toolCallCount: 0, // not tracked per-tool in new model
+    };
+
+    // Emit event
+    await this.eventBus.emit(
+      createEvent(
+        success ? EventType.TASK_COMPLETED : EventType.TASK_FAILED,
+        {
+          source: this.agentId,
+          taskId,
+          payload: { result: text, finishReason },
+        },
+      ),
+    );
+
+    // Resolve completion promise
+    state?.onComplete?.();
+
+    // Cleanup
+    this.removeTaskState(taskId);
+    this.stateManager.markIdle();
   }
 }
