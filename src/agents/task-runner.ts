@@ -13,6 +13,7 @@ import type { ExecutionResult } from "./base/execution-agent.ts";
 import type { TaskNotification } from "./agent.ts";
 import type { LanguageModel } from "../infra/llm-types.ts";
 import { ToolRegistry } from "../tools/registry.ts";
+import type { Tool } from "../tools/types.ts";
 import { allTaskTools } from "../tools/builtins/index.ts";
 import type { AITaskTypeRegistry } from "../aitask-types/registry.ts";
 import { shortId } from "../infra/id.ts";
@@ -50,6 +51,9 @@ export class TaskRunner {
 
   /** Cached per-type ToolRegistry instances. */
   private toolRegistryCache = new Map<string, ToolRegistry>();
+
+  /** Additional tools (e.g. MCP tools) registered after construction. */
+  private additionalTools: Tool[] = [];
 
   constructor(deps: TaskRunnerDeps) {
     this.model = deps.model;
@@ -149,6 +153,16 @@ export class TaskRunner {
     return [...this.activeTasks.values()];
   }
 
+  /**
+   * Register additional tools (e.g. MCP tools) that should be available
+   * to all task types. Clears the tool registry cache so new tasks
+   * pick up the updated tool set.
+   */
+  setAdditionalTools(tools: Tool[]): void {
+    this.additionalTools = tools;
+    this.toolRegistryCache.clear();
+  }
+
   // ═══════════════════════════════════════════════════
   // Internal
   // ═══════════════════════════════════════════════════
@@ -170,6 +184,11 @@ export class TaskRunner {
       if (toolNameSet.has(tool.name)) {
         registry.register(tool);
       }
+    }
+
+    // Register additional tools (e.g. MCP tools) unconditionally
+    for (const tool of this.additionalTools) {
+      registry.register(tool);
     }
 
     this.toolRegistryCache.set(taskType, registry);

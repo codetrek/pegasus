@@ -3288,12 +3288,12 @@ describe("MainAgent", () => {
       agent.send({ text: "hi", channel: { type: "cli", channelId: "test" } });
       await Bun.sleep(300);
 
-      // Mock taskRegistry.activeCount to return > 0
+      // Mock TaskRunner.activeCount to return > 0 (TickManager now reads from TaskRunner)
       const origActiveCount = Object.getOwnPropertyDescriptor(
-        agent.taskAgent.taskRegistry,
+        Object.getPrototypeOf(agent._taskRunner),
         "activeCount",
-      );
-      Object.defineProperty(agent.taskAgent.taskRegistry, "activeCount", {
+      ) ?? Object.getOwnPropertyDescriptor(agent._taskRunner, "activeCount");
+      Object.defineProperty(agent._taskRunner, "activeCount", {
         get: () => 1,
         configurable: true,
       });
@@ -3313,9 +3313,9 @@ describe("MainAgent", () => {
 
       // Restore
       if (origActiveCount) {
-        Object.defineProperty(agent.taskAgent.taskRegistry, "activeCount", origActiveCount);
+        Object.defineProperty(agent._taskRunner, "activeCount", origActiveCount);
       } else {
-        Object.defineProperty(agent.taskAgent.taskRegistry, "activeCount", {
+        Object.defineProperty(agent._taskRunner, "activeCount", {
           get: () => 0,
           configurable: true,
         });
@@ -3470,6 +3470,105 @@ describe("MainAgent", () => {
       // buildSystemPrompt() should return the same cached value
       const result = (agent as any).buildSystemPrompt();
       expect(result).toBe(cached);
+
+      await agent.stop();
+    }, 15_000);
+  });
+
+  // ── TaskRunner integration tests ──
+
+  describe("TaskRunner integration", () => {
+    it("should expose _taskRunner getter after start", async () => {
+      const model = createReplyModel("ok");
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+      });
+
+      await agent.start();
+
+      expect(agent._taskRunner).toBeDefined();
+      expect(agent._taskRunner.activeCount).toBe(0);
+      expect(agent._taskRunner.listAll()).toEqual([]);
+
+      await agent.stop();
+    }, 10_000);
+
+    it("should use TaskRunner for spawn_task", async () => {
+      let mainCallCount = 0;
+      const model: LanguageModel = {
+        provider: "test",
+        modelId: "test-model",
+        async generate(options: {
+          system?: string;
+          messages?: Message[];
+        }): Promise<GenerateTextResult> {
+          const isMainAgent = options.system?.includes("INNER MONOLOGUE") ?? false;
+
+          if (isMainAgent) {
+            mainCallCount++;
+            if (mainCallCount === 1) {
+              return {
+                text: "I need to spawn a task.",
+                finishReason: "tool_calls",
+                toolCalls: [
+                  {
+                    id: "tc-spawn",
+                    name: "spawn_task",
+                    arguments: {
+                      description: "TaskRunner test task",
+                      input: "do the thing",
+                    },
+                  },
+                ],
+                usage: { promptTokens: 10, completionTokens: 10 },
+              };
+            }
+            // After spawn, just stop
+            return {
+              text: "",
+              finishReason: "stop",
+              usage: { promptTokens: 5, completionTokens: 0 },
+            };
+          }
+
+          // ExecutionAgent calls: complete immediately
+          return {
+            text: "Task done.",
+            finishReason: "stop",
+            usage: { promptTokens: 10, completionTokens: 10 },
+          };
+        },
+      };
+
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+      });
+
+      await agent.start();
+      agent.onReply(() => {});
+
+      agent.send({
+        text: "do the thing",
+        channel: { type: "cli", channelId: "test" },
+      });
+
+      // Wait for spawn_task to be processed
+      await Bun.sleep(500);
+
+      // Verify spawn tool result includes description in session messages
+      // Note: the description appears unescaped in the assistant's toolCalls arguments
+      const sessionContent = await Bun.file(
+        `${testDataDir}/agents/main/session/current.jsonl`,
+      ).text();
+      expect(sessionContent).toContain('"description":"TaskRunner test task"');
+      expect(sessionContent).toContain("spawn_task");
+
+      // Wait for task completion
+      await Bun.sleep(2000);
 
       await agent.stop();
     }, 15_000);
