@@ -843,4 +843,161 @@ describe("BaseAgent", () => {
       expect(agent.getTaskStates().has("task-1")).toBe(false);
     });
   });
+
+  describe("processStep — multi-iteration tool cycle", () => {
+    test("3-step cycle: LLM→tools→LLM→tools→LLM→done", async () => {
+      let llmCallCount = 0;
+      const model = createMockModel({
+        generate: mock(async () => {
+          llmCallCount++;
+          if (llmCallCount === 1) {
+            return {
+              text: "step 1",
+              finishReason: "tool_calls",
+              toolCalls: [
+                { id: "tc-1", name: "tool_a", arguments: { step: 1 } },
+              ],
+              usage: { promptTokens: 10, completionTokens: 5 },
+            };
+          }
+          if (llmCallCount === 2) {
+            return {
+              text: "step 2",
+              finishReason: "tool_calls",
+              toolCalls: [
+                { id: "tc-2", name: "tool_b", arguments: { step: 2 } },
+              ],
+              usage: { promptTokens: 15, completionTokens: 8 },
+            };
+          }
+          // Third call: no tools, task complete
+          return {
+            text: "Done!",
+            finishReason: "stop",
+            usage: { promptTokens: 20, completionTokens: 10 },
+          };
+        }),
+      });
+
+      // Skip all tool calls (simulate instant execution)
+      class MultiIterAgent extends TestAgent {
+        protected override async onToolCall(tc: any) {
+          return {
+            action: "skip" as const,
+            result: {
+              toolCallId: tc.id,
+              content: JSON.stringify({ result: `${tc.name}_result` }),
+            },
+          };
+        }
+      }
+
+      const agent = new MultiIterAgent({
+        agentId: "test-agent-1",
+        model,
+        toolRegistry: createMockRegistry(),
+      });
+      agent.testCreateTaskState("task-1", [
+        { role: "user", content: "do a 3-step task" },
+      ]);
+
+      await agent.testProcessStep("task-1");
+      // Wait for async tool execution chains to complete
+      await new Promise((r) => setTimeout(r, 500));
+
+      // Verify: LLM called 3 times
+      expect(llmCallCount).toBe(3);
+
+      // Verify: iteration count is 3
+      const state = agent.getTaskStates().get("task-1")!;
+      expect(state.iteration).toBe(3);
+
+      // Verify: onTaskComplete called once with "complete"
+      expect(agent.onTaskCompleteMock).toHaveBeenCalledTimes(1);
+      expect(agent.onTaskCompleteMock).toHaveBeenCalledWith(
+        "task-1",
+        "Done!",
+        "complete",
+      );
+
+      // Verify: messages contain the full cycle
+      // user, assistant(tc-1), tool(tc-1), assistant(tc-2), tool(tc-2), assistant(Done!)
+      expect(state.messages).toHaveLength(6);
+      expect(state.messages[0]!.role).toBe("user");
+      expect(state.messages[1]!.role).toBe("assistant");
+      expect(state.messages[1]!.toolCalls).toHaveLength(1);
+      expect(state.messages[2]!.role).toBe("tool");
+      expect(state.messages[3]!.role).toBe("assistant");
+      expect(state.messages[3]!.toolCalls).toHaveLength(1);
+      expect(state.messages[4]!.role).toBe("tool");
+      expect(state.messages[5]!.role).toBe("assistant");
+      expect(state.messages[5]!.content).toBe("Done!");
+    }, 5000);
+  });
+
+  describe("processStep — _executeToolAsync catch branch", () => {
+    test("when toolExecutor.execute() throws, error is caught and added to collector as JSON error result", async () => {
+      let llmCallCount = 0;
+      const model = createMockModel({
+        generate: mock(async () => {
+          llmCallCount++;
+          if (llmCallCount === 1) {
+            return {
+              text: "",
+              finishReason: "tool_calls",
+              toolCalls: [
+                { id: "tc-err-1", name: "failing_tool", arguments: {} },
+              ],
+              usage: { promptTokens: 10, completionTokens: 5 },
+            };
+          }
+          // Second call after error result: complete
+          return {
+            text: "handled error",
+            finishReason: "stop",
+            usage: { promptTokens: 10, completionTokens: 5 },
+          };
+        }),
+      });
+
+      // Create an agent that lets tool calls go through to execute,
+      // but the toolExecutor will throw
+      const registry = createMockRegistry();
+      registry.register({
+        name: "failing_tool",
+        description: "a tool that fails",
+        category: "system" as any,
+        parameters: z.object({}),
+        execute: mock(async () => {
+          throw new Error("connection reset");
+        }),
+      });
+
+      const agent = createTestAgent({ model, toolRegistry: registry });
+      agent.testCreateTaskState("task-1", [
+        { role: "user", content: "call the failing tool" },
+      ]);
+
+      await agent.testProcessStep("task-1");
+      // Wait for async tool execution and next processStep
+      await new Promise((r) => setTimeout(r, 500));
+
+      // Collector should have completed despite the error
+      expect(llmCallCount).toBe(2);
+
+      // The tool result message should contain the error
+      const state = agent.getTaskStates().get("task-1")!;
+      const toolMsg = state.messages.find((m) => m.role === "tool");
+      expect(toolMsg).toBeDefined();
+      expect(toolMsg!.content).toContain("connection reset");
+
+      // Agent should have completed successfully after handling the error
+      expect(agent.onTaskCompleteMock).toHaveBeenCalledTimes(1);
+      expect(agent.onTaskCompleteMock).toHaveBeenCalledWith(
+        "task-1",
+        "handled error",
+        "complete",
+      );
+    }, 5000);
+  });
 });

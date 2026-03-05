@@ -575,4 +575,110 @@ describe("ExecutionAgent", () => {
       expect(first.role).toBe("user");
     });
   });
+
+  describe("event-driven path via TASK_CREATED", () => {
+    test("start() + TASK_CREATED event triggers processStep → LLM → onTaskComplete → emits TASK_COMPLETED", async () => {
+      const eventBus = new EventBus({ keepHistory: true });
+      const model = createMockModel(
+        mock(async () => ({
+          text: "event-driven result",
+          finishReason: "stop",
+          usage: { promptTokens: 10, completionTokens: 5 },
+        })),
+      );
+
+      const agent = new ExecutionAgent(
+        createTaskDeps({
+          model,
+          eventBus,
+          agentId: "event-exec-1",
+          input: "event-driven task input",
+        }),
+      );
+
+      // start() subscribes to events and starts the EventBus
+      await agent.start();
+
+      // Emit TASK_CREATED event with matching agentId
+      await eventBus.emit(
+        createEvent(EventType.TASK_CREATED, {
+          source: "event-exec-1",
+          taskId: "event-exec-1",
+          payload: { description: "test task" },
+        }),
+      );
+
+      // Wait for the event bus to dispatch and agent to process
+      await new Promise((r) => setTimeout(r, 500));
+
+      // Verify: agent processed the event and completed
+      // Check that TASK_COMPLETED was emitted in event history
+      const completedEvents = eventBus.history.filter(
+        (e) => e.type === EventType.TASK_COMPLETED,
+      );
+      expect(completedEvents.length).toBe(1);
+      expect(completedEvents[0]!.source).toBe("event-exec-1");
+      expect(completedEvents[0]!.payload.result).toBe("event-driven result");
+      expect(completedEvents[0]!.payload.finishReason).toBe("complete");
+
+      // Verify: LLM was called
+      expect(model.generate).toHaveBeenCalledTimes(1);
+
+      // Clean up
+      await agent.stop();
+    }, 10000);
+  });
+
+  describe("TASK_RESUMED resume flow", () => {
+    test("TASK_RESUMED event re-starts execution via _startExecution", async () => {
+      const eventBus = new EventBus({ keepHistory: true });
+      const model = createMockModel(
+        mock(async () => ({
+          text: "resumed result",
+          finishReason: "stop",
+          usage: { promptTokens: 10, completionTokens: 5 },
+        })),
+      );
+
+      const resumeDir = await createTempDir();
+      const agent = new ExecutionAgent(
+        createWorkerDeps({
+          model,
+          eventBus,
+          agentId: "resume-exec-1",
+          input: "resumable task input",
+          sessionDir: resumeDir,
+        }),
+      );
+
+      // start() subscribes to events
+      await agent.start();
+
+      // Emit TASK_RESUMED event (simulating resume of a previously suspended task)
+      await eventBus.emit(
+        createEvent(EventType.TASK_RESUMED, {
+          source: "resume-exec-1",
+          taskId: "resume-exec-1",
+          payload: { reason: "user requested resume" },
+        }),
+      );
+
+      // Wait for the event bus to dispatch and agent to process
+      await new Promise((r) => setTimeout(r, 500));
+
+      // Verify: agent re-started execution
+      expect(model.generate).toHaveBeenCalledTimes(1);
+
+      // Verify: TASK_COMPLETED was emitted
+      const completedEvents = eventBus.history.filter(
+        (e) => e.type === EventType.TASK_COMPLETED,
+      );
+      expect(completedEvents.length).toBe(1);
+      expect(completedEvents[0]!.source).toBe("resume-exec-1");
+      expect(completedEvents[0]!.payload.result).toBe("resumed result");
+
+      // Clean up
+      await agent.stop();
+    }, 10000);
+  });
 });
