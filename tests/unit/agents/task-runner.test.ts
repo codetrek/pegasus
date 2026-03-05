@@ -16,13 +16,16 @@
  *   - run() promise rejection triggers failed notification (.catch branch)
  */
 
-import { describe, test, expect, mock } from "bun:test";
+import { describe, test, expect, mock, beforeEach } from "bun:test";
 import { TaskRunner, type TaskRunnerDeps } from "../../../src/agents/task-runner.ts";
 import type { TaskNotification } from "../../../src/agents/agent.ts";
 import type { LanguageModel } from "../../../src/infra/llm-types.ts";
 import { AITaskTypeRegistry } from "../../../src/aitask-types/registry.ts";
 import { allTaskTools } from "../../../src/tools/builtins/index.ts";
 import { ExecutionAgent } from "../../../src/agents/base/execution-agent.ts";
+import { mkdtemp } from "node:fs/promises";
+import path from "node:path";
+import os from "node:os";
 
 // ── Helpers ──────────────────────────────────────────
 
@@ -67,10 +70,13 @@ function createBlockingModel(): [LanguageModel, () => void] {
   return [model, resolver!];
 }
 
+let tempDir: string;
+
 function createDeps(overrides?: Partial<TaskRunnerDeps>): TaskRunnerDeps {
   return {
     model: createMockModel(),
     taskTypeRegistry: new AITaskTypeRegistry(),
+    tasksDir: tempDir,
     onNotification: mock((_n: TaskNotification) => {}),
     ...overrides,
   };
@@ -84,6 +90,9 @@ async function waitForNotifications(ms = 200): Promise<void> {
 // ── Tests ────────────────────────────────────────────
 
 describe("TaskRunner", () => {
+  beforeEach(async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "pegasus-taskrunner-test-"));
+  });
   describe("submit returns taskId and increments activeCount", () => {
     test("returns a non-empty taskId string", () => {
       const [model] = createBlockingModel();
