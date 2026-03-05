@@ -38,13 +38,10 @@ jobs:
         run: bun run typecheck
 
       - name: Run tests with coverage
-        run: bun run coverage
-
-      - name: Parse coverage
         id: coverage
         run: |
-          # Extract line coverage percentage from coverage output
-          COVERAGE=$(bun run coverage 2>&1 | grep "All files" | awk '{print $4}' | tr -d '%')
+          OUTPUT=$(bun run coverage 2>&1 | tee /dev/stderr)
+          COVERAGE=$(echo "$OUTPUT" | grep "All files" | awk '{print $4}' | tr -d '%')
           echo "percentage=$COVERAGE" >> $GITHUB_OUTPUT
           echo "Line Coverage: $COVERAGE%"
 
