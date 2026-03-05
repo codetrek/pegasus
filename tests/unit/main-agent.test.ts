@@ -1577,185 +1577,8 @@ describe("MainAgent", () => {
 
   // ── Main Reflection tests ──
 
-  describe("_shouldReflectOnSession", () => {
-    it("should return false for sessions with fewer than 6 messages", async () => {
-      const model = createMonologueModel("test");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
-      const messages: Message[] = [
-        { role: "user", content: "hello" },
-        { role: "assistant", content: "hi" },
-        { role: "user", content: "bye" },
-      ];
-      expect(agent._shouldReflectOnSession(messages)).toBe(false);
-    });
-
-    it("should return false for sessions with fewer than 2 user messages", async () => {
-      const model = createMonologueModel("test");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
-      const messages: Message[] = [
-        { role: "user", content: "hello" },
-        { role: "assistant", content: "hi" },
-        { role: "assistant", content: "thinking..." },
-        { role: "assistant", content: "still thinking..." },
-        { role: "assistant", content: "done" },
-        { role: "assistant", content: "final" },
-      ];
-      expect(agent._shouldReflectOnSession(messages)).toBe(false);
-    });
-
-    it("should return true for sessions with enough messages and user messages", async () => {
-      const model = createMonologueModel("test");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
-      const messages: Message[] = [
-        { role: "user", content: "hello" },
-        { role: "assistant", content: "hi" },
-        { role: "user", content: "how are you" },
-        { role: "assistant", content: "good" },
-        { role: "user", content: "what time is it" },
-        { role: "assistant", content: "3pm" },
-      ];
-      expect(agent._shouldReflectOnSession(messages)).toBe(true);
-    });
-
-    it("should return false for exactly 5 messages (boundary)", async () => {
-      const model = createMonologueModel("test");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
-      const messages: Message[] = [
-        { role: "user", content: "hello" },
-        { role: "assistant", content: "hi" },
-        { role: "user", content: "how are you" },
-        { role: "assistant", content: "good" },
-        { role: "user", content: "bye" },
-      ];
-      expect(agent._shouldReflectOnSession(messages)).toBe(false);
-    });
-
-    it("should return false for empty messages", async () => {
-      const model = createMonologueModel("test");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
-      expect(agent._shouldReflectOnSession([])).toBe(false);
-    });
-  });
-
-  describe("_runMainReflection", () => {
-    it("should run PostTaskReflector and complete successfully", async () => {
-      await mkdir(`${testDataDir}/agents/main/memory`, { recursive: true });
-
-      const model: LanguageModel = {
-        provider: "test",
-        modelId: "test-model",
-        async generate(): Promise<GenerateTextResult> {
-          return {
-            text: "Nothing worth recording from this session.",
-            finishReason: "stop",
-            usage: { promptTokens: 10, completionTokens: 10 },
-          };
-        },
-      };
-
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-      await agent.start();
-
-      const messages: Message[] = [
-        { role: "user", content: "My name is Alice" },
-        { role: "assistant", content: "Hi Alice!" },
-        { role: "user", content: "I like TypeScript" },
-        { role: "assistant", content: "Great choice!" },
-      ];
-
-      // Should not throw
-      await agent._runMainReflection(messages);
-
-      await agent.stop();
-    }, 10_000);
-
-    it("should write memory when reflector decides to", async () => {
-      await mkdir(`${testDataDir}/agents/main/memory`, { recursive: true });
-
-      let callCount = 0;
-      const model: LanguageModel = {
-        provider: "test",
-        modelId: "test-model",
-        async generate(): Promise<GenerateTextResult> {
-          callCount++;
-          if (callCount === 1) {
-            // Reflector's first call: write to memory
-            return {
-              text: "",
-              finishReason: "tool_calls",
-              toolCalls: [
-                {
-                  id: "tc-write",
-                  name: "memory_write",
-                  arguments: {
-                    path: "facts/user.md",
-                    content: "# User\n> Summary: user info\n\n- Name: Alice\n- Likes: TypeScript",
-                  },
-                },
-              ],
-              usage: { promptTokens: 10, completionTokens: 10 },
-            };
-          }
-          // Second call: done
-          return {
-            text: "Recorded user preferences.",
-            finishReason: "stop",
-            usage: { promptTokens: 10, completionTokens: 10 },
-          };
-        },
-      };
-
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-      await agent.start();
-
-      const messages: Message[] = [
-        { role: "user", content: "My name is Alice and I like TypeScript" },
-        { role: "assistant", content: "Hi Alice! TypeScript is great." },
-      ];
-
-      await agent._runMainReflection(messages);
-
-      // Verify memory was written
-      const content = await Bun.file(`${testDataDir}/agents/main/memory/facts/user.md`).text();
-      expect(content).toContain("Alice");
-      expect(content).toContain("TypeScript");
-
-      await agent.stop();
-    }, 10_000);
-  });
+  // Note: _shouldReflectOnSession and _runMainReflection unit tests moved to
+  // tests/unit/agents/reflection-orchestrator.test.ts (ReflectionOrchestrator)
 
   describe("compact triggers reflection", () => {
     it("should trigger reflection when compact happens with sufficient messages", async () => {
@@ -1851,39 +1674,76 @@ describe("MainAgent", () => {
     }, 20_000);
 
     it("should not crash compact when reflection fails", async () => {
-      await mkdir(`${testDataDir}/agents/main/memory`, { recursive: true });
+      // This test verifies that a reflection failure (thrown error) does not crash
+      // the main agent's compact flow. The .catch() wrapper in _think handles this.
+      // The detailed runReflection error handling is tested in reflection-orchestrator.test.ts.
+      // Here we verify the integration: reflection error is logged but doesn't propagate.
 
-      // Directly test that _runMainReflection handles errors gracefully
+      let thinkCount = 0;
       const model: LanguageModel = {
         provider: "test",
         modelId: "test-model",
-        async generate(): Promise<GenerateTextResult> {
-          throw new Error("LLM reflection error");
+        async generate(options: {
+          system?: string;
+          messages?: Message[];
+        }): Promise<GenerateTextResult> {
+          thinkCount++;
+          // Summarize call
+          if (options.system?.includes("conversation summarizer")) {
+            return {
+              text: "Summary: user said hello.",
+              finishReason: "stop",
+              usage: { promptTokens: 50, completionTokens: 20 },
+            };
+          }
+          // Reflection call — throw to simulate failure
+          if (options.system?.includes("reviewing a completed task")) {
+            throw new Error("LLM reflection error");
+          }
+          // Normal think calls: return huge tokens on 3rd+ to trigger compact
+          const promptTokens = thinkCount >= 3 ? 110_000 : 100;
+          return {
+            text: "",
+            finishReason: "tool_calls",
+            toolCalls: [
+              {
+                id: `tc-reply-${thinkCount}`,
+                name: "reply",
+                arguments: { text: `Reply ${thinkCount}`, channelType: "cli", channelId: "test" },
+              },
+            ],
+            usage: { promptTokens, completionTokens: 10 },
+          };
         },
       };
 
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
+      const settings = SettingsSchema.parse({
+        dataDir: testDataDir,
+        logLevel: "warn",
+        session: { compactThreshold: 0.8 },
+        authDir: "/tmp/pegasus-test-auth",
       });
+
+      const agent = new MainAgent({ models: createMockModelRegistry(model), persona: testPersona, settings });
       await agent.start();
+      agent.onReply(() => {});
 
-      const messages: Message[] = [
-        { role: "user", content: "hello" },
-        { role: "assistant", content: "hi" },
-        { role: "user", content: "how are you" },
-        { role: "assistant", content: "good" },
-      ];
+      // Build up enough messages to pass the reflection gate
+      agent.send({ text: "My name is Alice", channel: { type: "cli", channelId: "test" } });
+      await Bun.sleep(400);
+      agent.send({ text: "I work at Acme Corp", channel: { type: "cli", channelId: "test" } });
+      await Bun.sleep(400);
+      agent.send({ text: "Tell me more", channel: { type: "cli", channelId: "test" } });
+      await Bun.sleep(400);
 
-      // _runMainReflection should throw (the error is caught by .catch in _checkAndCompact)
-      await expect(agent._runMainReflection(messages)).rejects.toThrow("LLM reflection error");
+      // This triggers compact → reflection (which throws) → .catch() handles it
+      agent.send({ text: "One last thing", channel: { type: "cli", channelId: "test" } });
+      await Bun.sleep(1500);
 
-      // The key point: when called via _checkAndCompact, this error is caught by .catch()
-      // and does NOT propagate. We verified the error handling pattern works.
-
+      // Agent should still be operational (error was caught, not propagated)
+      // Just verifying no crash occurred
       await agent.stop();
-    }, 10_000);
+    }, 20_000);
 
     it("should skip reflection for trivial sessions", async () => {
       // Ensure reflection is NOT called when session is trivial (few messages)
