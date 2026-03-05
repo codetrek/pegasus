@@ -221,25 +221,32 @@ describe("MainAgent", () => {
 
   it("should queue messages and process sequentially", async () => {
     let callCount = 0;
-    // Each send() triggers exactly one _think call.
-    // reply tool calls do NOT trigger follow-up thinking, so each _think
-    // simply returns a reply and finishes. Two sends → two replies.
+    // Each send() triggers _think. After reply, follow-up think fires but
+    // LLM returns stop (no tool calls) to naturally terminate.
     const model: LanguageModel = {
       provider: "test",
       modelId: "test-model",
       async generate(): Promise<GenerateTextResult> {
         callCount++;
+        // Odd calls: reply to user. Even calls: follow-up → stop (natural termination).
+        if (callCount % 2 === 1) {
+          return {
+            text: "",
+            finishReason: "tool_calls",
+            toolCalls: [
+              {
+                id: `tc_${callCount}`,
+                name: "reply",
+                arguments: { text: `Response ${Math.ceil(callCount / 2)}`, channelType: "cli", channelId: "test" },
+              },
+            ],
+            usage: { promptTokens: 10, completionTokens: 10 },
+          };
+        }
         return {
           text: "",
-          finishReason: "tool_calls",
-          toolCalls: [
-            {
-              id: `tc_${callCount}`,
-              name: "reply",
-              arguments: { text: `Response ${callCount}`, channelType: "cli", channelId: "test" },
-            },
-          ],
-          usage: { promptTokens: 10, completionTokens: 10 },
+          finishReason: "stop",
+          usage: { promptTokens: 5, completionTokens: 0 },
         };
       },
     };
@@ -1613,16 +1620,25 @@ describe("MainAgent", () => {
 
           // Normal _think calls: track count and return large tokens on 3rd+ call
           thinkCount++;
-          // First 2 think calls: normal tokens. 3rd+ think call: huge tokens to trigger compact
-          const promptTokens = thinkCount >= 3 ? 110_000 : 100;
+          // Odd think calls: reply. Even think calls: follow-up → stop.
+          if (thinkCount % 2 === 0) {
+            return {
+              text: "",
+              finishReason: "stop",
+              usage: { promptTokens: 5, completionTokens: 0 },
+            };
+          }
+          // First 2 reply calls: normal tokens. 3rd+ reply call: huge tokens to trigger compact
+          const replyNum = Math.ceil(thinkCount / 2);
+          const promptTokens = replyNum >= 3 ? 110_000 : 100;
           return {
             text: "",
             finishReason: "tool_calls",
             toolCalls: [
               {
-                id: `tc-reply-${thinkCount}`,
+                id: `tc-reply-${replyNum}`,
                 name: "reply",
-                arguments: { text: `Reply ${thinkCount}`, channelType: "cli", channelId: "test" },
+                arguments: { text: `Reply ${replyNum}`, channelType: "cli", channelId: "test" },
               },
             ],
             usage: { promptTokens, completionTokens: 10 },
@@ -1854,7 +1870,7 @@ describe("MainAgent", () => {
       } as unknown as WorkerAdapter;
     }
 
-    it("should handle spawn_subagent tool call (no follow-up think)", async () => {
+    it("should handle spawn_subagent tool call (follow-up think terminates naturally)", async () => {
       let callCount = 0;
       const model: LanguageModel = {
         provider: "test",
@@ -1879,12 +1895,11 @@ describe("MainAgent", () => {
               usage: { promptTokens: 10, completionTokens: 10 },
             };
           }
-          // If called again (shouldn't happen for spawn_subagent — it's terminal),
-          // just stop the loop. This verifies no follow-up think was triggered.
+          // Follow-up think: LLM returns stop (natural termination)
           return {
-            text: "unexpected follow-up",
+            text: "",
             finishReason: "stop",
-            usage: { promptTokens: 5, completionTokens: 5 },
+            usage: { promptTokens: 5, completionTokens: 0 },
           };
         },
       };
@@ -1929,8 +1944,8 @@ describe("MainAgent", () => {
       expect(sessionContent).toContain("spawn_subagent");
       expect(sessionContent).toContain("Research weather patterns");
 
-      // spawn_subagent is terminal — callCount should be 1 (no follow-up)
-      expect(callCount).toBe(1);
+      // follow-up think fires after spawn_subagent, LLM returns stop → callCount = 2
+      expect(callCount).toBe(2);
 
       await agent.stop();
     }, 10_000);
@@ -1970,7 +1985,15 @@ describe("MainAgent", () => {
             };
           }
           if (callCount === 2) {
-            // Second call: after subagent notification, try to resume
+            // Follow-up think after spawn: stop (natural termination)
+            return {
+              text: "",
+              finishReason: "stop",
+              usage: { promptTokens: 5, completionTokens: 0 },
+            };
+          }
+          if (callCount === 3) {
+            // Third call: after subagent notification, try to resume
             // Extract subagentId from session
             const toolMsgs = (options.messages ?? []).filter(
               (m: Message) => m.role === "tool" && m.content.includes("subagentId"),
@@ -3353,6 +3376,7 @@ describe("MainAgent", () => {
       tick.start();
       tick.fire();
 
+      // tick.fire() adds a system message synchronously — check immediately
       const tickMsgs = tick.sessionMessages.slice(msgsBefore).filter(
         (m: any) => typeof m.content === "string" && m.content.includes("[System:"),
       );
@@ -3370,6 +3394,8 @@ describe("MainAgent", () => {
 
       tick.stop();
       await agent.stop();
+      // Allow any fire-and-forget async work to settle after agent.stop()
+      await Bun.sleep(100);
     }, 10_000);
   });
 

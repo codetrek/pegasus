@@ -92,10 +92,13 @@ describe("Multi-channel routing", () => {
 
   it("should route replies to correct adapter by channel.type", async () => {
     // Model replies to the same channel type as inbound
+    let replied = false;
     const model: LanguageModel = {
       provider: "test",
       modelId: "test-model",
       async generate(): Promise<GenerateTextResult> {
+        if (replied) return { text: "", finishReason: "stop", usage: { promptTokens: 5, completionTokens: 0 } };
+        replied = true;
         return {
           text: "",
           finishReason: "tool_calls",
@@ -144,10 +147,13 @@ describe("Multi-channel routing", () => {
 
   it("should log warning for unknown channel type", async () => {
     // Model replies to a channel type that has no adapter
+    let replied = false;
     const model: LanguageModel = {
       provider: "test",
       modelId: "test-model",
       async generate(): Promise<GenerateTextResult> {
+        if (replied) return { text: "", finishReason: "stop", usage: { promptTokens: 5, completionTokens: 0 } };
+        replied = true;
         return {
           text: "",
           finishReason: "tool_calls",
@@ -210,19 +216,27 @@ describe("Multi-channel routing", () => {
             usage: { promptTokens: 10, completionTokens: 10 },
           };
         }
-        // Second message: reply to telegram
-        return {
-          text: "",
-          finishReason: "tool_calls",
-          toolCalls: [
-            {
-              id: "tc-reply-tg",
-              name: "reply",
-              arguments: { text: "TG reply", channelId: "tg-456" },
-            },
-          ],
-          usage: { promptTokens: 10, completionTokens: 10 },
-        };
+        if (callCount === 2) {
+          // Follow-up after CLI reply: stop
+          return { text: "", finishReason: "stop", usage: { promptTokens: 5, completionTokens: 0 } };
+        }
+        if (callCount === 3) {
+          // Second message: reply to telegram
+          return {
+            text: "",
+            finishReason: "tool_calls",
+            toolCalls: [
+              {
+                id: "tc-reply-tg",
+                name: "reply",
+                arguments: { text: "TG reply", channelId: "tg-456" },
+              },
+            ],
+            usage: { promptTokens: 10, completionTokens: 10 },
+          };
+        }
+        // Follow-up after TG reply: stop
+        return { text: "", finishReason: "stop", usage: { promptTokens: 5, completionTokens: 0 } };
       },
     };
 
@@ -265,10 +279,13 @@ describe("Multi-channel routing", () => {
   }, 15_000);
 
   it("should handle adapter deliver failure gracefully", async () => {
+    let replied = false;
     const model: LanguageModel = {
       provider: "test",
       modelId: "test-model",
       async generate(): Promise<GenerateTextResult> {
+        if (replied) return { text: "", finishReason: "stop", usage: { promptTokens: 5, completionTokens: 0 } };
+        replied = true;
         return {
           text: "",
           finishReason: "tool_calls",
@@ -316,10 +333,13 @@ describe("Multi-channel routing", () => {
   }, 10_000);
 
   it("onReply still works when no adapters registered", async () => {
+    let replied = false;
     const model: LanguageModel = {
       provider: "test",
       modelId: "test-model",
       async generate(): Promise<GenerateTextResult> {
+        if (replied) return { text: "", finishReason: "stop", usage: { promptTokens: 5, completionTokens: 0 } };
+        replied = true;
         return {
           text: "",
           finishReason: "tool_calls",
