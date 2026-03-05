@@ -45,6 +45,11 @@ export function extToMime(ext: string): string {
       return "image/webp";
     case "gif":
       return "image/gif";
+    case "bmp":
+      return "image/bmp";
+    case "tiff":
+    case "tif":
+      return "image/tiff";
     default:
       return "image/jpeg";
   }

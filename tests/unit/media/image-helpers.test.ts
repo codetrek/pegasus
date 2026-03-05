@@ -60,10 +60,18 @@ describe("extToMime", () => {
   });
 
   it("defaults to image/jpeg for unknown extensions", () => {
-    expect(extToMime("bmp")).toBe("image/jpeg");
-    expect(extToMime("tiff")).toBe("image/jpeg");
     expect(extToMime("svg")).toBe("image/jpeg");
     expect(extToMime("")).toBe("image/jpeg");
+    expect(extToMime("heic")).toBe("image/jpeg");
+  });
+
+  it("maps bmp to image/bmp", () => {
+    expect(extToMime("bmp")).toBe("image/bmp");
+  });
+
+  it("maps tiff/tif to image/tiff", () => {
+    expect(extToMime("tiff")).toBe("image/tiff");
+    expect(extToMime("tif")).toBe("image/tiff");
   });
 });
 

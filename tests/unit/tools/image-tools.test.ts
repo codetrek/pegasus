@@ -122,7 +122,7 @@ describe("image_read tool", () => {
   it("should default to image/jpeg for unknown extensions", async () => {
     const imagesDir = path.join(tmpDir, "images");
     const fakeId = "ffeeddccbbaa";
-    writeFileSync(path.join(imagesDir, `${fakeId}.bmp`), TEST_PNG);
+    writeFileSync(path.join(imagesDir, `${fakeId}.heic`), TEST_PNG);
 
     const result = await image_read.execute(
       { source: fakeId },

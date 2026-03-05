@@ -149,7 +149,7 @@ describe("browser_screenshot ImageManager integration", () => {
     expect(source).toBe("browser");
   }, 5000);
 
-  it("still returns screenshotPath in result for backward compatibility", async () => {
+  it("removes screenshotPath from result when storeImage is used", async () => {
     const mgr = createMockManager(tmpFile);
     const storeImage = mock(() =>
       Promise.resolve({ id: "abc123def456", mimeType: "image/png" }),
@@ -161,8 +161,9 @@ describe("browser_screenshot ImageManager integration", () => {
     );
 
     expect(result.success).toBe(true);
-    expect((result.result as any).screenshotPath).toBe(tmpFile);
-    expect((result.result as any).message).toContain(tmpFile);
+    expect((result.result as any).screenshotPath).toBeUndefined();
+    expect((result.result as any).message).toContain("Screenshot captured and stored");
+    expect((result.result as any).message).toContain("abc123def456");
     expect((result.result as any).snapshot).toBeDefined();
   }, 5000);
 });

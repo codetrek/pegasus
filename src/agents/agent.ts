@@ -47,9 +47,9 @@ import path from "node:path";
 const logger = getLogger("agent");
 
 export type TaskNotification =
-  | { type: "completed"; taskId: string; result: unknown; imageIds?: string[] }
+  | { type: "completed"; taskId: string; result: unknown; imageRefs?: Array<{ id: string; mimeType: string }> }
   | { type: "failed"; taskId: string; error: string }
-  | { type: "notify"; taskId: string; message: string; imageIds?: string[] };
+  | { type: "notify"; taskId: string; message: string; imageRefs?: Array<{ id: string; mimeType: string }> };
 
 /** Push a tool result message into context.messages. */
 export function context_pushToolResult(
@@ -180,6 +180,8 @@ export class Agent {
   private modelLimitsCache: ModelLimitsCache | undefined;
   private storeImage?: ToolContext["storeImage"];
   private ownedImageManager: ImageManager | null = null;
+  /** Per-task offset tracking for notify image collection — only scan new messages each time. */
+  private notifyImageOffsets = new Map<string, number>();
 
   constructor(deps: AgentDeps) {
     this.settings = deps.settings ?? getSettings();
@@ -471,18 +473,20 @@ export class Agent {
           }),
         );
         if (this.notifyCallback) {
-          const imageIds = (task.context.finalResult as any).imageIds as string[] | undefined;
+          const finalResult = task.context.finalResult as Record<string, unknown>;
+          const imageRefs = finalResult.imageRefs as Array<{ id: string; mimeType: string }> | undefined;
           this.notifyCallback({
             type: "completed",
             taskId: task.taskId,
             result: task.context.finalResult,
-            ...(imageIds?.length ? { imageIds } : {}),
+            ...(imageRefs?.length ? { imageRefs } : {}),
           });
         }
         // Async post-task reflection (fire-and-forget)
         if (this.postReflector && shouldReflect(task.context)) {
           this._spawn(this._runPostReflection(task));
         }
+        this.notifyImageOffsets.delete(task.taskId);
         break;
 
       case TaskState.FAILED:
@@ -502,6 +506,7 @@ export class Agent {
             error: task.context.error ?? "unknown error",
           });
         }
+        this.notifyImageOffsets.delete(task.taskId);
         break;
     }
   }
@@ -780,19 +785,23 @@ export class Agent {
         if (toolName === "notify" && toolResult.success) {
           const { message } = toolResult.result as { action: string; message: string; taskId: string };
 
-          // Collect image IDs from task messages for mid-task notifications
-          const imageIds: string[] = [];
+          // Collect only NEW image refs since last notify (avoid re-sending all historical images)
+          const offset = this.notifyImageOffsets.get(task.taskId) ?? 0;
+          const imageRefs: Array<{ id: string; mimeType: string }> = [];
           const seen = new Set<string>();
-          for (const msg of task.context.messages) {
+          const msgs = task.context.messages;
+          for (let i = offset; i < msgs.length; i++) {
+            const msg = msgs[i]!;
             if (msg.images) {
               for (const img of msg.images) {
                 if (!seen.has(img.id)) {
                   seen.add(img.id);
-                  imageIds.push(img.id);
+                  imageRefs.push({ id: img.id, mimeType: img.mimeType });
                 }
               }
             }
           }
+          this.notifyImageOffsets.set(task.taskId, msgs.length);
 
           await this.eventBus.emit(
             createEvent(EventType.TASK_NOTIFY, {
@@ -806,7 +815,7 @@ export class Agent {
               type: "notify",
               taskId: task.taskId,
               message,
-              ...(imageIds.length ? { imageIds } : {}),
+              ...(imageRefs.length ? { imageRefs } : {}),
             });
           }
         }
@@ -1046,17 +1055,17 @@ export class Agent {
     const respondAction = task.context.actionsDone.findLast((a) => a.actionType === "respond");
     const responseText = respondAction?.result as string | undefined;
 
-    // Collect unique image IDs from task conversation messages.
+    // Collect unique image refs (id + mimeType) from task conversation messages.
     // These are image refs produced by tools (screenshot, image_read, etc.)
     // and need to be passed to MainAgent so the LLM can see them via hydration.
-    const imageIds: string[] = [];
+    const imageRefs: Array<{ id: string; mimeType: string }> = [];
     const seen = new Set<string>();
     for (const msg of task.context.messages) {
       if (msg.images) {
         for (const img of msg.images) {
           if (!seen.has(img.id)) {
             seen.add(img.id);
-            imageIds.push(img.id);
+            imageRefs.push({ id: img.id, mimeType: img.mimeType });
           }
         }
       }
@@ -1067,7 +1076,7 @@ export class Agent {
       input: task.context.inputText,
       response: responseText ?? null,
       iterations: task.context.iteration,
-      ...(imageIds.length > 0 ? { imageIds } : {}),
+      ...(imageRefs.length > 0 ? { imageRefs } : {}),
     };
   }
 

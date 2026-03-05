@@ -387,6 +387,7 @@ export class MainAgent extends ConversationAgent {
       model: this.models.getForTier("balanced"),
       taskTypeRegistry: this.aiTaskTypeRegistry,
       tasksDir: this.mainStorePaths.tasks,
+      storeImage: this._getStoreImageCallback(),
       onNotification: (notification) => {
         this.pushQueue({ kind: "task_notify", notification } as QueueItem);
       },
@@ -1157,11 +1158,11 @@ export class MainAgent extends ConversationAgent {
     const systemMsg: Message = { role: "user", content: resultText };
 
     // Attach image refs from notification — MainAgent LLM will see them via hydration
-    const imageIds = (notification.type === "completed" || notification.type === "notify")
-      ? (notification as any).imageIds as string[] | undefined
+    const imageRefs = (notification.type === "completed" || notification.type === "notify")
+      ? notification.imageRefs
       : undefined;
-    if (imageIds?.length) {
-      systemMsg.images = imageIds.map(id => ({ id, mimeType: "image/png" }));
+    if (imageRefs?.length) {
+      systemMsg.images = imageRefs.map(ref => ({ id: ref.id, mimeType: ref.mimeType }));
     }
 
     this.sessionMessages.push(systemMsg);

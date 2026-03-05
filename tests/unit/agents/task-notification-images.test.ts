@@ -66,8 +66,8 @@ afterEach(async () => {
 // Part B: _compileResult image collection
 // ═══════════════════════════════════════════════════
 
-describe("_compileResult image ID collection", () => {
-  it("collects image IDs from task messages", () => {
+describe("_compileResult image ref collection", () => {
+  it("collects image refs from task messages", () => {
     const agent = new Agent(makeDeps());
     agents.push(agent);
 
@@ -86,11 +86,11 @@ describe("_compileResult image ID collection", () => {
     const task = new TaskFSM({ taskId: "t1", context });
     const result = (agent as any)._compileResult(task) as Record<string, unknown>;
 
-    expect(result.imageIds).toEqual(["img_abc123"]);
+    expect(result.imageRefs).toEqual([{ id: "img_abc123", mimeType: "image/png" }]);
     expect(result.response).toBe("Done");
   }, 10_000);
 
-  it("returns no imageIds field when messages have no images", () => {
+  it("returns no imageRefs field when messages have no images", () => {
     const agent = new Agent(makeDeps());
     agents.push(agent);
 
@@ -104,11 +104,11 @@ describe("_compileResult image ID collection", () => {
     const task = new TaskFSM({ taskId: "t2", context });
     const result = (agent as any)._compileResult(task) as Record<string, unknown>;
 
-    expect(result.imageIds).toBeUndefined();
+    expect(result.imageRefs).toBeUndefined();
     expect(result.response).toBe("All done");
   }, 10_000);
 
-  it("deduplicates image IDs across multiple messages", () => {
+  it("deduplicates image refs across multiple messages", () => {
     const agent = new Agent(makeDeps());
     agents.push(agent);
 
@@ -138,7 +138,11 @@ describe("_compileResult image ID collection", () => {
     const task = new TaskFSM({ taskId: "t3", context });
     const result = (agent as any)._compileResult(task) as Record<string, unknown>;
 
-    expect(result.imageIds).toEqual(["img_aaa", "img_bbb", "img_ccc"]);
+    expect(result.imageRefs).toEqual([
+      { id: "img_aaa", mimeType: "image/png" },
+      { id: "img_bbb", mimeType: "image/jpeg" },
+      { id: "img_ccc", mimeType: "image/webp" },
+    ]);
   }, 10_000);
 
   it("skips messages with empty images arrays", () => {
@@ -154,50 +158,53 @@ describe("_compileResult image ID collection", () => {
     const task = new TaskFSM({ taskId: "t4", context });
     const result = (agent as any)._compileResult(task) as Record<string, unknown>;
 
-    expect(result.imageIds).toBeUndefined();
+    expect(result.imageRefs).toBeUndefined();
   }, 10_000);
 });
 
 // ═══════════════════════════════════════════════════
-// Part C: TaskNotification type carries imageIds
+// Part C: TaskNotification type carries imageRefs
 // ═══════════════════════════════════════════════════
 
-describe("TaskNotification type with imageIds", () => {
-  it("completed notification carries imageIds", () => {
+describe("TaskNotification type with imageRefs", () => {
+  it("completed notification carries imageRefs", () => {
     const notification: TaskNotification = {
       type: "completed",
       taskId: "t1",
       result: { response: "done" },
-      imageIds: ["img_abc", "img_def"],
+      imageRefs: [{ id: "img_abc", mimeType: "image/png" }, { id: "img_def", mimeType: "image/jpeg" }],
     };
 
     expect(notification.type).toBe("completed");
-    expect(notification.imageIds).toEqual(["img_abc", "img_def"]);
+    expect(notification.imageRefs).toEqual([
+      { id: "img_abc", mimeType: "image/png" },
+      { id: "img_def", mimeType: "image/jpeg" },
+    ]);
   });
 
-  it("completed notification without imageIds is valid", () => {
+  it("completed notification without imageRefs is valid", () => {
     const notification: TaskNotification = {
       type: "completed",
       taskId: "t2",
       result: { response: "done" },
     };
 
-    expect(notification.imageIds).toBeUndefined();
+    expect(notification.imageRefs).toBeUndefined();
   });
 
-  it("notify notification carries imageIds", () => {
+  it("notify notification carries imageRefs", () => {
     const notification: TaskNotification = {
       type: "notify",
       taskId: "t3",
       message: "progress update",
-      imageIds: ["img_xyz"],
+      imageRefs: [{ id: "img_xyz", mimeType: "image/webp" }],
     };
 
     expect(notification.type).toBe("notify");
-    expect(notification.imageIds).toEqual(["img_xyz"]);
+    expect(notification.imageRefs).toEqual([{ id: "img_xyz", mimeType: "image/webp" }]);
   });
 
-  it("failed notification does not have imageIds field", () => {
+  it("failed notification does not have imageRefs field", () => {
     const notification: TaskNotification = {
       type: "failed",
       taskId: "t4",
@@ -205,7 +212,7 @@ describe("TaskNotification type with imageIds", () => {
     };
 
     // TypeScript enforces this at compile time; runtime check for completeness
-    expect((notification as any).imageIds).toBeUndefined();
+    expect((notification as any).imageRefs).toBeUndefined();
   });
 });
 
@@ -231,22 +238,22 @@ describe("_handleTaskNotify image attachment", () => {
 
     const systemMsg: Message = { role: "user", content: resultText };
 
-    const imageIds = (notification.type === "completed" || notification.type === "notify")
-      ? (notification as any).imageIds as string[] | undefined
+    const imageRefs = (notification.type === "completed" || notification.type === "notify")
+      ? notification.imageRefs
       : undefined;
-    if (imageIds?.length) {
-      systemMsg.images = imageIds.map(id => ({ id, mimeType: "image/png" }));
+    if (imageRefs?.length) {
+      systemMsg.images = imageRefs.map(ref => ({ id: ref.id, mimeType: ref.mimeType }));
     }
 
     return systemMsg;
   }
 
-  it("attaches images to message for completed notification with imageIds", () => {
+  it("attaches images to message for completed notification with imageRefs", () => {
     const notification: TaskNotification = {
       type: "completed",
       taskId: "t1",
       result: { response: "Screenshot taken" },
-      imageIds: ["img_abc", "img_def"],
+      imageRefs: [{ id: "img_abc", mimeType: "image/png" }, { id: "img_def", mimeType: "image/jpeg" }],
     };
 
     const msg = buildNotifyMessage(notification);
@@ -254,27 +261,27 @@ describe("_handleTaskNotify image attachment", () => {
     expect(msg.images).toBeDefined();
     expect(msg.images).toHaveLength(2);
     expect(msg.images![0]).toEqual({ id: "img_abc", mimeType: "image/png" });
-    expect(msg.images![1]).toEqual({ id: "img_def", mimeType: "image/png" });
+    expect(msg.images![1]).toEqual({ id: "img_def", mimeType: "image/jpeg" });
     expect(msg.content).toContain("[Task t1 completed]");
   });
 
-  it("attaches images to message for notify notification with imageIds", () => {
+  it("attaches images to message for notify notification with imageRefs", () => {
     const notification: TaskNotification = {
       type: "notify",
       taskId: "t2",
       message: "Progress: screenshot taken",
-      imageIds: ["img_xyz"],
+      imageRefs: [{ id: "img_xyz", mimeType: "image/webp" }],
     };
 
     const msg = buildNotifyMessage(notification);
 
     expect(msg.images).toBeDefined();
     expect(msg.images).toHaveLength(1);
-    expect(msg.images![0]).toEqual({ id: "img_xyz", mimeType: "image/png" });
+    expect(msg.images![0]).toEqual({ id: "img_xyz", mimeType: "image/webp" });
     expect(msg.content).toContain("[Task t2 update]");
   });
 
-  it("does not attach images when no imageIds present", () => {
+  it("does not attach images when no imageRefs present", () => {
     const notification: TaskNotification = {
       type: "completed",
       taskId: "t3",
@@ -300,12 +307,12 @@ describe("_handleTaskNotify image attachment", () => {
     expect(msg.content).toContain("[Task t4 failed]");
   });
 
-  it("does not attach images when imageIds is empty array", () => {
+  it("does not attach images when imageRefs is empty array", () => {
     const notification: TaskNotification = {
       type: "completed",
       taskId: "t5",
       result: { response: "done" },
-      imageIds: [],
+      imageRefs: [],
     };
 
     const msg = buildNotifyMessage(notification);

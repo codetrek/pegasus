@@ -6,18 +6,7 @@ import path from "node:path";
 import type { Tool, ToolResult, ToolContext } from "../types.ts";
 import { ToolCategory } from "../types.ts";
 import type { ImageAttachment } from "../../media/types.ts";
-import { readImageFile } from "../../media/image-helpers.ts";
-
-// Infer mimeType from file extension
-function extToMime(ext: string): string {
-  switch (ext.toLowerCase()) {
-    case "jpg": case "jpeg": return "image/jpeg";
-    case "png": return "image/png";
-    case "webp": return "image/webp";
-    case "gif": return "image/gif";
-    default: return "image/jpeg";
-  }
-}
+import { readImageFile, extToMime } from "../../media/image-helpers.ts";
 
 export const image_read: Tool = {
   name: "image_read",

@@ -123,9 +123,11 @@ export const browser_screenshot: Tool = {
       // If storeImage is available, persist screenshot in ImageManager and
       // return image data inline so the LLM can see it.
       let images: ImageAttachment[] | undefined;
+      let storedImageId: string | undefined;
       if (context.storeImage) {
         const buffer = await readFile(result.screenshotPath);
         const ref = await context.storeImage(buffer, "image/png", "browser");
+        storedImageId = ref.id;
         images = [
           {
             id: ref.id,
@@ -140,10 +142,11 @@ export const browser_screenshot: Tool = {
       return {
         success: true,
         result: {
-          screenshotPath: result.screenshotPath,
+          ...(storedImageId
+            ? { message: `Screenshot captured and stored (image ${storedImageId})` }
+            : { screenshotPath: result.screenshotPath, message: `Screenshot saved to ${result.screenshotPath}` }),
           snapshot: result.snapshot,
           truncated: result.truncated,
-          message: `Screenshot saved to ${result.screenshotPath}`,
         },
         ...(images ? { images } : {}),
         startedAt,
