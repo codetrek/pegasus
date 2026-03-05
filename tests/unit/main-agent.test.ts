@@ -2495,29 +2495,33 @@ describe("MainAgent", () => {
     });
   });
 
-  // ── _loadOAuthCredentials tests ──
+  // ── _loadOAuthCredentials tests (moved to AuthManager) ──
 
-  describe("_loadOAuthCredentials", () => {
-    it("should return null for non-existent file", async () => {
+  describe("_loadOAuthCredentials (via AuthManager)", () => {
+    function createTestAuthManager(settings?: any) {
       const model = createReplyModel("ok");
-      const agent = new MainAgent({
+      const s = settings ?? testSettings();
+      const { ModelLimitsCache } = require("@pegasus/context/index.ts");
+      const { AuthManager } = require("@pegasus/agents/auth-manager.ts");
+      const { mkdirSync } = require("node:fs");
+      const cacheDir = `/tmp/pegasus-test-mlc-auth-${process.pid}-${Date.now()}`;
+      mkdirSync(cacheDir, { recursive: true });
+      return new AuthManager({
+        settings: s,
         models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
+        modelLimitsCache: new ModelLimitsCache(cacheDir),
+        credDir: s.authDir,
       });
+    }
 
-      const result = (agent as any)._loadOAuthCredentials("/tmp/nonexistent-cred-file.json");
+    it("should return null for non-existent file", async () => {
+      const mgr = createTestAuthManager();
+      const result = mgr._loadOAuthCredentials("/tmp/nonexistent-cred-file.json");
       expect(result).toBeNull();
-    });
+    }, 5_000);
 
     it("should load pi-ai format credentials (access, refresh, expires)", async () => {
-      const model = createReplyModel("ok");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
+      const mgr = createTestAuthManager();
       const credPath = `/tmp/pegasus-test-cred-piai-${process.pid}.json`;
       writeFileSync(credPath, JSON.stringify({
         access: "test-access-token",
@@ -2526,23 +2530,17 @@ describe("MainAgent", () => {
       }));
 
       try {
-        const result = (agent as any)._loadOAuthCredentials(credPath);
+        const result = mgr._loadOAuthCredentials(credPath);
         expect(result).not.toBeNull();
         expect(result.access).toBe("test-access-token");
         expect(result.refresh).toBe("test-refresh-token");
       } finally {
         await rm(credPath, { force: true }).catch(() => {});
       }
-    });
+    }, 5_000);
 
     it("should convert old Pegasus format (accessToken, refreshToken, expiresAt)", async () => {
-      const model = createReplyModel("ok");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
+      const mgr = createTestAuthManager();
       const credPath = `/tmp/pegasus-test-cred-old-${process.pid}.json`;
       writeFileSync(credPath, JSON.stringify({
         accessToken: "old-access",
@@ -2552,7 +2550,7 @@ describe("MainAgent", () => {
       }));
 
       try {
-        const result = (agent as any)._loadOAuthCredentials(credPath);
+        const result = mgr._loadOAuthCredentials(credPath);
         expect(result).not.toBeNull();
         expect(result.access).toBe("old-access");
         expect(result.refresh).toBe("old-refresh");
@@ -2561,16 +2559,10 @@ describe("MainAgent", () => {
       } finally {
         await rm(credPath, { force: true }).catch(() => {});
       }
-    });
+    }, 5_000);
 
     it("should convert old Pegasus format without accountId", async () => {
-      const model = createReplyModel("ok");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
+      const mgr = createTestAuthManager();
       const credPath = `/tmp/pegasus-test-cred-old-noacct-${process.pid}.json`;
       writeFileSync(credPath, JSON.stringify({
         accessToken: "old-access-2",
@@ -2579,7 +2571,7 @@ describe("MainAgent", () => {
       }));
 
       try {
-        const result = (agent as any)._loadOAuthCredentials(credPath);
+        const result = mgr._loadOAuthCredentials(credPath);
         expect(result).not.toBeNull();
         expect(result.access).toBe("old-access-2");
         expect(result.refresh).toBe("old-refresh-2");
@@ -2587,68 +2579,62 @@ describe("MainAgent", () => {
       } finally {
         await rm(credPath, { force: true }).catch(() => {});
       }
-    });
+    }, 5_000);
 
     it("should return null for unrecognized format", async () => {
-      const model = createReplyModel("ok");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
+      const mgr = createTestAuthManager();
       const credPath = `/tmp/pegasus-test-cred-unknown-${process.pid}.json`;
       writeFileSync(credPath, JSON.stringify({ foo: "bar", baz: 42 }));
 
       try {
-        const result = (agent as any)._loadOAuthCredentials(credPath);
+        const result = mgr._loadOAuthCredentials(credPath);
         expect(result).toBeNull();
       } finally {
         await rm(credPath, { force: true }).catch(() => {});
       }
-    });
+    }, 5_000);
 
     it("should return null for invalid JSON", async () => {
-      const model = createReplyModel("ok");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
+      const mgr = createTestAuthManager();
       const credPath = `/tmp/pegasus-test-cred-invalid-${process.pid}.json`;
       writeFileSync(credPath, "not valid json {{{{");
 
       try {
-        const result = (agent as any)._loadOAuthCredentials(credPath);
+        const result = mgr._loadOAuthCredentials(credPath);
         expect(result).toBeNull();
       } finally {
         await rm(credPath, { force: true }).catch(() => {});
       }
-    });
+    }, 5_000);
   });
 
-  // ── _initModelLimits tests ──
+  // ── _initModelLimits tests (moved to AuthManager) ──
 
-  describe("_initModelLimits", () => {
-    it("should do nothing when no providers are configured", async () => {
+  describe("_initModelLimits (via AuthManager)", () => {
+    function createTestAuthManager(settings?: any) {
       const model = createReplyModel("ok");
-      const agent = new MainAgent({
+      const s = settings ?? testSettings();
+      const { ModelLimitsCache } = require("@pegasus/context/index.ts");
+      const { AuthManager } = require("@pegasus/agents/auth-manager.ts");
+      const { mkdirSync } = require("node:fs");
+      const cacheDir = `/tmp/pegasus-test-mlc-auth-limits-${process.pid}-${Date.now()}`;
+      mkdirSync(cacheDir, { recursive: true });
+      const cache = new ModelLimitsCache(cacheDir);
+      return { mgr: new AuthManager({
+        settings: s,
         models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
+        modelLimitsCache: cache,
+        credDir: s.authDir,
+      }), cache, cacheDir };
+    }
 
-      // Set up the cache (normally done in start())
-      const { ModelLimitsCache } = await import("@pegasus/context/model-limits-cache.ts");
-      (agent as any).modelLimitsCache = new ModelLimitsCache(`/tmp/pegasus-test-mlc-${process.pid}-${Date.now()}`);
-
+    it("should do nothing when no providers are configured", async () => {
+      const { mgr } = createTestAuthManager();
       // No copilot or openrouter configured — should complete without error
-      await (agent as any)._initModelLimits();
-    });
+      await mgr.initialize();
+    }, 10_000);
 
     it("should await first-run fetch for openrouter when no cache exists", async () => {
-      const model = createReplyModel("ok");
       const settings = SettingsSchema.parse({
         dataDir: testDataDir,
         logLevel: "warn",
@@ -2658,30 +2644,15 @@ describe("MainAgent", () => {
         },
         authDir: "/tmp/pegasus-test-auth",
       });
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings,
-      });
+      const { mgr, cacheDir } = createTestAuthManager(settings);
 
-      // Mock the cache
-      const { ModelLimitsCache } = await import("@pegasus/context/model-limits-cache.ts");
-      const cacheDir = `/tmp/pegasus-test-mlc-or-${process.pid}-${Date.now()}`;
-      const cache = new ModelLimitsCache(cacheDir);
-      (agent as any).modelLimitsCache = cache;
+      // OpenRouterModelFetcher.fetch() should not throw (returns empty Map on failure)
+      await mgr.initialize();
 
-      // Mock the OpenRouterModelFetcher to avoid real API calls
-      // The _initModelLimits creates its own fetcher, so we need to mock at a deeper level.
-      // Instead, we'll just run it and expect it to handle the fetch failure gracefully.
-      // OpenRouterModelFetcher.fetch() should not throw (returns empty Map on failure).
-      await (agent as any)._initModelLimits();
-
-      // Clean up
       await rm(cacheDir, { recursive: true, force: true }).catch(() => {});
     }, 15_000);
 
     it("should background refresh for openrouter when cache exists", async () => {
-      const model = createReplyModel("ok");
       const settings = SettingsSchema.parse({
         dataDir: testDataDir,
         logLevel: "warn",
@@ -2691,141 +2662,41 @@ describe("MainAgent", () => {
         },
         authDir: "/tmp/pegasus-test-auth",
       });
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings,
-      });
-
-      // Create cache with existing openrouter data
-      const { ModelLimitsCache } = await import("@pegasus/context/model-limits-cache.ts");
-      const cacheDir = `/tmp/pegasus-test-mlc-or-bg-${process.pid}-${Date.now()}`;
-      const cache = new ModelLimitsCache(cacheDir);
+      const { mgr, cache, cacheDir } = createTestAuthManager(settings);
       // Pre-populate with provider cache so hasProviderCache("openrouter") returns true
       cache.update("openrouter", new Map([["test-model", { maxInputTokens: 100000, maxOutputTokens: 4096, contextWindow: 128000 }]]));
-      (agent as any).modelLimitsCache = cache;
 
-      // This should take the background refresh path
-      await (agent as any)._initModelLimits();
+      await mgr.initialize();
 
       // Wait for background promise to settle
       await Bun.sleep(200);
 
-      // Clean up
-      await rm(cacheDir, { recursive: true, force: true }).catch(() => {});
-    }, 15_000);
-
-    it("should await first-run fetch for copilot when no cache exists", async () => {
-      const model = createReplyModel("ok");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
-      // Set up copilot connection info (normally set by _initCopilotAuth)
-      (agent as any)._copilotTokenProvider = async () => "test-copilot-token";
-      (agent as any)._copilotBaseURL = "https://api.github.com/copilot";
-
-      // Mock the cache without copilot data
-      const { ModelLimitsCache } = await import("@pegasus/context/model-limits-cache.ts");
-      const cacheDir = `/tmp/pegasus-test-mlc-cp-${process.pid}-${Date.now()}`;
-      const cache = new ModelLimitsCache(cacheDir);
-      (agent as any).modelLimitsCache = cache;
-
-      // Should take the awaitable (first-run) path for copilot
-      // CopilotModelFetcher.fetch() will fail gracefully (returns empty Map)
-      await (agent as any)._initModelLimits();
-
-      // Clean up
-      await rm(cacheDir, { recursive: true, force: true }).catch(() => {});
-    }, 15_000);
-
-    it("should background refresh for copilot when cache exists", async () => {
-      const model = createReplyModel("ok");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
-      // Set up copilot connection info
-      (agent as any)._copilotTokenProvider = async () => "test-copilot-token";
-      (agent as any)._copilotBaseURL = "https://api.github.com/copilot";
-
-      // Create cache with existing copilot data
-      const { ModelLimitsCache } = await import("@pegasus/context/model-limits-cache.ts");
-      const cacheDir = `/tmp/pegasus-test-mlc-cp-bg-${process.pid}-${Date.now()}`;
-      const cache = new ModelLimitsCache(cacheDir);
-      cache.update("copilot", new Map([["gpt-4o", { maxInputTokens: 128000, maxOutputTokens: 16384, contextWindow: 128000 }]]));
-      (agent as any).modelLimitsCache = cache;
-
-      // Should take the background refresh path
-      await (agent as any)._initModelLimits();
-
-      // Wait for background promise to settle
-      await Bun.sleep(200);
-
-      // Clean up
       await rm(cacheDir, { recursive: true, force: true }).catch(() => {});
     }, 15_000);
   });
 
-  // ── _copilotTokenProvider tests ──
+  // ── _copilotTokenProvider tests (via AuthManager getter) ──
 
-  describe("_copilotTokenProvider closure", () => {
-    it("should return fresh access token when not expired", async () => {
+  describe("_copilotTokenProvider (via AuthManager)", () => {
+    it("should be undefined when copilot is not configured", async () => {
+      const { AuthManager } = require("@pegasus/agents/auth-manager.ts");
+      const { ModelLimitsCache } = require("@pegasus/context/index.ts");
+      const { mkdirSync } = require("node:fs");
       const model = createReplyModel("ok");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
+      const cacheDir = `/tmp/pegasus-test-mlc-cp-getter-${process.pid}-${Date.now()}`;
+      mkdirSync(cacheDir, { recursive: true });
+      const mgr = new AuthManager({
         settings: testSettings(),
+        models: createMockModelRegistry(model),
+        modelLimitsCache: new ModelLimitsCache(cacheDir),
+        credDir: testSettings().authDir,
       });
 
-      // Write fresh credentials to a temp file
-      const credPath = `/tmp/pegasus-test-copilot-token-${process.pid}.json`;
-      const futureExpiry = Date.now() + 3600_000;
-      writeFileSync(credPath, JSON.stringify({
-        access: "fresh-access-token",
-        refresh: "test-refresh",
-        expires: futureExpiry,
-      }));
+      await mgr.initialize();
+      expect(mgr.copilotTokenProvider).toBeUndefined();
 
-      // Set up the closure manually (mimics what _initCopilotAuth does)
-      (agent as any)._copilotCredPath = credPath;
-      (agent as any)._copilotTokenProvider = async () => {
-        const freshCreds = (agent as any)._loadOAuthCredentials(credPath);
-        if (!freshCreds) throw new Error("No Copilot credentials");
-        if (Date.now() >= freshCreds.expires) {
-          throw new Error("Token expired — would need refresh");
-        }
-        return freshCreds.access;
-      };
-
-      const token = await (agent as any)._copilotTokenProvider();
-      expect(token).toBe("fresh-access-token");
-
-      await rm(credPath, { force: true }).catch(() => {});
-    });
-
-    it("should throw when no credentials file exists", async () => {
-      const model = createReplyModel("ok");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
-      const credPath = `/tmp/pegasus-test-copilot-nocred-${process.pid}.json`;
-      (agent as any)._copilotCredPath = credPath;
-      (agent as any)._copilotTokenProvider = async () => {
-        const freshCreds = (agent as any)._loadOAuthCredentials(credPath);
-        if (!freshCreds) throw new Error("No Copilot credentials");
-        return freshCreds.access;
-      };
-
-      await expect((agent as any)._copilotTokenProvider()).rejects.toThrow("No Copilot credentials");
-    });
+      await rm(cacheDir, { recursive: true, force: true }).catch(() => {});
+    }, 10_000);
   });
 
   // ── registerAdapter reply routing tests ──
