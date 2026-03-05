@@ -18,6 +18,8 @@ import { allTaskTools } from "../tools/builtins/index.ts";
 import type { AITaskTypeRegistry } from "../aitask-types/registry.ts";
 import { shortId } from "../infra/id.ts";
 import { getLogger } from "../infra/logger.ts";
+import { appendFile, mkdir } from "node:fs/promises";
+import path from "node:path";
 
 const logger = getLogger("task_runner");
 
@@ -37,6 +39,8 @@ export interface TaskRunnerDeps {
   model: LanguageModel;
   /** AI task type registry for per-type tool resolution. */
   taskTypeRegistry: AITaskTypeRegistry;
+  /** Base directory for task persistence (e.g. data/agents/main/tasks). */
+  tasksDir: string;
   /** Callback for task lifecycle notifications. */
   onNotification: (notification: TaskNotification) => void;
 }
@@ -46,6 +50,7 @@ export interface TaskRunnerDeps {
 export class TaskRunner {
   private model: LanguageModel;
   private taskTypeRegistry: AITaskTypeRegistry;
+  private tasksDir: string;
   private onNotification: (notification: TaskNotification) => void;
   private activeTasks = new Map<string, TaskInfo>();
 
@@ -58,6 +63,7 @@ export class TaskRunner {
   constructor(deps: TaskRunnerDeps) {
     this.model = deps.model;
     this.taskTypeRegistry = deps.taskTypeRegistry;
+    this.tasksDir = deps.tasksDir;
     this.onNotification = deps.onNotification;
   }
 
@@ -77,6 +83,8 @@ export class TaskRunner {
   ): string {
     const taskId = shortId();
     const toolRegistry = this.getToolRegistryForType(taskType);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const sessionDir = path.join(this.tasksDir, dateStr, taskId);
 
     const agent = new ExecutionAgent({
       agentId: taskId,
@@ -84,11 +92,17 @@ export class TaskRunner {
       toolRegistry,
       input,
       description,
-      mode: "task",
+      mode: "worker",
+      sessionDir,
       contextPrompt: this.taskTypeRegistry.getPrompt(taskType),
       onNotify: (message: string) => {
         this.onNotification({ type: "notify", taskId, message });
       },
+    });
+
+    // Write task index entry (for task_list / task_replay tools)
+    this._appendTaskIndex(taskId, dateStr).catch((err) => {
+      logger.warn({ taskId, err }, "task_index_append_failed");
     });
 
     const info: TaskInfo = {
@@ -193,5 +207,16 @@ export class TaskRunner {
 
     this.toolRegistryCache.set(taskType, registry);
     return registry;
+  }
+
+  /**
+   * Append a task entry to the index.jsonl file (for task_list / task_replay).
+   * Compatible with the format used by TaskPersister.
+   */
+  private async _appendTaskIndex(taskId: string, date: string): Promise<void> {
+    await mkdir(this.tasksDir, { recursive: true });
+    const indexPath = path.join(this.tasksDir, "index.jsonl");
+    const line = JSON.stringify({ taskId, date }) + "\n";
+    await appendFile(indexPath, line, "utf-8");
   }
 }

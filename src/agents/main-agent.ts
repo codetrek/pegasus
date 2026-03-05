@@ -382,6 +382,7 @@ export class MainAgent extends ConversationAgent {
     this.taskRunner = new TaskRunner({
       model: this.models.getForTier("balanced"),
       taskTypeRegistry: this.aiTaskTypeRegistry,
+      tasksDir: this.mainStorePaths.tasks,
       onNotification: (notification) => {
         this.pushQueue({ kind: "task_notify", notification } as QueueItem);
       },
