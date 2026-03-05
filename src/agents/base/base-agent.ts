@@ -50,6 +50,8 @@ export interface BaseAgentDeps {
   toolTimeout?: number;
   /** Max tool-use loop iterations per invocation. Default: 25. */
   maxIterations?: number;
+  /** Optional storeImage callback injected into ToolContext for all tool executions. */
+  storeImage?: ToolContext["storeImage"];
 }
 
 // ── Helpers ──────────────────────────────────────────
@@ -106,6 +108,9 @@ export abstract class BaseAgent {
   protected toolExecutor: ToolExecutor;
   protected maxIterations: number;
 
+  /** Optional storeImage callback injected into ToolContext for all tool executions. */
+  private _storeImage?: ToolContext["storeImage"];
+
   /** Per-task execution state for event-driven processStep engine. */
   protected taskStates = new Map<string, TaskExecutionState>();
 
@@ -120,6 +125,7 @@ export abstract class BaseAgent {
     this.eventBus = deps.eventBus ?? new EventBus();
     this.stateManager = new AgentStateManager();
     this.maxIterations = deps.maxIterations ?? 25;
+    this._storeImage = deps.storeImage;
 
     this.toolExecutor = new ToolExecutor(
       this.toolRegistry,
@@ -397,10 +403,12 @@ export abstract class BaseAgent {
           }
           break;
         case "execute": {
+          const ctx: ToolContext = { taskId };
+          if (this._storeImage) ctx.storeImage = this._storeImage;
           const result = await this.toolExecutor.execute(
             tc.name,
             tc.arguments,
-            { taskId } as ToolContext,
+            ctx,
           );
           toolResult = formatToolResult(tc.id, tc.name, result);
           break;

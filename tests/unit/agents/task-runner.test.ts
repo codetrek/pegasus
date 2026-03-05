@@ -23,6 +23,9 @@ import type { LanguageModel } from "../../../src/infra/llm-types.ts";
 import { AITaskTypeRegistry } from "../../../src/aitask-types/registry.ts";
 import { allTaskTools } from "../../../src/tools/builtins/index.ts";
 import { ExecutionAgent } from "../../../src/agents/base/execution-agent.ts";
+import type { Tool, ToolContext, ToolResult } from "../../../src/tools/types.ts";
+import { ToolCategory } from "../../../src/tools/types.ts";
+import { z } from "zod";
 import { mkdtemp } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -431,6 +434,116 @@ describe("TaskRunner", () => {
       } finally {
         ExecutionAgent.prototype.run = originalRun;
       }
+    }, 5000);
+  });
+
+  describe("storeImage propagates from TaskRunner to ToolContext", () => {
+    test("tool receives storeImage callback via ToolContext when provided", async () => {
+      let capturedContext: ToolContext | null = null;
+
+      // Create a spy tool that captures its ToolContext
+      const spyTool: Tool = {
+        name: "test_spy_tool",
+        description: "Captures ToolContext for testing",
+        category: ToolCategory.SYSTEM,
+        parameters: z.object({}),
+        execute: async (_params: unknown, context: ToolContext): Promise<ToolResult> => {
+          capturedContext = context;
+          return { success: true, result: "spied", startedAt: Date.now() };
+        },
+      };
+
+      // Mock storeImage function
+      const mockStoreImage = mock(async (_buf: Buffer, _mime: string, _src: string) => {
+        return { id: "img-123", mimeType: "image/png" };
+      });
+
+      // Model: first call returns a tool call for our spy, second call finishes
+      let callIndex = 0;
+      const model = createMockModel(
+        mock(async () => {
+          callIndex++;
+          if (callIndex === 1) {
+            return {
+              text: "",
+              finishReason: "tool_calls",
+              toolCalls: [
+                { id: "tc-spy-1", name: "test_spy_tool", arguments: {} },
+              ],
+              usage: { promptTokens: 10, completionTokens: 5 },
+            };
+          }
+          return {
+            text: "done",
+            finishReason: "stop",
+            toolCalls: [],
+            usage: { promptTokens: 10, completionTokens: 5 },
+          };
+        }),
+      );
+
+      const runner = new TaskRunner(createDeps({
+        model,
+        storeImage: mockStoreImage,
+      }));
+
+      // Register the spy tool as additional so TaskRunner picks it up
+      runner.setAdditionalTools([spyTool]);
+
+      runner.submit("run spy", "user", "general", "Spy task");
+
+      await waitForNotifications(500);
+
+      expect(capturedContext).not.toBeNull();
+      expect(capturedContext!.storeImage).toBe(mockStoreImage);
+    }, 5000);
+
+    test("tool receives no storeImage when not provided to TaskRunner", async () => {
+      let capturedContext: ToolContext | null = null;
+
+      const spyTool: Tool = {
+        name: "test_spy_tool",
+        description: "Captures ToolContext for testing",
+        category: ToolCategory.SYSTEM,
+        parameters: z.object({}),
+        execute: async (_params: unknown, context: ToolContext): Promise<ToolResult> => {
+          capturedContext = context;
+          return { success: true, result: "spied", startedAt: Date.now() };
+        },
+      };
+
+      let callIndex = 0;
+      const model = createMockModel(
+        mock(async () => {
+          callIndex++;
+          if (callIndex === 1) {
+            return {
+              text: "",
+              finishReason: "tool_calls",
+              toolCalls: [
+                { id: "tc-spy-2", name: "test_spy_tool", arguments: {} },
+              ],
+              usage: { promptTokens: 10, completionTokens: 5 },
+            };
+          }
+          return {
+            text: "done",
+            finishReason: "stop",
+            toolCalls: [],
+            usage: { promptTokens: 10, completionTokens: 5 },
+          };
+        }),
+      );
+
+      // No storeImage provided
+      const runner = new TaskRunner(createDeps({ model }));
+      runner.setAdditionalTools([spyTool]);
+      runner.submit("run spy", "user", "general", "No image task");
+
+      await waitForNotifications(500);
+
+      expect(capturedContext).not.toBeNull();
+      expect(capturedContext!.storeImage).toBeUndefined();
     }, 5000);
   });
 });
