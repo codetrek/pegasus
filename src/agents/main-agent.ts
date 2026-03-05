@@ -685,8 +685,7 @@ export class MainAgent extends ConversationAgent {
       this.sessionMessages.push(assistantMsg);
       await this.sessionStore.append(assistantMsg);
 
-      // Execute all tool calls, track whether any need LLM follow-up
-      let needsFollowUp = false;
+      // Execute all tool calls
 
       for (const tc of result.toolCalls) {
         if (tc.name === "reply") {
@@ -745,13 +744,11 @@ export class MainAgent extends ConversationAgent {
         } else if (tc.name === "spawn_task") {
           await this._handleSpawnTask(tc);
         } else if (tc.name === "resume_task") {
-          const resumeNeedsFollowUp = await this._handleResumeTask(tc);
-          if (resumeNeedsFollowUp) needsFollowUp = true;
+          await this._handleResumeTask(tc);
         } else if (tc.name === "spawn_subagent") {
           await this._handleSpawnSubagent(tc);
         } else if (tc.name === "resume_subagent") {
-          const resumeNeedsFollowUp = await this._handleResumeSubagent(tc);
-          if (resumeNeedsFollowUp) needsFollowUp = true;
+          await this._handleResumeSubagent(tc);
         } else if (tc.name === "use_skill") {
           // Handle use_skill tool call
           const { skill: skillName, args: skillArgs } = tc.arguments as { skill: string; args?: string };
@@ -765,7 +762,6 @@ export class MainAgent extends ConversationAgent {
             };
             this.sessionMessages.push(toolMsg);
             await this.sessionStore.append(toolMsg);
-            needsFollowUp = true;
           } else if (skill.context === "fork") {
             const body = this.skillRegistry.loadBody(skillName, skillArgs);
             const taskType = skill.agent || "general";
@@ -788,7 +784,6 @@ export class MainAgent extends ConversationAgent {
             };
             this.sessionMessages.push(toolMsg);
             await this.sessionStore.append(toolMsg);
-            needsFollowUp = true; // LLM needs to follow skill instructions
           }
         } else if (tc.name === "reload_skills") {
           // Reload skill registry, rebuild system prompt, notify project Workers.
@@ -804,10 +799,8 @@ export class MainAgent extends ConversationAgent {
           };
           this.sessionMessages.push(toolMsg);
           await this.sessionStore.append(toolMsg);
-          needsFollowUp = true;
         } else {
-          // Execute simple tool directly — results need LLM follow-up
-          needsFollowUp = true;
+          // Execute simple tool directly
           const toolResult = await this.mainToolExecutor.execute(
             tc.name,
             tc.arguments,
@@ -878,11 +871,9 @@ export class MainAgent extends ConversationAgent {
         }
       }
 
-      // Only queue another think if there are tool results the LLM needs to process.
-      // reply() and spawn_task() are terminal actions — their results don't need follow-up.
-      if (needsFollowUp) {
-        this.pushQueue({ kind: "think", channel } as QueueItem);
-      }
+      // Always queue next think after tool calls — LLM decides when to stop
+      // by returning no tool_calls (pure text / empty response).
+      this.pushQueue({ kind: "think", channel } as QueueItem);
       return;
     }
 
