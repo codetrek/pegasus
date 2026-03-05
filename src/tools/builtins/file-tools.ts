@@ -10,6 +10,7 @@ import path from "node:path";
 import { readdir, access, stat as fsStat } from "node:fs/promises";
 import ignore from "ignore";
 import { getSettings } from "../../infra/config.ts";
+import { isImageFile, readImageFile } from "../../media/image-helpers.ts";
 
 // ── rg availability check (cached at module load) ──
 
@@ -70,8 +71,13 @@ export const read_file: Tool = {
         }
       }
 
-      // Read file
+      // Image detection — switch to image mode before attempting text read
       const filePath = normalizePath(originalPath);
+      if (isImageFile(filePath)) {
+        return readImageFile(filePath, context, "file_read", startedAt);
+      }
+
+      // Read file (text mode)
       const raw = await Bun.file(filePath).text();
       const stat = await Bun.file(filePath).stat();
       const allLines = raw.split("\n");
