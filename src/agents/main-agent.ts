@@ -26,8 +26,7 @@ import { SessionStore } from "../session/store.ts";
 import { Agent } from "./agent.ts";
 import type { TaskNotification } from "./agent.ts";
 import type { ToolCall } from "../models/tool.ts";
-import { EstimateCounter } from "../infra/token-counter.ts";
-import { computeTokenBudget, calculateMaxToolResultChars, truncateToolResult, summarizeMessages, isContextOverflowError, MAX_OVERFLOW_COMPACT_RETRIES, ModelLimitsCache } from "../context/index.ts";
+import { computeTokenBudget, calculateMaxToolResultChars, truncateToolResult, isContextOverflowError, MAX_OVERFLOW_COMPACT_RETRIES, ModelLimitsCache } from "../context/index.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import path from "node:path";
 import os from "node:os";
@@ -40,6 +39,7 @@ import { OwnerStore } from "../security/owner-store.ts";
 import { classifyMessage } from "../security/message-classifier.ts";
 import { TickManager } from "./tick-manager.ts";
 import { AuthManager } from "./auth-manager.ts";
+import { CompactionManager } from "./compaction-manager.ts";
 
 // Main Agent's curated tool set
 import { mainAgentTools, reflectionTools } from "../tools/builtins/index.ts";
@@ -85,7 +85,6 @@ export class MainAgent {
   private processing = false;
   private lastPromptTokens = 0;
   private _overflowRetryCount = 0;
-  private tokenCounter = new EstimateCounter();
   private skillRegistry: SkillRegistry;
   private skillDirs: Array<{ dir: string; source: "builtin" | "user" }> = [];
   private aiTaskTypeRegistry: AITaskTypeRegistry;
@@ -100,6 +99,7 @@ export class MainAgent {
   private systemPrompt: string = "";
   private modelLimitsCache!: ModelLimitsCache;
   private authManager!: AuthManager;
+  private compactionManager!: CompactionManager;
   private _mcpAuthDir: string;
   private tickManager: TickManager;
 
@@ -172,6 +172,14 @@ export class MainAgent {
     // Initialize model limits cache for provider-aware token budget resolution
     const modelLimitsCacheDir = path.join(os.homedir(), ".pegasus", "model-limits");
     this.modelLimitsCache = new ModelLimitsCache(modelLimitsCacheDir);
+
+    // CompactionManager — context window management
+    this.compactionManager = new CompactionManager({
+      sessionStore: this.sessionStore,
+      models: this.models,
+      settings: this.settings,
+      modelLimitsCache: this.modelLimitsCache,
+    });
 
     // Authenticate providers and fetch model limits via AuthManager
     this.authManager = new AuthManager({
@@ -560,7 +568,24 @@ export class MainAgent {
    */
   private async _think(channel: { type: string; channelId: string; replyTo?: string }): Promise<void> {
     // Check if compact is needed before LLM call
-    await this._checkAndCompact();
+    const preCompactMessages = [...this.sessionMessages];
+    const didCompact = await this.compactionManager.checkAndCompact(
+      this.sessionMessages,
+      this.lastPromptTokens,
+    );
+    if (didCompact) {
+      this.sessionMessages = await this.sessionStore.load();
+      await this._injectMemoryIndex();
+      this.lastPromptTokens = 0;
+      this.imageReadCache.clear();
+
+      // Fire-and-forget reflection on the archived session
+      if (this._shouldReflectOnSession(preCompactMessages)) {
+        this._runMainReflection(preCompactMessages).catch((err) => {
+          logger.warn({ error: err instanceof Error ? err.message : String(err) }, "main_reflection_failed");
+        });
+      }
+    }
 
     // Hydrate images for recent turns (vision support)
     const messages = this.imageManager
@@ -590,9 +615,17 @@ export class MainAgent {
           { error: errorToString(err), attempt: this._overflowRetryCount },
           "context_overflow_detected_forcing_compact",
         );
-        const compacted = await this._checkAndCompact();
+        const compacted = await this.compactionManager.checkAndCompact(
+          this.sessionMessages,
+          this.lastPromptTokens,
+        );
+        if (compacted) {
+          this.sessionMessages = await this.sessionStore.load();
+          await this._injectMemoryIndex();
+          this.lastPromptTokens = 0;
+        }
         if (!compacted) {
-          const summary = await this._compactWithFallback();
+          const summary = await this.compactionManager.compactWithFallback(this.sessionMessages);
           await this.sessionStore.compact(summary);
           this.sessionMessages = await this.sessionStore.load();
           await this._injectMemoryIndex();
@@ -1139,78 +1172,6 @@ export class MainAgent {
     );
   }
 
-  // ── Compact ──
-
-  /**
-   * Check if session needs compaction based on token estimate.
-   * Returns true if compact was performed.
-   */
-  private async _checkAndCompact(): Promise<boolean> {
-    const budget = computeTokenBudget({
-      modelId: this.models.getDefaultModelId(),
-      provider: this.models.getDefaultProvider(),
-      configContextWindow: this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
-      compactThreshold: this.settings.session?.compactThreshold,
-      modelLimitsCache: this.modelLimitsCache,
-    });
-
-    // Estimate current token usage
-    const keepLastNTurns = this.settings.vision?.keepLastNTurns ?? 5;
-    let estimatedTokens: number;
-    if (this.lastPromptTokens > 0) {
-      // Use lastPromptTokens as base, but also estimate full session
-      // to catch cases where many messages were added since last LLM call
-      const fullEstimate = await this.sessionStore.estimateTokens(
-        this.sessionMessages,
-        this.tokenCounter,
-        keepLastNTurns,
-      );
-      // Use the larger of: lastPromptTokens or full estimate
-      estimatedTokens = Math.max(this.lastPromptTokens, fullEstimate);
-    } else {
-      // First call: no lastPromptTokens, estimate everything
-      estimatedTokens = await this.sessionStore.estimateTokens(
-        this.sessionMessages,
-        this.tokenCounter,
-        keepLastNTurns,
-      );
-    }
-
-    if (estimatedTokens < budget.compactTrigger) return false;
-
-    // Trigger compact
-    logger.info(
-      { estimatedTokens, compactTrigger: budget.compactTrigger, contextWindow: budget.contextWindow },
-      "compact_triggered",
-    );
-
-    // Save pre-compact messages for reflection BEFORE archiving
-    const preCompactMessages = [...this.sessionMessages];
-
-    // 1. Generate summary via independent LLM call
-    const summary = await this._compactWithFallback();
-
-    // 2. Archive current session and create new one with summary
-    const archiveName = await this.sessionStore.compact(summary);
-
-    // 3. Reset in-memory state
-    this.sessionMessages = await this.sessionStore.load();
-    await this._injectMemoryIndex();
-    this.lastPromptTokens = 0;
-    this.imageReadCache.clear();
-
-    logger.info({ archiveName }, "compact_completed");
-
-    // 4. Fire-and-forget reflection on the archived session
-    if (this._shouldReflectOnSession(preCompactMessages)) {
-      this._runMainReflection(preCompactMessages).catch((err) => {
-        logger.warn({ error: err instanceof Error ? err.message : String(err) }, "main_reflection_failed");
-      });
-    }
-
-    return true;
-  }
-
   // ── Main Reflection ──
 
   /**
@@ -1320,63 +1281,6 @@ export class MainAgent {
       { toolCalls: reflection.toolCallsCount, assessment: reflection.assessment },
       "main_reflection_complete",
     );
-  }
-
-  /**
-   * Generate a summary of the current session via an independent LLM call.
-   * This is NOT part of Main Agent's inner monologue — it's a system operation.
-   */
-  private async _generateSummary(): Promise<string> {
-    return summarizeMessages({
-      messages: this.sessionMessages,
-      model: this.models.getForTier("fast"),
-      configContextWindow: this.models.getContextWindowForTier("fast"),
-      modelLimitsCache: this.modelLimitsCache,
-    });
-  }
-
-  /**
-   * 3-level compact fallback:
-   *   1. Chunked LLM summarize
-   *   2. Mechanical summary (no LLM)
-   *   3. Hard truncate (last resort)
-   */
-  private async _compactWithFallback(): Promise<string> {
-    try {
-      return await this._generateSummary();
-    } catch (err) {
-      logger.warn({ error: errorToString(err) }, "chunked_summary_failed_trying_mechanical");
-    }
-    try {
-      return this._mechanicalSummary();
-    } catch (err) {
-      logger.warn({ error: errorToString(err) }, "mechanical_summary_failed_hard_truncate");
-    }
-    return "[Session history truncated due to context window limit. Previous context was lost.]";
-  }
-
-  private _mechanicalSummary(): string {
-    const userMessages = this.sessionMessages.filter((m) => m.role === "user");
-    const assistantMessages = this.sessionMessages.filter((m) => m.role === "assistant");
-    const toolMessages = this.sessionMessages.filter((m) => m.role === "tool");
-    const recentUsers = userMessages.slice(-3).map(
-      (m, i) => `  ${i + 1}. ${typeof m.content === "string" ? m.content.slice(0, 200) : String(m.content).slice(0, 200)}`,
-    );
-    const toolNames = new Set<string>();
-    for (const m of assistantMessages) {
-      if (m.toolCalls) {
-        for (const tc of m.toolCalls) toolNames.add(tc.name);
-      }
-    }
-    return [
-      `[Session compacted — ${this.sessionMessages.length} messages archived]`,
-      "",
-      "Recent user messages:",
-      ...recentUsers,
-      "",
-      `Tools used: ${[...toolNames].join(", ") || "(none)"}`,
-      `Total exchanges: ${userMessages.length} user, ${assistantMessages.length} assistant, ${toolMessages.length} tool`,
-    ].join("\n");
   }
 
   // ── Helpers ──
