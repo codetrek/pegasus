@@ -32,7 +32,7 @@ describe("OpenRouterModelFetcher", () => {
   });
 
   it("has provider = 'openrouter'", () => {
-    const fetcher = new OpenRouterModelFetcher(API_KEY);
+    const fetcher = new OpenRouterModelFetcher(API_KEY, { retryDelayMs: 0 });
     expect(fetcher.provider).toBe("openrouter");
   });
 
@@ -41,7 +41,7 @@ describe("OpenRouterModelFetcher", () => {
       Promise.resolve(new Response(makeResponse([]), { status: 200 })),
     );
 
-    const fetcher = new OpenRouterModelFetcher(API_KEY);
+    const fetcher = new OpenRouterModelFetcher(API_KEY, { retryDelayMs: 0 });
     await fetcher.fetch();
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -66,7 +66,7 @@ describe("OpenRouterModelFetcher", () => {
       ),
     );
 
-    const fetcher = new OpenRouterModelFetcher(API_KEY);
+    const fetcher = new OpenRouterModelFetcher(API_KEY, { retryDelayMs: 0 });
     const result = await fetcher.fetch();
 
     expect(result.size).toBe(1);
@@ -98,7 +98,7 @@ describe("OpenRouterModelFetcher", () => {
       ),
     );
 
-    const fetcher = new OpenRouterModelFetcher(API_KEY);
+    const fetcher = new OpenRouterModelFetcher(API_KEY, { retryDelayMs: 0 });
     const result = await fetcher.fetch();
 
     expect(result.has("claude-sonnet-4")).toBe(true);
@@ -123,7 +123,7 @@ describe("OpenRouterModelFetcher", () => {
       ),
     );
 
-    const fetcher = new OpenRouterModelFetcher(API_KEY);
+    const fetcher = new OpenRouterModelFetcher(API_KEY, { retryDelayMs: 0 });
     const result = await fetcher.fetch();
 
     expect(result.has("some-model-no-slash")).toBe(true);
@@ -146,7 +146,7 @@ describe("OpenRouterModelFetcher", () => {
       ),
     );
 
-    const fetcher = new OpenRouterModelFetcher(API_KEY);
+    const fetcher = new OpenRouterModelFetcher(API_KEY, { retryDelayMs: 0 });
     const result = await fetcher.fetch();
 
     const limits = result.get("gpt-4o")!;
@@ -171,7 +171,7 @@ describe("OpenRouterModelFetcher", () => {
       ),
     );
 
-    const fetcher = new OpenRouterModelFetcher(API_KEY);
+    const fetcher = new OpenRouterModelFetcher(API_KEY, { retryDelayMs: 0 });
     const result = await fetcher.fetch();
 
     const limits = result.get("gpt-4o")!;
@@ -199,7 +199,7 @@ describe("OpenRouterModelFetcher", () => {
       ),
     );
 
-    const fetcher = new OpenRouterModelFetcher(API_KEY);
+    const fetcher = new OpenRouterModelFetcher(API_KEY, { retryDelayMs: 0 });
     const result = await fetcher.fetch();
 
     expect(result.size).toBe(1);
@@ -216,7 +216,7 @@ describe("OpenRouterModelFetcher", () => {
       ),
     );
 
-    const fetcher = new OpenRouterModelFetcher(API_KEY);
+    const fetcher = new OpenRouterModelFetcher(API_KEY, { retryDelayMs: 0 });
     const result = await fetcher.fetch();
 
     expect(result.size).toBe(0);
@@ -230,7 +230,7 @@ describe("OpenRouterModelFetcher", () => {
       ),
     );
 
-    const fetcher = new OpenRouterModelFetcher(API_KEY);
+    const fetcher = new OpenRouterModelFetcher(API_KEY, { retryDelayMs: 0 });
     const result = await fetcher.fetch();
 
     expect(result.size).toBe(0);
@@ -248,7 +248,7 @@ describe("OpenRouterModelFetcher", () => {
         ),
       );
 
-      const fetcher = new OpenRouterModelFetcher(API_KEY);
+      const fetcher = new OpenRouterModelFetcher(API_KEY, { retryDelayMs: 0 });
       const result = await fetcher.fetch();
 
       expect(result.size).toBe(0);
@@ -283,7 +283,7 @@ describe("OpenRouterModelFetcher", () => {
         );
       });
 
-      const fetcher = new OpenRouterModelFetcher(API_KEY);
+      const fetcher = new OpenRouterModelFetcher(API_KEY, { retryDelayMs: 0 });
       const result = await fetcher.fetch();
 
       expect(result.size).toBe(1);
@@ -298,7 +298,7 @@ describe("OpenRouterModelFetcher", () => {
       Promise.reject(new Error("network failure")),
     );
 
-    const fetcher = new OpenRouterModelFetcher(API_KEY);
+    const fetcher = new OpenRouterModelFetcher(API_KEY, { retryDelayMs: 0 });
     const result = await fetcher.fetch();
 
     expect(result.size).toBe(0);
@@ -309,7 +309,7 @@ describe("OpenRouterModelFetcher", () => {
       Promise.resolve(new Response("not json at all", { status: 200 })),
     );
 
-    const fetcher = new OpenRouterModelFetcher(API_KEY);
+    const fetcher = new OpenRouterModelFetcher(API_KEY, { retryDelayMs: 0 });
     const result = await fetcher.fetch();
 
     expect(result.size).toBe(0);
@@ -341,7 +341,7 @@ describe("OpenRouterModelFetcher", () => {
       ),
     );
 
-    const fetcher = new OpenRouterModelFetcher(API_KEY);
+    const fetcher = new OpenRouterModelFetcher(API_KEY, { retryDelayMs: 0 });
     const result = await fetcher.fetch();
 
     expect(result.size).toBe(3);

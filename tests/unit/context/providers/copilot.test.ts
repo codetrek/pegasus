@@ -86,7 +86,7 @@ describe("CopilotModelFetcher", () => {
       ),
     );
 
-    const fetcher = new CopilotModelFetcher(tokenProvider, BASE_URL);
+    const fetcher = new CopilotModelFetcher(tokenProvider, BASE_URL, { retryDelayMs: 0 });
     const result = await fetcher.fetch();
 
     expect(result).toBeInstanceOf(Map);
@@ -115,7 +115,7 @@ describe("CopilotModelFetcher", () => {
     );
     globalThis.fetch = fn as unknown as typeof globalThis.fetch;
 
-    const fetcher = new CopilotModelFetcher(tokenProvider, BASE_URL);
+    const fetcher = new CopilotModelFetcher(tokenProvider, BASE_URL, { retryDelayMs: 0 });
     await fetcher.fetch();
 
     expect(fn).toHaveBeenCalledTimes(1);
@@ -174,7 +174,7 @@ describe("CopilotModelFetcher", () => {
       ),
     );
 
-    const fetcher = new CopilotModelFetcher(tokenProvider, BASE_URL);
+    const fetcher = new CopilotModelFetcher(tokenProvider, BASE_URL, { retryDelayMs: 0 });
     const result = await fetcher.fetch();
 
     expect(result.size).toBe(1);
@@ -193,7 +193,7 @@ describe("CopilotModelFetcher", () => {
     );
     globalThis.fetch = fn as unknown as typeof globalThis.fetch;
 
-    const fetcher = new CopilotModelFetcher(tokenProvider, BASE_URL);
+    const fetcher = new CopilotModelFetcher(tokenProvider, BASE_URL, { retryDelayMs: 0 });
     const result = await fetcher.fetch();
 
     expect(result).toBeInstanceOf(Map);
@@ -210,7 +210,7 @@ describe("CopilotModelFetcher", () => {
     );
     globalThis.fetch = fn as unknown as typeof globalThis.fetch;
 
-    const fetcher = new CopilotModelFetcher(tokenProvider, BASE_URL);
+    const fetcher = new CopilotModelFetcher(tokenProvider, BASE_URL, { retryDelayMs: 0 });
     const result = await fetcher.fetch();
 
     expect(result).toBeInstanceOf(Map);
@@ -230,7 +230,7 @@ describe("CopilotModelFetcher", () => {
       );
       globalThis.fetch = fn as unknown as typeof globalThis.fetch;
 
-      const fetcher = new CopilotModelFetcher(tokenProvider, BASE_URL);
+      const fetcher = new CopilotModelFetcher(tokenProvider, BASE_URL, { retryDelayMs: 0 });
       const result = await fetcher.fetch();
 
       expect(result).toBeInstanceOf(Map);
@@ -271,7 +271,7 @@ describe("CopilotModelFetcher", () => {
         );
       }) as unknown as typeof globalThis.fetch;
 
-      const fetcher = new CopilotModelFetcher(tokenProvider, BASE_URL);
+      const fetcher = new CopilotModelFetcher(tokenProvider, BASE_URL, { retryDelayMs: 0 });
       const result = await fetcher.fetch();
 
       expect(result.size).toBe(1);
@@ -294,7 +294,7 @@ describe("CopilotModelFetcher", () => {
       );
       globalThis.fetch = fn as unknown as typeof globalThis.fetch;
 
-      const fetcher = new CopilotModelFetcher(tokenProvider, BASE_URL);
+      const fetcher = new CopilotModelFetcher(tokenProvider, BASE_URL, { retryDelayMs: 0 });
       const result = await fetcher.fetch();
 
       expect(result).toBeInstanceOf(Map);
@@ -314,7 +314,7 @@ describe("CopilotModelFetcher", () => {
       ),
     );
 
-    const fetcher = new CopilotModelFetcher(tokenProvider, BASE_URL);
+    const fetcher = new CopilotModelFetcher(tokenProvider, BASE_URL, { retryDelayMs: 0 });
     const result = await fetcher.fetch();
 
     expect(result).toBeInstanceOf(Map);
@@ -330,7 +330,7 @@ describe("CopilotModelFetcher", () => {
         Promise.resolve(new Response("not-json{{{", { status: 200 })),
       );
 
-      const fetcher = new CopilotModelFetcher(tokenProvider, BASE_URL);
+      const fetcher = new CopilotModelFetcher(tokenProvider, BASE_URL, { retryDelayMs: 0 });
       const result = await fetcher.fetch();
 
       expect(result).toBeInstanceOf(Map);
@@ -348,7 +348,7 @@ describe("CopilotModelFetcher", () => {
       ),
     );
 
-    const fetcher = new CopilotModelFetcher(tokenProvider, BASE_URL);
+    const fetcher = new CopilotModelFetcher(tokenProvider, BASE_URL, { retryDelayMs: 0 });
     const result = await fetcher.fetch();
 
     expect(result).toBeInstanceOf(Map);
@@ -379,7 +379,7 @@ describe("CopilotModelFetcher", () => {
         );
       });
 
-      const fetcher = new CopilotModelFetcher(countingTokenProvider, BASE_URL);
+      const fetcher = new CopilotModelFetcher(countingTokenProvider, BASE_URL, { retryDelayMs: 0 });
       await fetcher.fetch();
 
       // Token provider should be called twice: once for initial, once for retry

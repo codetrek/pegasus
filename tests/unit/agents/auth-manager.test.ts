@@ -30,6 +30,7 @@ import type { AuthManagerDeps } from "../../../src/agents/auth-manager.ts";
 describe("AuthManager", () => {
   let tmpDir: string;
   let deps: AuthManagerDeps;
+  let originalFetch: typeof globalThis.fetch;
 
   beforeEach(() => {
     tmpDir = path.join(os.tmpdir(), `auth-manager-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -64,9 +65,17 @@ describe("AuthManager", () => {
     mockRefreshGitHubCopilotToken.mockReset();
     mockGetGitHubCopilotBaseUrl.mockReset();
     mockLoginCodexDeviceCode.mockReset();
+
+    // Prevent real network calls from model limits fetching (CopilotModelFetcher/OpenRouterModelFetcher).
+    // Without this, initialize() triggers real fetch() → 10s timeout per test.
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = mock(() =>
+      Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200 })),
+    ) as unknown as typeof globalThis.fetch;
   });
 
   afterEach(() => {
+    globalThis.fetch = originalFetch;
     try {
       rmSync(tmpDir, { recursive: true, force: true });
     } catch {

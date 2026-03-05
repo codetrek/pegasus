@@ -18,6 +18,7 @@ import type {
 import {
   resolveTransportAuth,
   refreshToken,
+  setRetryDelayMs,
 } from "../../../../src/mcp/auth/provider-factory.ts";
 
 // ── Helpers ──
@@ -82,10 +83,13 @@ describe("resolveTransportAuth", () => {
     tmpDir = makeTempDir();
     tokenStore = new TokenStore(tmpDir);
     originalFetch = globalThis.fetch;
+    // Eliminate retry delay in tests to avoid 2s waits
+    setRetryDelayMs(0);
   });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    setRetryDelayMs(2000);
     cleanDir(tmpDir);
   });
 
@@ -343,10 +347,12 @@ describe("refreshToken", () => {
   beforeEach(() => {
     tmpDir = makeTempDir();
     originalFetch = globalThis.fetch;
+    setRetryDelayMs(0);
   });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    setRetryDelayMs(2000);
     cleanDir(tmpDir);
   });
 
@@ -476,10 +482,12 @@ describe("resolveTransportAuth — additional branches", () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pf-branch-test-"));
     tokenStore = new TokenStore(tmpDir);
     originalFetch = globalThis.fetch;
+    setRetryDelayMs(0);
   });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    setRetryDelayMs(2000);
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

@@ -265,7 +265,7 @@ describe("MainAgent", () => {
       channel: { type: "cli", channelId: "test" },
     });
 
-    await Bun.sleep(100);
+    await Bun.sleep(50);
 
     expect(replies).toHaveLength(2);
 
@@ -357,7 +357,7 @@ describe("MainAgent", () => {
       text: "what time is it",
       channel: { type: "cli", channelId: "test" },
     });
-    await Bun.sleep(100);
+    await Bun.sleep(50);
 
     expect(callCount).toBeGreaterThanOrEqual(2);
     expect(replies).toHaveLength(1);
@@ -444,7 +444,7 @@ describe("MainAgent", () => {
     // Wait for spawn_task to process — the underlying Agent will run the
     // task asynchronously, and when it completes, MainAgent receives
     // the result via _onTaskResult → _handleTaskResult → onReply
-    await Bun.sleep(100);
+    await Bun.sleep(50);
 
     // Should get at least one reply (the post-spawn response)
     expect(replies.length).toBeGreaterThanOrEqual(1);
@@ -752,7 +752,7 @@ describe("MainAgent", () => {
     });
 
     // Wait for spawn → task complete → resume → task complete again
-    await Bun.sleep(800);
+    await Bun.sleep(300);
 
     // Should have received replies
     expect(replies.length).toBeGreaterThanOrEqual(1);
@@ -813,7 +813,7 @@ describe("MainAgent", () => {
       text: "resume some old task",
       channel: { type: "cli", channelId: "test" },
     });
-    await Bun.sleep(200);
+    await Bun.sleep(50);
 
     // Should not crash — error is handled gracefully
     // The LLM sees the error in tool result and replies to user
@@ -925,11 +925,11 @@ describe("MainAgent", () => {
 
     // First message — sets lastPromptTokens to 80k
     agent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(100);
+    await Bun.sleep(50);
 
     // Second message — should trigger compact (80k > 50k * 0.8 = 40k)
     agent.send({ text: "how are you", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(100);
+    await Bun.sleep(50);
 
     // Verify compact happened: archive file should exist
     const { readdir } = await import("node:fs/promises");
@@ -1007,11 +1007,11 @@ describe("MainAgent", () => {
 
     // First message — triggers large promptTokens
     agent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(100);
+    await Bun.sleep(50);
 
     // Second message — should trigger compact before _think
     agent.send({ text: "how are you", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(100);
+    await Bun.sleep(50);
 
     // Verify compact happened: archive file should exist
     const { readdir } = await import("node:fs/promises");
@@ -1088,11 +1088,11 @@ describe("MainAgent", () => {
 
     // First message — triggers large promptTokens
     agent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(100);
+    await Bun.sleep(50);
 
     // Second message — triggers compact; summarize fails → mechanical summary
     agent.send({ text: "how are you", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(100);
+    await Bun.sleep(50);
 
     // Verify compact happened: archive file should exist
     const { readdir } = await import("node:fs/promises");
@@ -1284,7 +1284,7 @@ describe("MainAgent", () => {
     agent.onReply((msg) => replies.push(msg));
 
     agent.send({ text: "help me", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(100);
+    await Bun.sleep(50);
 
     // The tool result message should contain the skill body
     const toolResults = capturedMessages.filter((m) => m.role === "tool");
@@ -1338,7 +1338,7 @@ describe("MainAgent", () => {
     agent.onReply((msg) => replies.push(msg));
 
     agent.send({ text: "use skill", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(100);
+    await Bun.sleep(50);
 
     expect(replies.length).toBeGreaterThanOrEqual(1);
 
@@ -1451,7 +1451,7 @@ describe("MainAgent", () => {
     agent.onReply(() => {});
 
     agent.send({ text: "what time", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(100);
+    await Bun.sleep(50);
 
     // Find the tool result message for current_time (in the second LLM call messages)
     const toolMsg = capturedMessages.find(
@@ -1645,14 +1645,14 @@ describe("MainAgent", () => {
       // Each creates user + assistant + tool = 3 messages per send
       // After 3 sends: 9+ messages, 3 user messages — plenty for reflection gate
       agent.send({ text: "My name is Alice", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(80);
+      await Bun.sleep(50);
 
       agent.send({ text: "I work at Acme Corp", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(80);
+      await Bun.sleep(50);
 
       // 3rd message: thinkCount=3 returns 110k tokens, setting lastPromptTokens
       agent.send({ text: "Tell me more", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(80);
+      await Bun.sleep(50);
 
       // 4th message: compact triggers (lastPromptTokens=110k > 128k*0.8=102.4k)
       agent.send({ text: "One last thing", channel: { type: "cli", channelId: "test" } });
@@ -1665,7 +1665,7 @@ describe("MainAgent", () => {
       expect(archives.length).toBeGreaterThanOrEqual(1);
 
       // Wait for fire-and-forget reflection to complete
-      await Bun.sleep(100);
+      await Bun.sleep(50);
 
       // Reflection should have been called
       expect(reflectionCalled).toBe(true);
@@ -1730,11 +1730,11 @@ describe("MainAgent", () => {
 
       // Build up enough messages to pass the reflection gate
       agent.send({ text: "My name is Alice", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(80);
+      await Bun.sleep(50);
       agent.send({ text: "I work at Acme Corp", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(80);
+      await Bun.sleep(50);
       agent.send({ text: "Tell me more", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(80);
+      await Bun.sleep(50);
 
       // This triggers compact → reflection (which throws) → .catch() handles it
       agent.send({ text: "One last thing", channel: { type: "cli", channelId: "test" } });
@@ -1816,11 +1816,11 @@ describe("MainAgent", () => {
 
       // Send only ONE message — compact triggers, but session is trivial (<6 messages)
       agent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(100);
+      await Bun.sleep(50);
 
       // Second message triggers compact (high promptTokens)
       agent.send({ text: "test", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(200);
+      await Bun.sleep(50);
 
       // Reflection should NOT have been called (session too short)
       expect(reflectionCalled).toBe(false);
@@ -1907,7 +1907,7 @@ describe("MainAgent", () => {
         channel: { type: "cli", channelId: "test" },
       });
 
-      await Bun.sleep(100);
+      await Bun.sleep(50);
 
       // Verify spawn was called on WorkerAdapter
       expect(mockWA.startWorker).toHaveBeenCalledTimes(1);
@@ -2117,7 +2117,7 @@ describe("MainAgent", () => {
         text: "resume old subagent",
         channel: { type: "cli", channelId: "test" },
       });
-      await Bun.sleep(100);
+      await Bun.sleep(50);
 
       // Error triggers follow-up → LLM replies with "SubAgent not found"
       expect(callCount).toBeGreaterThanOrEqual(2); // 1st: resume, 2nd: follow-up
@@ -2189,7 +2189,7 @@ describe("MainAgent", () => {
         channel: { type: "subagent", channelId: "sa_1_12345" },
       });
 
-      await Bun.sleep(100);
+      await Bun.sleep(50);
 
       // MainAgent should have processed the subagent message via _think()
       // and the LLM should have produced a reply
@@ -2529,7 +2529,7 @@ describe("MainAgent", () => {
       await mgr.initialize();
 
       // Wait for background promise to settle
-      await Bun.sleep(200);
+      await Bun.sleep(50);
 
       await rm(cacheDir, { recursive: true, force: true }).catch(() => {});
     }, 10_000);
@@ -2802,7 +2802,7 @@ describe("MainAgent", () => {
       agent.onReply((msg) => replies.push(msg));
 
       agent.send({ text: "reload please", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(100);
+      await Bun.sleep(50);
 
       // After reload_skills tool was processed:
       // 1. new-skill should now be in registry
@@ -2874,7 +2874,7 @@ describe("MainAgent", () => {
       agent.onReply((msg) => replies.push(msg));
 
       agent.send({ text: "reload", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(100);
+      await Bun.sleep(50);
 
       // Verify broadcast was called with skills_reload
       expect(broadcastCalls.length).toBeGreaterThanOrEqual(1);
@@ -2925,7 +2925,7 @@ describe("MainAgent", () => {
       agent.onReply((msg) => replies.push(msg));
 
       agent.send({ text: "reload", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(100);
+      await Bun.sleep(50);
 
       // Should not crash, tool result should show skillCount
       const toolResults = capturedMessages.filter((m) => m.role === "tool");
@@ -3090,14 +3090,14 @@ describe("MainAgent", () => {
         text: "msg1",
         channel: { type: "telegram", channelId: "chat1", userId: "user1" },
       });
-      await Bun.sleep(200);
+      await Bun.sleep(50);
 
       // Second message — should NOT inject another notification (rate-limited)
       agent.send({
         text: "msg2",
         channel: { type: "telegram", channelId: "chat2", userId: "user2" },
       });
-      await Bun.sleep(200);
+      await Bun.sleep(50);
 
       const content = await Bun.file(
         `${testDataDir}/agents/main/session/current.jsonl`,
@@ -3557,7 +3557,7 @@ describe("MainAgent", () => {
       });
 
       // Wait for spawn_task to be processed
-      await Bun.sleep(100);
+      await Bun.sleep(50);
 
       // Verify spawn tool result includes description in session messages
       // Note: the description appears unescaped in the assistant's toolCalls arguments
@@ -3568,7 +3568,7 @@ describe("MainAgent", () => {
       expect(sessionContent).toContain("spawn_task");
 
       // Wait for task completion
-      await Bun.sleep(400);
+      await Bun.sleep(150);
 
       await agent.stop();
     }, 10_000);
