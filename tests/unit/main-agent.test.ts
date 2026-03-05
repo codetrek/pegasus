@@ -2223,6 +2223,165 @@ describe("MainAgent", () => {
       await agent.stop();
     }, 10_000);
 
+    it("should extract imageRefs from subagent notify metadata into session message", async () => {
+      let capturedMessages: Message[] = [];
+      const model: LanguageModel = {
+        provider: "test",
+        modelId: "test-model",
+        async generate(options: {
+          messages?: Message[];
+        }): Promise<GenerateTextResult> {
+          capturedMessages = options.messages ?? [];
+          return {
+            text: "thinking...",
+            finishReason: "stop",
+            usage: { promptTokens: 5, completionTokens: 0 },
+          };
+        },
+      };
+
+      const mockWA = createMockWorkerAdapter();
+      const projectAdapter = new ProjectAdapter(mockWA);
+
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+        _projectAdapter: projectAdapter,
+      });
+
+      await agent.start();
+
+      const replies: OutboundMessage[] = [];
+      agent.onReply((msg) => replies.push(msg));
+
+      // Simulate a SubAgent sending a notification with imageRefs in metadata
+      agent.send({
+        text: "Analysis complete with screenshots",
+        channel: { type: "subagent", channelId: "sa_img_test" },
+        metadata: {
+          imageRefs: [
+            { id: "img_abc123", mimeType: "image/png" },
+            { id: "img_def456", mimeType: "image/jpeg" },
+          ],
+        },
+      });
+
+      await Bun.sleep(50);
+
+      // The user message sent to the LLM should have images attached
+      const userMsgs = capturedMessages.filter((m: Message) => m.role === "user");
+      const lastUser = userMsgs[userMsgs.length - 1];
+      expect(lastUser).toBeDefined();
+      expect(lastUser!.images).toBeDefined();
+      expect(lastUser!.images).toHaveLength(2);
+      expect(lastUser!.images![0]).toEqual({ id: "img_abc123", mimeType: "image/png" });
+      expect(lastUser!.images![1]).toEqual({ id: "img_def456", mimeType: "image/jpeg" });
+
+      await agent.stop();
+    }, 10_000);
+
+    it("should not attach images when subagent message has no imageRefs", async () => {
+      let capturedMessages: Message[] = [];
+      const model: LanguageModel = {
+        provider: "test",
+        modelId: "test-model",
+        async generate(options: {
+          messages?: Message[];
+        }): Promise<GenerateTextResult> {
+          capturedMessages = options.messages ?? [];
+          return {
+            text: "thinking...",
+            finishReason: "stop",
+            usage: { promptTokens: 5, completionTokens: 0 },
+          };
+        },
+      };
+
+      const mockWA = createMockWorkerAdapter();
+      const projectAdapter = new ProjectAdapter(mockWA);
+
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+        _projectAdapter: projectAdapter,
+      });
+
+      await agent.start();
+
+      // Send a subagent message without imageRefs
+      agent.send({
+        text: "Analysis complete, no images",
+        channel: { type: "subagent", channelId: "sa_no_img" },
+      });
+
+      await Bun.sleep(50);
+
+      // The user message sent to the LLM should NOT have images
+      const userMsgs = capturedMessages.filter((m: Message) => m.role === "user");
+      const lastUser = userMsgs[userMsgs.length - 1];
+      expect(lastUser).toBeDefined();
+      expect(lastUser!.images).toBeUndefined();
+
+      await agent.stop();
+    }, 10_000);
+
+    it("should merge imageRefs with existing images on inbound message", async () => {
+      let capturedMessages: Message[] = [];
+      const model: LanguageModel = {
+        provider: "test",
+        modelId: "test-model",
+        async generate(options: {
+          messages?: Message[];
+        }): Promise<GenerateTextResult> {
+          capturedMessages = options.messages ?? [];
+          return {
+            text: "thinking...",
+            finishReason: "stop",
+            usage: { promptTokens: 5, completionTokens: 0 },
+          };
+        },
+      };
+
+      const mockWA = createMockWorkerAdapter();
+      const projectAdapter = new ProjectAdapter(mockWA);
+
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+        _projectAdapter: projectAdapter,
+      });
+
+      await agent.start();
+
+      // Send a message that already has images AND has imageRefs in metadata
+      agent.send({
+        text: "Analysis with both sources",
+        channel: { type: "subagent", channelId: "sa_merge" },
+        images: [{ id: "existing_img", mimeType: "image/webp" }],
+        metadata: {
+          imageRefs: [
+            { id: "ref_img", mimeType: "image/png" },
+          ],
+        },
+      });
+
+      await Bun.sleep(50);
+
+      // Should merge: existing images + imageRefs
+      const userMsgs = capturedMessages.filter((m: Message) => m.role === "user");
+      const lastUser = userMsgs[userMsgs.length - 1];
+      expect(lastUser).toBeDefined();
+      expect(lastUser!.images).toBeDefined();
+      expect(lastUser!.images).toHaveLength(2);
+      expect(lastUser!.images![0]).toEqual({ id: "existing_img", mimeType: "image/webp" });
+      expect(lastUser!.images![1]).toEqual({ id: "ref_img", mimeType: "image/png" });
+
+      await agent.stop();
+    }, 10_000);
+
     it("should stop active subagents on agent.stop()", async () => {
       let callCount = 0;
       const model: LanguageModel = {

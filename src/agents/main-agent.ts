@@ -541,6 +541,15 @@ export class MainAgent extends ConversationAgent {
       if (handled) return;
     }
 
+    // Extract imageRefs from subagent notify metadata (mirrors _handleTaskNotify pattern)
+    if (message.metadata?.imageRefs) {
+      const refs = message.metadata.imageRefs as Array<{ id: string; mimeType: string }>;
+      if (refs.length > 0) {
+        const existing = message.images ?? [];
+        message.images = [...existing, ...refs.map(ref => ({ id: ref.id, mimeType: ref.mimeType }))];
+      }
+    }
+
     // Normal message: add to session with channel metadata for LLM visibility
     const now = formatTimestamp(Date.now());
     const channelMeta = `[${now} | channel: ${message.channel.type} | id: ${message.channel.channelId}${message.channel.userId ? ` | user: ${message.channel.userId}` : ""}${message.channel.replyTo ? ` | thread: ${message.channel.replyTo}` : ""}]`;
