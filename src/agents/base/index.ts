@@ -46,6 +46,8 @@ export {
   type ConversationAgentDeps,
   type ReplyCallback,
   type SpawnAgentCallback,
+  type QueueItem,
+  type CustomQueueItem,
 } from "./conversation-agent.ts";
 
 export {

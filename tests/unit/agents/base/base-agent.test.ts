@@ -812,6 +812,160 @@ describe("BaseAgent", () => {
     });
   });
 
+  describe("onLLMError hook", () => {
+    test("onLLMError returns true → processStep retries and succeeds", async () => {
+      let llmCallCount = 0;
+      const model = createMockModel({
+        generate: mock(async () => {
+          llmCallCount++;
+          if (llmCallCount === 1) {
+            throw new Error("transient error");
+          }
+          return {
+            text: "recovered",
+            finishReason: "stop",
+            usage: { promptTokens: 10, completionTokens: 5 },
+          };
+        }),
+      });
+
+      let onLLMErrorCallCount = 0;
+      class RetryAgent extends TestAgent {
+        protected override async onLLMError(_taskId: string, _error: unknown): Promise<boolean> {
+          onLLMErrorCallCount++;
+          // Retry on first call, fail on second
+          return onLLMErrorCallCount === 1;
+        }
+      }
+
+      const agent = new RetryAgent({
+        agentId: "retry-agent",
+        model,
+        toolRegistry: createMockRegistry(),
+      });
+      agent.testCreateTaskState("task-1", [
+        { role: "user", content: "hi" },
+      ]);
+
+      await agent.testProcessStep("task-1");
+
+      // LLM should have been called twice: first fails, retry succeeds
+      expect(llmCallCount).toBe(2);
+      expect(onLLMErrorCallCount).toBe(1);
+      expect(agent.onTaskCompleteMock).toHaveBeenCalledTimes(1);
+      expect(agent.onTaskCompleteMock).toHaveBeenCalledWith(
+        "task-1",
+        "recovered",
+        "complete",
+      );
+    }, 5000);
+  });
+
+  describe("onMessagesAppended hook", () => {
+    test("onMessagesAppended called with assistant message (no tools)", async () => {
+      const model = createMockModel({
+        generate: mock(async () => ({
+          text: "hello response",
+          finishReason: "stop",
+          usage: { promptTokens: 10, completionTokens: 5 },
+        })),
+      });
+
+      const appendedCalls: { taskId: string; messages: Message[] }[] = [];
+      class HookAgent extends TestAgent {
+        protected override async onMessagesAppended(taskId: string, newMessages: Message[]): Promise<void> {
+          appendedCalls.push({ taskId, messages: [...newMessages] });
+        }
+      }
+
+      const agent = new HookAgent({
+        agentId: "hook-agent",
+        model,
+        toolRegistry: createMockRegistry(),
+      });
+      agent.testCreateTaskState("task-1", [
+        { role: "user", content: "hi" },
+      ]);
+
+      await agent.testProcessStep("task-1");
+
+      expect(appendedCalls).toHaveLength(1);
+      expect(appendedCalls[0]!.taskId).toBe("task-1");
+      expect(appendedCalls[0]!.messages).toHaveLength(1);
+      expect(appendedCalls[0]!.messages[0]!.role).toBe("assistant");
+      expect(appendedCalls[0]!.messages[0]!.content).toBe("hello response");
+    });
+
+    test("onMessagesAppended called with tool results in _onAllToolsDone", async () => {
+      let llmCallCount = 0;
+      const model = createMockModel({
+        generate: mock(async () => {
+          llmCallCount++;
+          if (llmCallCount === 1) {
+            return {
+              text: "thinking",
+              finishReason: "tool_calls",
+              toolCalls: [
+                { id: "tc-1", name: "test_tool", arguments: {} },
+              ],
+              usage: { promptTokens: 10, completionTokens: 5 },
+            };
+          }
+          return {
+            text: "done",
+            finishReason: "stop",
+            usage: { promptTokens: 10, completionTokens: 5 },
+          };
+        }),
+      });
+
+      const appendedCalls: { taskId: string; messages: Message[] }[] = [];
+      class HookToolAgent extends TestAgent {
+        protected override async onToolCall(tc: any) {
+          return {
+            action: "skip" as const,
+            result: {
+              toolCallId: tc.id,
+              content: JSON.stringify({ ok: true }),
+            },
+          };
+        }
+        protected override async onMessagesAppended(taskId: string, newMessages: Message[]): Promise<void> {
+          appendedCalls.push({ taskId, messages: [...newMessages] });
+        }
+      }
+
+      const agent = new HookToolAgent({
+        agentId: "hook-tool-agent",
+        model,
+        toolRegistry: createMockRegistry(),
+      });
+      agent.testCreateTaskState("task-1", [
+        { role: "user", content: "do something" },
+      ]);
+
+      await agent.testProcessStep("task-1");
+      await new Promise((r) => setTimeout(r, 300));
+
+      // Should be called 3 times:
+      // 1. assistant message with tool calls
+      // 2. tool result messages from _onAllToolsDone
+      // 3. final assistant message (no tools)
+      expect(appendedCalls).toHaveLength(3);
+
+      // First call: assistant with tool calls
+      expect(appendedCalls[0]!.messages[0]!.role).toBe("assistant");
+      expect(appendedCalls[0]!.messages[0]!.toolCalls).toHaveLength(1);
+
+      // Second call: tool results
+      expect(appendedCalls[1]!.messages[0]!.role).toBe("tool");
+
+      // Third call: final assistant message
+      expect(appendedCalls[2]!.messages[0]!.role).toBe("assistant");
+      expect(appendedCalls[2]!.messages[0]!.content).toBe("done");
+    }, 5000);
+  });
+
   describe("createTaskExecutionState and removeTaskState", () => {
     test("creates and registers a task state", () => {
       const agent = createTestAgent();

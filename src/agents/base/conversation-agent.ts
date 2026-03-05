@@ -53,11 +53,18 @@ export type SpawnAgentCallback = (
   config: Record<string, unknown>,
 ) => string;
 
-/** Queue item — what arrives from the outside world. */
-type QueueItem =
+/** Custom queue item for subclass extensions. */
+export interface CustomQueueItem {
+  kind: string;
+  [key: string]: unknown;
+}
+
+/** Queue item — what arrives from the outside world. Subclasses extend via onCustomQueueItem. */
+export type QueueItem =
   | { kind: "message"; message: InboundMessage }
   | { kind: "child_complete"; childId: string; result: PendingWorkResult }
-  | { kind: "think"; channel: ChannelInfo };
+  | { kind: "think"; channel: ChannelInfo }
+  | CustomQueueItem;
 
 // ── ConversationAgent ────────────────────────────────
 
@@ -105,6 +112,12 @@ export abstract class ConversationAgent extends BaseAgent {
     this._processQueue();
   }
 
+  /** Push an item to the processing queue. Subclasses use this for custom queue items. */
+  protected pushQueue(item: QueueItem): void {
+    this.queue.push(item);
+    this._processQueue();
+  }
+
   // ═══════════════════════════════════════════════════
   // Lifecycle
   // ═══════════════════════════════════════════════════
@@ -135,23 +148,33 @@ export abstract class ConversationAgent extends BaseAgent {
       const item = this.queue.shift()!;
       try {
         switch (item.kind) {
-          case "message":
-            await this._handleMessage(item.message);
+          case "message": {
+            const mi = item as { kind: "message"; message: InboundMessage };
+            await this._handleMessage(mi.message);
             break;
-          case "child_complete":
-            await this._handleChildComplete(item.childId, item.result);
+          }
+          case "child_complete": {
+            const ci = item as { kind: "child_complete"; childId: string; result: PendingWorkResult };
+            await this._handleChildComplete(ci.childId, ci.result);
             break;
-          case "think":
-            await this._think(item.channel);
+          }
+          case "think": {
+            const ti = item as { kind: "think"; channel: ChannelInfo };
+            await this._think(ti.channel);
+            break;
+          }
+          default:
+            await this.onCustomQueueItem(item);
             break;
         }
       } catch (err) {
         logger.error({ error: err, agentId: this.agentId, kind: item.kind }, "queue_item_error");
         // Try to send error reply for user messages
         if (item.kind === "message" && this._onReply) {
+          const mi = item as { kind: "message"; message: InboundMessage };
           this._onReply({
             text: `Internal error: ${err instanceof Error ? err.message : String(err)}`,
-            channel: item.message.channel,
+            channel: mi.message.channel,
           });
         }
       }
@@ -162,7 +185,10 @@ export abstract class ConversationAgent extends BaseAgent {
   // Message Handling
   // ═══════════════════════════════════════════════════
 
-  private async _handleMessage(message: InboundMessage): Promise<void> {
+  /** Hook for subclass-specific queue items. Default: no-op. */
+  protected async onCustomQueueItem(_item: QueueItem): Promise<void> {}
+
+  protected async _handleMessage(message: InboundMessage): Promise<void> {
     this.lastChannel = message.channel;
 
     // Add user message to session
