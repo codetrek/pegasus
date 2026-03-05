@@ -47,9 +47,9 @@ import path from "node:path";
 const logger = getLogger("agent");
 
 export type TaskNotification =
-  | { type: "completed"; taskId: string; result: unknown }
+  | { type: "completed"; taskId: string; result: unknown; imageIds?: string[] }
   | { type: "failed"; taskId: string; error: string }
-  | { type: "notify"; taskId: string; message: string };
+  | { type: "notify"; taskId: string; message: string; imageIds?: string[] };
 
 /** Push a tool result message into context.messages. */
 export function context_pushToolResult(
@@ -471,10 +471,12 @@ export class Agent {
           }),
         );
         if (this.notifyCallback) {
+          const imageIds = (task.context.finalResult as any).imageIds as string[] | undefined;
           this.notifyCallback({
             type: "completed",
             taskId: task.taskId,
             result: task.context.finalResult,
+            ...(imageIds?.length ? { imageIds } : {}),
           });
         }
         // Async post-task reflection (fire-and-forget)
@@ -777,6 +779,21 @@ export class Agent {
         // Intercept notify tool: emit TASK_NOTIFY event + call notifyCallback
         if (toolName === "notify" && toolResult.success) {
           const { message } = toolResult.result as { action: string; message: string; taskId: string };
+
+          // Collect image IDs from task messages for mid-task notifications
+          const imageIds: string[] = [];
+          const seen = new Set<string>();
+          for (const msg of task.context.messages) {
+            if (msg.images) {
+              for (const img of msg.images) {
+                if (!seen.has(img.id)) {
+                  seen.add(img.id);
+                  imageIds.push(img.id);
+                }
+              }
+            }
+          }
+
           await this.eventBus.emit(
             createEvent(EventType.TASK_NOTIFY, {
               source: "cognitive.act",
@@ -789,6 +806,7 @@ export class Agent {
               type: "notify",
               taskId: task.taskId,
               message,
+              ...(imageIds.length ? { imageIds } : {}),
             });
           }
         }
@@ -1028,11 +1046,28 @@ export class Agent {
     const respondAction = task.context.actionsDone.findLast((a) => a.actionType === "respond");
     const responseText = respondAction?.result as string | undefined;
 
+    // Collect unique image IDs from task conversation messages.
+    // These are image refs produced by tools (screenshot, image_read, etc.)
+    // and need to be passed to MainAgent so the LLM can see them via hydration.
+    const imageIds: string[] = [];
+    const seen = new Set<string>();
+    for (const msg of task.context.messages) {
+      if (msg.images) {
+        for (const img of msg.images) {
+          if (!seen.has(img.id)) {
+            seen.add(img.id);
+            imageIds.push(img.id);
+          }
+        }
+      }
+    }
+
     return {
       taskId: task.taskId,
       input: task.context.inputText,
       response: responseText ?? null,
       iterations: task.context.iteration,
+      ...(imageIds.length > 0 ? { imageIds } : {}),
     };
   }
 
