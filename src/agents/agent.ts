@@ -28,7 +28,7 @@ import { ToolRegistry } from "../tools/registry.ts";
 import { ToolExecutor } from "../tools/executor.ts";
 import { BackgroundTaskManager } from "../tools/background.ts";
 import { BrowserManager } from "../tools/browser/index.ts";
-import type { ToolResult } from "../tools/types.ts";
+import type { ToolResult, ToolContext } from "../tools/types.ts";
 import { reflectionTools, allTaskTools } from "../tools/builtins/index.ts";
 import type { AITaskTypeRegistry } from "../aitask-types/index.ts";
 import type { MemoryIndexEntry } from "../prompts/index.ts";
@@ -41,6 +41,8 @@ import type { MCPManager, MCPServerConfig } from "../mcp/index.ts";
 import { wrapMCPTools } from "../mcp/index.ts";
 import type { AgentStorePaths } from "../storage/paths.ts";
 import { formatToolTimestamp } from "../infra/time.ts";
+import { ImageManager } from "../media/image-manager.ts";
+import path from "node:path";
 
 const logger = getLogger("agent");
 
@@ -138,6 +140,8 @@ export interface AgentDeps {
   enableReflection?: boolean;
   /** Cache for provider-fetched model limits. */
   modelLimitsCache?: ModelLimitsCache;
+  /** Pre-built storeImage callback. When provided, Agent uses it directly instead of self-provisioning an ImageManager. */
+  storeImage?: (buffer: Buffer, mimeType: string, source: string) => Promise<{ id: string; mimeType: string }>;
 }
 
 export class Agent {
@@ -174,6 +178,8 @@ export class Agent {
   private backgroundTaskManager: BackgroundTaskManager;
   private browserManager: BrowserManager | null = null;
   private modelLimitsCache: ModelLimitsCache | undefined;
+  private storeImage?: ToolContext["storeImage"];
+  private ownedImageManager: ImageManager | null = null;
 
   constructor(deps: AgentDeps) {
     this.settings = deps.settings ?? getSettings();
@@ -245,6 +251,22 @@ export class Agent {
     const browserConfig = this.settings.tools?.browser;
     if (browserConfig) {
       this.browserManager = new BrowserManager(browserConfig);
+    }
+
+    // Resolve storeImage: prefer injected callback, otherwise self-provision ImageManager
+    if (deps.storeImage) {
+      this.storeImage = deps.storeImage;
+    } else if (this.settings.vision?.enabled !== false) {
+      const mediaDir = path.join(this.settings.dataDir, "media");
+      this.ownedImageManager = new ImageManager(mediaDir, {
+        maxDimensionPx: this.settings.vision?.maxDimensionPx,
+        maxBytes: this.settings.vision?.maxImageBytes,
+      });
+      const mgr = this.ownedImageManager;
+      this.storeImage = async (buffer: Buffer, mimeType: string, source: string) => {
+        const ref = await mgr.store(buffer, mimeType, source);
+        return { id: ref.id, mimeType: ref.mimeType };
+      };
     }
 
     // Task persistence (side-effect: subscribes to EventBus)
@@ -324,6 +346,12 @@ export class Agent {
     // Close browser AFTER background tasks are done
     if (this.browserManager) {
       await this.browserManager.close();
+    }
+
+    // Close self-provisioned ImageManager
+    if (this.ownedImageManager) {
+      this.ownedImageManager.close();
+      this.ownedImageManager = null;
     }
 
     await this.eventBus.stop();
@@ -657,7 +685,7 @@ export class Agent {
         const toolResult = await this.toolExecutor.execute(
           toolName,
           toolParams,
-          { taskId: task.context.id, tasksDir: this.storePaths.tasks, taskRegistry: this.taskRegistry, ...(this.storePaths.memory && { memoryDir: this.storePaths.memory }), mediaDir: `${this.settings.dataDir}/media`, extractModel: this.extractModel ?? undefined, backgroundManager: this.backgroundTaskManager, browserManager: this.browserManager ?? undefined },
+          { taskId: task.context.id, tasksDir: this.storePaths.tasks, taskRegistry: this.taskRegistry, ...(this.storePaths.memory && { memoryDir: this.storePaths.memory }), mediaDir: `${this.settings.dataDir}/media`, extractModel: this.extractModel ?? undefined, backgroundManager: this.backgroundTaskManager, browserManager: this.browserManager ?? undefined, storeImage: this.storeImage },
         );
 
         // Intercept spawn_task: create real task, wait for completion, return result

@@ -54,7 +54,7 @@ import { EventBus } from "../events/bus.ts";
 import { mainAgentTools } from "../tools/builtins/index.ts";
 import { MCPManager, wrapMCPTools } from "../mcp/index.ts";
 import type { MCPServerConfig } from "../mcp/index.ts";
-import type { Tool } from "../tools/types.ts";
+import type { Tool, ToolContext } from "../tools/types.ts";
 import { TokenRefreshMonitor } from "../mcp/auth/refresh-monitor.ts";
 import type { DeviceCodeAuthConfig } from "../mcp/auth/types.ts";
 import { buildMainAgentPaths } from "../storage/paths.ts";
@@ -291,6 +291,7 @@ export class MainAgent extends ConversationAgent {
         settings: this.settings,
         storePaths: this.mainStorePaths,
         modelLimitsCache: this.modelLimitsCache,
+        storeImage: this._getStoreImageCallback(),
       });
     } catch (err) {
       // If codex auth failed and default model is codex, this will throw.
@@ -802,6 +803,7 @@ export class MainAgent extends ConversationAgent {
               mediaDir: this.imageManager
                 ? path.join(this.settings.dataDir, "media")
                 : undefined,
+              storeImage: this._getStoreImageCallback(),
             },
           );
           const rawContent = toolResult.success
@@ -1453,6 +1455,19 @@ export class MainAgent extends ConversationAgent {
       fire: () => this.tickManager.fire(),
       isRunning: () => this.tickManager.isRunning,
       sessionMessages: this.sessionMessages,
+    };
+  }
+
+  /**
+   * Get a storeImage callback for ToolContext injection (Agent deps + direct tool execution).
+   * Returns undefined when vision is disabled (imageManager is null).
+   */
+  private _getStoreImageCallback(): ToolContext["storeImage"] {
+    if (!this.imageManager) return undefined;
+    const mgr = this.imageManager;
+    return async (buffer: Buffer, mimeType: string, source: string) => {
+      const ref = await mgr.store(buffer, mimeType, source);
+      return { id: ref.id, mimeType: ref.mimeType };
     };
   }
 
