@@ -3,7 +3,7 @@
  *
  * Tests the pure logic functions (notificationToText, sendNotify, dispatchMessage,
  * handleMessage, handleLLMResponse, handleLLMError, handleShutdown, handleInit,
- * initProject, initSubAgent, loadPreviousTaskSummary) via _testState, postMessage
+ * initProject, initSubAgent) via _testState, postMessage
  * overrides, and factory overrides.
  *
  * NO mock.module is used — this avoids global mock pollution that breaks
