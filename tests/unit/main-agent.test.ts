@@ -3270,4 +3270,208 @@ describe("MainAgent", () => {
       await agent.stop();
     }, 10_000);
   });
+
+  // ── _handleTick with active work ──
+
+  describe("tick with active work", () => {
+    it("should inject status message and queue think when active tasks exist", async () => {
+      const model = createMonologueModel("noted");
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+      });
+      await agent.start();
+      agent.onReply(() => {});
+
+      // Send a message first so lastChannel is set
+      agent.send({ text: "hi", channel: { type: "cli", channelId: "test" } });
+      await Bun.sleep(300);
+
+      // Mock taskRegistry.activeCount to return > 0
+      const origActiveCount = Object.getOwnPropertyDescriptor(
+        agent.taskAgent.taskRegistry,
+        "activeCount",
+      );
+      Object.defineProperty(agent.taskAgent.taskRegistry, "activeCount", {
+        get: () => 1,
+        configurable: true,
+      });
+
+      const tick = agent._tick;
+      const msgsBefore = tick.sessionMessages.length;
+
+      tick.start();
+      tick.fire(); // should trigger _handleTick with activeTasks=1
+
+      // Verify status message was injected
+      const tickMsgs = tick.sessionMessages.slice(msgsBefore).filter(
+        (m: any) => typeof m.content === "string" && m.content.includes("[System:"),
+      );
+      expect(tickMsgs.length).toBeGreaterThanOrEqual(1);
+      expect(tickMsgs[0]!.content).toContain("1 task(s) running");
+
+      // Restore
+      if (origActiveCount) {
+        Object.defineProperty(agent.taskAgent.taskRegistry, "activeCount", origActiveCount);
+      } else {
+        Object.defineProperty(agent.taskAgent.taskRegistry, "activeCount", {
+          get: () => 0,
+          configurable: true,
+        });
+      }
+
+      tick.stop();
+      await agent.stop();
+    }, 15_000);
+
+    it("should include subagent count in tick status", async () => {
+      const model = createMonologueModel("noted");
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+      });
+      await agent.start();
+      agent.onReply(() => {});
+
+      // Send a message first so lastChannel is set
+      agent.send({ text: "hi", channel: { type: "cli", channelId: "test" } });
+      await Bun.sleep(300);
+
+      // Mock subAgentManager.activeCount to return > 0
+      const subMgr = (agent as any).subAgentManager;
+      const origSubActive = Object.getOwnPropertyDescriptor(subMgr, "activeCount");
+      Object.defineProperty(subMgr, "activeCount", {
+        get: () => 2,
+        configurable: true,
+      });
+
+      const tick = agent._tick;
+      const msgsBefore = tick.sessionMessages.length;
+
+      tick.start();
+      tick.fire();
+
+      const tickMsgs = tick.sessionMessages.slice(msgsBefore).filter(
+        (m: any) => typeof m.content === "string" && m.content.includes("[System:"),
+      );
+      expect(tickMsgs.length).toBeGreaterThanOrEqual(1);
+      expect(tickMsgs[0]!.content).toContain("2 subagent(s) running");
+
+      if (origSubActive) {
+        Object.defineProperty(subMgr, "activeCount", origSubActive);
+      } else {
+        Object.defineProperty(subMgr, "activeCount", {
+          get: () => 0,
+          configurable: true,
+        });
+      }
+
+      tick.stop();
+      await agent.stop();
+    }, 15_000);
+  });
+
+  // ── _cachedImageRead ──
+
+  describe("_cachedImageRead", () => {
+    it("should return null when imageManager is null", async () => {
+      const model = createReplyModel("ok");
+      const settings = testSettings();
+      (settings as any).vision = { enabled: false };
+
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings,
+      });
+
+      // imageManager is null when vision disabled
+      const result = await (agent as any)._cachedImageRead("img-123");
+      expect(result).toBeNull();
+    }, 10_000);
+
+    it("should return cached result on second call", async () => {
+      const model = createReplyModel("ok");
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+      });
+
+      const mockRead = mock(() =>
+        Promise.resolve({ data: "base64data", mimeType: "image/png" }),
+      );
+      (agent as any).imageManager = { read: mockRead, store: mock(), close: mock() };
+
+      // First call — reads from imageManager
+      const first = await (agent as any)._cachedImageRead("img-abc");
+      expect(first).toEqual({ data: "base64data", mimeType: "image/png" });
+      expect(mockRead).toHaveBeenCalledTimes(1);
+
+      // Second call — returns from cache
+      const second = await (agent as any)._cachedImageRead("img-abc");
+      expect(second).toEqual({ data: "base64data", mimeType: "image/png" });
+      expect(mockRead).toHaveBeenCalledTimes(1); // not called again
+    }, 10_000);
+
+    it("should return null and not cache when imageManager.read returns null", async () => {
+      const model = createReplyModel("ok");
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+      });
+
+      const mockRead = mock(() => Promise.resolve(null));
+      (agent as any).imageManager = { read: mockRead, store: mock(), close: mock() };
+
+      const result = await (agent as any)._cachedImageRead("img-missing");
+      expect(result).toBeNull();
+
+      // Cache should not have the entry
+      expect((agent as any).imageReadCache.has("img-missing")).toBe(false);
+    }, 10_000);
+  });
+
+  // ── hasQueuedWork ──
+
+  describe("hasQueuedWork", () => {
+    it("should always return false (conservative approach)", async () => {
+      const model = createReplyModel("ok");
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+      });
+
+      const result = (agent as any).hasQueuedWork();
+      expect(result).toBe(false);
+    }, 5_000);
+  });
+
+  // ── buildSystemPrompt override ──
+
+  describe("buildSystemPrompt", () => {
+    it("should return cached system prompt after start", async () => {
+      const model = createMonologueModel("thinking");
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+      });
+      await agent.start();
+
+      // _systemPrompt is set during onStart via _buildSystemPrompt
+      const cached = (agent as any)._systemPrompt;
+      expect(cached).toBeTruthy();
+
+      // buildSystemPrompt() should return the same cached value
+      const result = (agent as any).buildSystemPrompt();
+      expect(result).toBe(cached);
+
+      await agent.stop();
+    }, 15_000);
+  });
 });
