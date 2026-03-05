@@ -130,6 +130,7 @@ export class TaskRunner {
             type: "completed",
             taskId,
             result: result.result,
+            ...(result.imageRefs?.length ? { imageRefs: result.imageRefs } : {}),
           });
         } else {
           this.onNotification({

@@ -546,4 +546,89 @@ describe("TaskRunner", () => {
       expect(capturedContext!.storeImage).toBeUndefined();
     }, 5000);
   });
+
+  describe("imageRefs flow from ExecutionAgent through TaskRunner notification", () => {
+    test("completed notification includes imageRefs when tool returns images", async () => {
+      const notifications: TaskNotification[] = [];
+      const onNotification = mock((n: TaskNotification) => {
+        notifications.push(n);
+      });
+
+      // Tool that returns images in ToolResult
+      const imageTool: Tool = {
+        name: "test_image_tool",
+        description: "Returns images in ToolResult",
+        category: ToolCategory.SYSTEM,
+        parameters: z.object({}),
+        execute: async (): Promise<ToolResult> => ({
+          success: true,
+          result: "screenshot taken",
+          images: [
+            { id: "img-abc123", mimeType: "image/png", data: "base64data" },
+            { id: "img-def456", mimeType: "image/jpeg", data: "base64data2" },
+          ],
+          startedAt: Date.now(),
+        }),
+      };
+
+      // Model: first call returns tool call, second call finishes
+      let callIndex = 0;
+      const model = createMockModel(
+        mock(async () => {
+          callIndex++;
+          if (callIndex === 1) {
+            return {
+              text: "",
+              finishReason: "tool_calls",
+              toolCalls: [
+                { id: "tc-img-1", name: "test_image_tool", arguments: {} },
+              ],
+              usage: { promptTokens: 10, completionTokens: 5 },
+            };
+          }
+          return {
+            text: "done with image",
+            finishReason: "stop",
+            toolCalls: [],
+            usage: { promptTokens: 10, completionTokens: 5 },
+          };
+        }),
+      );
+
+      const runner = new TaskRunner(createDeps({ model, onNotification }));
+      runner.setAdditionalTools([imageTool]);
+      runner.submit("take screenshot", "user", "general", "Image task");
+
+      await waitForNotifications(500);
+
+      const completed = notifications.find((n) => n.type === "completed");
+      expect(completed).toBeDefined();
+      expect(completed!.type).toBe("completed");
+      // imageRefs should be present on the notification
+      const imageRefs = (completed as any).imageRefs as Array<{ id: string; mimeType: string }> | undefined;
+      expect(imageRefs).toBeDefined();
+      expect(imageRefs!.length).toBe(2);
+      expect(imageRefs![0]!.id).toBe("img-abc123");
+      expect(imageRefs![0]!.mimeType).toBe("image/png");
+      expect(imageRefs![1]!.id).toBe("img-def456");
+      expect(imageRefs![1]!.mimeType).toBe("image/jpeg");
+    }, 5000);
+
+    test("completed notification has no imageRefs when no images produced", async () => {
+      const notifications: TaskNotification[] = [];
+      const onNotification = mock((n: TaskNotification) => {
+        notifications.push(n);
+      });
+
+      const runner = new TaskRunner(createDeps({ onNotification }));
+      runner.submit("no images", "user", "general", "Plain task");
+
+      await waitForNotifications(500);
+
+      const completed = notifications.find((n) => n.type === "completed");
+      expect(completed).toBeDefined();
+      const imageRefs = (completed as any).imageRefs;
+      expect(imageRefs).toBeUndefined();
+    }, 5000);
+  });
 });
