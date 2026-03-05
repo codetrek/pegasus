@@ -29,10 +29,7 @@ describe("config-loader", () => {
     resetSettings();
   });
 
-  afterEach(async () => {
-    // Give logger time to flush before cleanup
-    await new Promise((resolve) => setTimeout(resolve, 200));
-
+  afterEach(() => {
     // Restore original directory
     process.chdir(originalCwd);
 

@@ -609,7 +609,7 @@ describe("ExecutionAgent", () => {
       );
 
       // Wait for the event bus to dispatch and agent to process
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 100));
 
       // Verify: agent processed the event and completed
       // Check that TASK_COMPLETED was emitted in event history
@@ -685,7 +685,7 @@ describe("ExecutionAgent", () => {
       );
 
       // Wait for EventBus to dispatch the event
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 100));
 
       // The subscription handler should have routed the event to handleEvent
       expect(state.aborted).toBe(true);
@@ -729,7 +729,7 @@ describe("ExecutionAgent", () => {
       );
 
       // Wait for the event bus to dispatch and agent to process
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 100));
 
       // Verify: agent re-started execution
       expect(model.generate).toHaveBeenCalledTimes(1);

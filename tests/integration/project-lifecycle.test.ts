@@ -128,7 +128,7 @@ describe("Project Lifecycle Integration", () => {
     expect(adapter.activeCount).toBe(1);
 
     // 4. Wait for worker to initialize (Agent start, PROJECT.md parse, etc.)
-    await Bun.sleep(3000);
+    await Bun.sleep(1000);
 
     // 5. Verify worker is still tracked and running
     expect(adapter.has("test-project")).toBe(true);
@@ -158,7 +158,7 @@ describe("Project Lifecycle Integration", () => {
     expect(adapter.has("proj-b")).toBe(true);
 
     // Wait for workers to initialize
-    await Bun.sleep(3000);
+    await Bun.sleep(1000);
 
     // Stop all — adapter.stop() stops all workers
     await adapter.stop();

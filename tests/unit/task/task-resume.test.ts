@@ -771,7 +771,7 @@ describe("Task Resume — E2E", () => {
       expect(task.context.actionsDone.length).toBeGreaterThanOrEqual(1);
 
       // Wait for JSONL to flush
-      await Bun.sleep(200);
+      await Bun.sleep(50);
 
       // Verify JSONL file exists before removal
       const tasksDir = buildMainAgentPaths(dataDir).tasks;
@@ -983,7 +983,7 @@ describe("Task Resume — E2E", () => {
       await agent.waitForTask(taskId, 10_000);
 
       // Wait for JSONL flush
-      await Bun.sleep(200);
+      await Bun.sleep(50);
 
       // Read and parse JSONL
       const tasksDir = buildMainAgentPaths(dataDir).tasks;

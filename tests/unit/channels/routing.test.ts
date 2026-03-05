@@ -130,7 +130,7 @@ describe("Multi-channel routing", () => {
       text: "hello",
       channel: { type: "telegram", channelId: "tg-123", userId: "any" },
     });
-    await Bun.sleep(500);
+    await Bun.sleep(100);
 
     // Reply should route to telegram adapter (channel.type = "telegram")
     expect(telegramMock.delivered.length).toBeGreaterThanOrEqual(1);
@@ -179,7 +179,7 @@ describe("Multi-channel routing", () => {
       text: "hello",
       channel: { type: "sms", channelId: "unknown-123", userId: "any" },
     });
-    await Bun.sleep(500);
+    await Bun.sleep(100);
 
     // CLI should not receive it (channel type mismatch)
     expect(cliMock.delivered).toHaveLength(0);
@@ -245,14 +245,14 @@ describe("Multi-channel routing", () => {
       text: "hello from cli",
       channel: { type: "cli", channelId: "main" },
     });
-    await Bun.sleep(500);
+    await Bun.sleep(100);
 
     // Send from Telegram
     agent.send({
       text: "hello from telegram",
       channel: { type: "telegram", channelId: "tg-456", userId: "any" },
     });
-    await Bun.sleep(500);
+    await Bun.sleep(100);
 
     // Each adapter should have received its own reply
     expect(cliMock.delivered).toHaveLength(1);
@@ -309,7 +309,7 @@ describe("Multi-channel routing", () => {
       text: "hello",
       channel: { type: "broken", channelId: "broken-123", userId: "any" },
     });
-    await Bun.sleep(500);
+    await Bun.sleep(100);
 
     // No crash occurred
     await agent.stop();
@@ -351,7 +351,7 @@ describe("Multi-channel routing", () => {
       text: "hello",
       channel: { type: "cli", channelId: "test" },
     });
-    await Bun.sleep(500);
+    await Bun.sleep(100);
 
     expect(replies).toHaveLength(1);
     expect(replies[0]!.text).toBe("Direct callback");

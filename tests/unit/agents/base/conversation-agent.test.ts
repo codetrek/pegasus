@@ -128,7 +128,7 @@ describe("ConversationAgent", () => {
       agent.send(makeInboundMessage("hi there"));
 
       // Wait for queue processing
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 50));
 
       // User message should be in session
       const msgs = agent.getSessionMessages();
@@ -149,7 +149,7 @@ describe("ConversationAgent", () => {
       const channel: ChannelInfo = { type: "slack", channelId: "ch-42" };
       agent.send(makeInboundMessage("test", channel));
 
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 50));
 
       expect(agent.getLastChannel()).toEqual(channel);
 
@@ -195,7 +195,7 @@ describe("ConversationAgent", () => {
 
       agent.send(makeInboundMessage("say hello"));
 
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 50));
 
       expect(replyCb).toHaveBeenCalled();
       const callArgs = replyCb.mock.calls[0]![0];
@@ -237,7 +237,7 @@ describe("ConversationAgent", () => {
       // Don't register onReply callback
       agent.send(makeInboundMessage("say hello"));
 
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 50));
 
       // Should not throw, but no callback was called
       // The agent handles this gracefully (returns skip with error)
@@ -282,7 +282,7 @@ describe("ConversationAgent", () => {
 
       agent.send(makeInboundMessage("run a task"));
 
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 50));
 
       expect(spawnCb).toHaveBeenCalledTimes(1);
       const [kind, config] = spawnCb.mock.calls[0]!;
@@ -327,7 +327,7 @@ describe("ConversationAgent", () => {
 
       agent.send(makeInboundMessage("orchestrate something"));
 
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 50));
 
       expect(spawnCb).toHaveBeenCalled();
       expect(spawnCb.mock.calls[0]![0]).toBe("orchestrator");
@@ -364,7 +364,7 @@ describe("ConversationAgent", () => {
         result: "child finished successfully",
       });
 
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 50));
 
       // Session should contain the child result message
       const msgs = agent.getSessionMessages();
@@ -404,7 +404,7 @@ describe("ConversationAgent", () => {
         error: "timeout exceeded",
       });
 
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 50));
 
       const msgs = agent.getSessionMessages();
       const errMsg = msgs.find(
@@ -430,7 +430,7 @@ describe("ConversationAgent", () => {
 
       agent.send(makeInboundMessage("trigger thinking"));
 
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 50));
 
       const msgs = agent.getSessionMessages();
       // Should have: user message + assistant response
@@ -484,7 +484,7 @@ describe("ConversationAgent", () => {
 
       agent.send(makeInboundMessage("do something"));
 
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 50));
 
       // reply callback should have been triggered
       expect(replyCb).toHaveBeenCalled();
@@ -508,7 +508,7 @@ describe("ConversationAgent", () => {
 
       agent.send(makeInboundMessage("check state"));
 
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 50));
 
       // After completion, task state should be cleaned up
       expect(agent.getTaskStates().has("session")).toBe(false);
@@ -546,7 +546,7 @@ describe("ConversationAgent", () => {
       // The event should be queued/handled (agent is WAITING, can accept work)
       await eventBus.emit(completedEvent);
 
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 50));
 
       // Child result should be injected into session
       const msgs = agent.getSessionMessages();
@@ -580,7 +580,7 @@ describe("ConversationAgent", () => {
 
       await eventBus.emit(unknownEvent);
 
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 50));
 
       // No child result message should appear in session
       const msgs = agent.getSessionMessages();
@@ -625,7 +625,7 @@ describe("ConversationAgent", () => {
         }),
       );
 
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 50));
 
       // Child result should be injected into session
       const msgs = agent.getSessionMessages();
@@ -675,7 +675,7 @@ describe("ConversationAgent", () => {
         }),
       );
 
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 50));
 
       // Error result should be injected into session
       const msgs = agent.getSessionMessages();
@@ -706,7 +706,7 @@ describe("ConversationAgent", () => {
       // Send a message which triggers _think -> processStep -> onTaskComplete
       agent.send(makeInboundMessage("complete me"));
 
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 50));
 
       // Task state should be cleaned up after completion
       expect(agent.getTaskStates().size).toBe(0);
@@ -742,7 +742,7 @@ describe("ConversationAgent", () => {
       const msg = makeInboundMessage("override test");
       agent.send(msg);
 
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 50));
 
       expect(handleMessageSpy).toHaveBeenCalledTimes(1);
       expect(handleMessageSpy.mock.calls[0]![0].text).toBe("override test");
@@ -780,7 +780,7 @@ describe("ConversationAgent", () => {
       const customItem: QueueItem = { kind: "custom_refresh", data: 42 };
       agent.testPushQueue(customItem);
 
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 50));
 
       expect(customItemSpy).toHaveBeenCalledTimes(1);
       const receivedItem = customItemSpy.mock.calls[0]![0];
@@ -809,7 +809,7 @@ describe("ConversationAgent", () => {
       // Push unknown kind — should not throw
       agent.testPushQueue({ kind: "unknown_kind" });
 
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 50));
 
       // No error, agent still running
       expect(agent.isRunning).toBe(true);
