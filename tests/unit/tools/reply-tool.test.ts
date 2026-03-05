@@ -89,4 +89,14 @@ describe("reply tool", () => {
     // Verify imageIds is defined in the schema shape
     expect(schema.shape).toHaveProperty("imageIds");
   });
+
+  it("should document file path support in imageIds description", () => {
+    const schema = reply.parameters as import("zod").ZodObject<Record<string, import("zod").ZodTypeAny>>;
+    const imageIdsField = schema.shape.imageIds;
+    // Get the description from the schema
+    const desc = imageIdsField?.description ?? (imageIdsField as any)?._def?.description ?? "";
+    // The description should mention both IDs and file paths
+    expect(desc).toContain("file paths");
+    expect(desc).toContain("img://ID");
+  });
 });

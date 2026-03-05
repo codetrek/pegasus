@@ -6,9 +6,11 @@
  */
 
 import { z } from "zod";
+import { readFile, unlink } from "node:fs/promises";
 import type { Tool, ToolResult, ToolContext } from "../types.ts";
 import { ToolCategory } from "../types.ts";
 import type { BrowserManager } from "./browser-manager.ts";
+import type { ImageAttachment } from "../../media/types.ts";
 
 // ── Helper ──────────────────────────────────────
 
@@ -117,14 +119,36 @@ export const browser_screenshot: Tool = {
       const manager = getBrowserManager(context);
       const { fullPage } = params as { fullPage: boolean };
       const result = await manager.screenshot(context.taskId, fullPage);
+
+      // If storeImage is available, persist screenshot in ImageManager and
+      // return image data inline so the LLM can see it.
+      let images: ImageAttachment[] | undefined;
+      let storedImageId: string | undefined;
+      if (context.storeImage) {
+        const buffer = await readFile(result.screenshotPath);
+        const ref = await context.storeImage(buffer, "image/png", "browser");
+        storedImageId = ref.id;
+        images = [
+          {
+            id: ref.id,
+            mimeType: "image/png",
+            data: buffer.toString("base64"),
+          },
+        ];
+        // Clean up the temp file — image is now in ImageManager
+        await unlink(result.screenshotPath).catch(() => {});
+      }
+
       return {
         success: true,
         result: {
-          screenshotPath: result.screenshotPath,
+          ...(storedImageId
+            ? { message: `Screenshot captured and stored (image ${storedImageId})` }
+            : { screenshotPath: result.screenshotPath, message: `Screenshot saved to ${result.screenshotPath}` }),
           snapshot: result.snapshot,
           truncated: result.truncated,
-          message: `Screenshot saved to ${result.screenshotPath}`,
         },
+        ...(images ? { images } : {}),
         startedAt,
         completedAt: Date.now(),
         durationMs: Date.now() - startedAt,

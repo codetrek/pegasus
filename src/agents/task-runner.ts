@@ -13,7 +13,7 @@ import type { ExecutionResult } from "./base/execution-agent.ts";
 import type { TaskNotification } from "./agent.ts";
 import type { LanguageModel } from "../infra/llm-types.ts";
 import { ToolRegistry } from "../tools/registry.ts";
-import type { Tool } from "../tools/types.ts";
+import type { Tool, ToolContext } from "../tools/types.ts";
 import { allTaskTools } from "../tools/builtins/index.ts";
 import type { AITaskTypeRegistry } from "../aitask-types/registry.ts";
 import { shortId } from "../infra/id.ts";
@@ -43,6 +43,8 @@ export interface TaskRunnerDeps {
   tasksDir: string;
   /** Callback for task lifecycle notifications. */
   onNotification: (notification: TaskNotification) => void;
+  /** Optional storeImage callback passed through to ExecutionAgent → ToolContext. */
+  storeImage?: ToolContext["storeImage"];
 }
 
 // ── TaskRunner ───────────────────────────────────────
@@ -52,6 +54,7 @@ export class TaskRunner {
   private taskTypeRegistry: AITaskTypeRegistry;
   private tasksDir: string;
   private onNotification: (notification: TaskNotification) => void;
+  private storeImage?: ToolContext["storeImage"];
   private activeTasks = new Map<string, TaskInfo>();
 
   /** Cached per-type ToolRegistry instances. */
@@ -65,6 +68,7 @@ export class TaskRunner {
     this.taskTypeRegistry = deps.taskTypeRegistry;
     this.tasksDir = deps.tasksDir;
     this.onNotification = deps.onNotification;
+    this.storeImage = deps.storeImage;
   }
 
   // ═══════════════════════════════════════════════════
@@ -95,6 +99,7 @@ export class TaskRunner {
       mode: "worker",
       sessionDir,
       contextPrompt: this.taskTypeRegistry.getPrompt(taskType),
+      storeImage: this.storeImage,
       onNotify: (message: string) => {
         this.onNotification({ type: "notify", taskId, message });
       },
@@ -125,6 +130,7 @@ export class TaskRunner {
             type: "completed",
             taskId,
             result: result.result,
+            ...(result.imageRefs?.length ? { imageRefs: result.imageRefs } : {}),
           });
         } else {
           this.onNotification({

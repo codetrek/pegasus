@@ -28,6 +28,7 @@ import { ToolExecutor } from "../tools/executor.ts";
 import type { InboundMessage, OutboundMessage, ChannelAdapter, ChannelInfo, StoreImageFn } from "../channels/types.ts";
 import { ImageManager } from "../media/image-manager.ts";
 import { hydrateImages } from "../media/image-prune.ts";
+import { extToMime } from "../media/image-helpers.ts";
 import { Agent } from "./agent.ts";
 import type { TaskNotification } from "./agent.ts";
 import { TaskRunner } from "./task-runner.ts";
@@ -36,6 +37,8 @@ import { computeTokenBudget, calculateMaxToolResultChars, truncateToolResult, is
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import path from "node:path";
 import os from "node:os";
+import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { SkillRegistry } from "../skills/index.ts";
 import { AITaskTypeRegistry, loadAITaskTypeDefinitions } from "../aitask-types/index.ts";
 import { ProjectManager } from "../projects/manager.ts";
@@ -54,7 +57,7 @@ import { EventBus } from "../events/bus.ts";
 import { mainAgentTools } from "../tools/builtins/index.ts";
 import { MCPManager, wrapMCPTools } from "../mcp/index.ts";
 import type { MCPServerConfig } from "../mcp/index.ts";
-import type { Tool } from "../tools/types.ts";
+import type { Tool, ToolContext } from "../tools/types.ts";
 import { TokenRefreshMonitor } from "../mcp/auth/refresh-monitor.ts";
 import type { DeviceCodeAuthConfig } from "../mcp/auth/types.ts";
 import { buildMainAgentPaths } from "../storage/paths.ts";
@@ -291,6 +294,7 @@ export class MainAgent extends ConversationAgent {
         settings: this.settings,
         storePaths: this.mainStorePaths,
         modelLimitsCache: this.modelLimitsCache,
+        storeImage: this._getStoreImageCallback(),
       });
     } catch (err) {
       // If codex auth failed and default model is codex, this will throw.
@@ -383,6 +387,7 @@ export class MainAgent extends ConversationAgent {
       model: this.models.getForTier("balanced"),
       taskTypeRegistry: this.aiTaskTypeRegistry,
       tasksDir: this.mainStorePaths.tasks,
+      storeImage: this._getStoreImageCallback(),
       onNotification: (notification) => {
         this.pushQueue({ kind: "task_notify", notification } as QueueItem);
       },
@@ -692,9 +697,33 @@ export class MainAgent extends ConversationAgent {
             replyTo?: string;
             imageIds?: string[];
           };
+
+          // Resolve images first so failures can be reported in the tool result
+          const images: Array<{ id: string; data: string; mimeType: string }> = [];
+          const failures: string[] = [];
+
+          if (imageIds?.length) {
+            for (const idOrPath of imageIds) {
+              const img = await this._resolveImage(idOrPath);
+              if (img) {
+                images.push(img);
+              } else {
+                failures.push(idOrPath);
+              }
+            }
+
+            if (failures.length > 0) {
+              logger.warn({ failures }, "reply_image_resolve_failed");
+            }
+          }
+
+          const delivered = { delivered: true } as Record<string, unknown>;
+          if (failures.length > 0) {
+            delivered.imageFailures = failures.map(f => `Failed to load image: ${f}`);
+          }
           const toolMsg: Message = {
             role: "tool",
-            content: JSON.stringify({ delivered: true }),
+            content: JSON.stringify(delivered),
             toolCallId: tc.id,
           };
           this.sessionMessages.push(toolMsg);
@@ -706,18 +735,9 @@ export class MainAgent extends ConversationAgent {
               channel: { type: channelType ?? channel.type, channelId, replyTo },
             };
 
-            // If imageIds provided, read image data and attach as structured content
-            if (imageIds?.length && this.imageManager) {
-              const images: Array<{ id: string; data: string; mimeType: string }> = [];
-              for (const id of imageIds) {
-                const img = await this.imageManager.read(id);
-                if (img) {
-                  images.push({ id, data: img.data, mimeType: img.mimeType });
-                }
-              }
-              if (images.length > 0) {
-                outbound.content = { text, images };
-              }
+            // Attach resolved images as structured content
+            if (images.length > 0) {
+              outbound.content = { text, images };
             }
 
             this.replyCallback(outbound);
@@ -802,6 +822,7 @@ export class MainAgent extends ConversationAgent {
               mediaDir: this.imageManager
                 ? path.join(this.settings.dataDir, "media")
                 : undefined,
+              storeImage: this._getStoreImageCallback(),
             },
           );
           const rawContent = toolResult.success
@@ -935,6 +956,48 @@ export class MainAgent extends ConversationAgent {
       this.imageReadCache.set(id, result);
     }
     return result;
+  }
+
+  /**
+   * Resolve an image identifier — accepts either a 12-char hash ID (looked up
+   * via cache + ImageManager) or a file path (read from disk, stored for
+   * persistence). Returns null when the identifier cannot be resolved.
+   */
+  private async _resolveImage(
+    idOrPath: string,
+  ): Promise<{ id: string; data: string; mimeType: string } | null> {
+    // 1. Try as hash ID first (fast path — cache + ImageManager)
+    if (this.imageManager) {
+      const cached = this.imageReadCache.get(idOrPath);
+      if (cached) return { id: idOrPath, ...cached };
+
+      const img = await this.imageManager.read(idOrPath);
+      if (img) {
+        this.imageReadCache.set(idOrPath, img);
+        return { id: idOrPath, data: img.data, mimeType: img.mimeType };
+      }
+    }
+
+    // 2. Try as file path
+    if (idOrPath.includes("/") || idOrPath.includes(".")) {
+      try {
+        const buffer = await readFile(idOrPath);
+        const ext = path.extname(idOrPath).slice(1).toLowerCase();
+        const mimeType = extToMime(ext);
+
+        if (this.imageManager) {
+          const ref = await this.imageManager.store(buffer, mimeType, "reply");
+          return { id: ref.id, data: buffer.toString("base64"), mimeType: ref.mimeType };
+        }
+
+        const id = createHash("sha256").update(buffer).digest("hex").slice(0, 12);
+        return { id, data: buffer.toString("base64"), mimeType };
+      } catch {
+        return null;
+      }
+    }
+
+    return null;
   }
 
   // ── Task spawning ──
@@ -1093,6 +1156,15 @@ export class MainAgent extends ConversationAgent {
     }
 
     const systemMsg: Message = { role: "user", content: resultText };
+
+    // Attach image refs from notification — MainAgent LLM will see them via hydration
+    const imageRefs = (notification.type === "completed" || notification.type === "notify")
+      ? notification.imageRefs
+      : undefined;
+    if (imageRefs?.length) {
+      systemMsg.images = imageRefs.map(ref => ({ id: ref.id, mimeType: ref.mimeType }));
+    }
+
     this.sessionMessages.push(systemMsg);
     await this.sessionStore.append(systemMsg, {
       type: "task_notify",
@@ -1453,6 +1525,19 @@ export class MainAgent extends ConversationAgent {
       fire: () => this.tickManager.fire(),
       isRunning: () => this.tickManager.isRunning,
       sessionMessages: this.sessionMessages,
+    };
+  }
+
+  /**
+   * Get a storeImage callback for ToolContext injection (Agent deps + direct tool execution).
+   * Returns undefined when vision is disabled (imageManager is null).
+   */
+  private _getStoreImageCallback(): ToolContext["storeImage"] {
+    if (!this.imageManager) return undefined;
+    const mgr = this.imageManager;
+    return async (buffer: Buffer, mimeType: string, source: string) => {
+      const ref = await mgr.store(buffer, mimeType, source);
+      return { id: ref.id, mimeType: ref.mimeType };
     };
   }
 

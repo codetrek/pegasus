@@ -28,7 +28,7 @@ import { ToolRegistry } from "../tools/registry.ts";
 import { ToolExecutor } from "../tools/executor.ts";
 import { BackgroundTaskManager } from "../tools/background.ts";
 import { BrowserManager } from "../tools/browser/index.ts";
-import type { ToolResult } from "../tools/types.ts";
+import type { ToolResult, ToolContext } from "../tools/types.ts";
 import { reflectionTools, allTaskTools } from "../tools/builtins/index.ts";
 import type { AITaskTypeRegistry } from "../aitask-types/index.ts";
 import type { MemoryIndexEntry } from "../prompts/index.ts";
@@ -41,13 +41,15 @@ import type { MCPManager, MCPServerConfig } from "../mcp/index.ts";
 import { wrapMCPTools } from "../mcp/index.ts";
 import type { AgentStorePaths } from "../storage/paths.ts";
 import { formatToolTimestamp } from "../infra/time.ts";
+import { ImageManager } from "../media/image-manager.ts";
+import path from "node:path";
 
 const logger = getLogger("agent");
 
 export type TaskNotification =
-  | { type: "completed"; taskId: string; result: unknown }
+  | { type: "completed"; taskId: string; result: unknown; imageRefs?: Array<{ id: string; mimeType: string }> }
   | { type: "failed"; taskId: string; error: string }
-  | { type: "notify"; taskId: string; message: string };
+  | { type: "notify"; taskId: string; message: string; imageRefs?: Array<{ id: string; mimeType: string }> };
 
 /** Push a tool result message into context.messages. */
 export function context_pushToolResult(
@@ -138,6 +140,8 @@ export interface AgentDeps {
   enableReflection?: boolean;
   /** Cache for provider-fetched model limits. */
   modelLimitsCache?: ModelLimitsCache;
+  /** Pre-built storeImage callback. When provided, Agent uses it directly instead of self-provisioning an ImageManager. */
+  storeImage?: (buffer: Buffer, mimeType: string, source: string) => Promise<{ id: string; mimeType: string }>;
 }
 
 export class Agent {
@@ -174,6 +178,10 @@ export class Agent {
   private backgroundTaskManager: BackgroundTaskManager;
   private browserManager: BrowserManager | null = null;
   private modelLimitsCache: ModelLimitsCache | undefined;
+  private storeImage?: ToolContext["storeImage"];
+  private ownedImageManager: ImageManager | null = null;
+  /** Per-task offset tracking for notify image collection — only scan new messages each time. */
+  private notifyImageOffsets = new Map<string, number>();
 
   constructor(deps: AgentDeps) {
     this.settings = deps.settings ?? getSettings();
@@ -245,6 +253,22 @@ export class Agent {
     const browserConfig = this.settings.tools?.browser;
     if (browserConfig) {
       this.browserManager = new BrowserManager(browserConfig);
+    }
+
+    // Resolve storeImage: prefer injected callback, otherwise self-provision ImageManager
+    if (deps.storeImage) {
+      this.storeImage = deps.storeImage;
+    } else if (this.settings.vision?.enabled !== false) {
+      const mediaDir = path.join(this.settings.dataDir, "media");
+      this.ownedImageManager = new ImageManager(mediaDir, {
+        maxDimensionPx: this.settings.vision?.maxDimensionPx,
+        maxBytes: this.settings.vision?.maxImageBytes,
+      });
+      const mgr = this.ownedImageManager;
+      this.storeImage = async (buffer: Buffer, mimeType: string, source: string) => {
+        const ref = await mgr.store(buffer, mimeType, source);
+        return { id: ref.id, mimeType: ref.mimeType };
+      };
     }
 
     // Task persistence (side-effect: subscribes to EventBus)
@@ -324,6 +348,12 @@ export class Agent {
     // Close browser AFTER background tasks are done
     if (this.browserManager) {
       await this.browserManager.close();
+    }
+
+    // Close self-provisioned ImageManager
+    if (this.ownedImageManager) {
+      this.ownedImageManager.close();
+      this.ownedImageManager = null;
     }
 
     await this.eventBus.stop();
@@ -443,16 +473,20 @@ export class Agent {
           }),
         );
         if (this.notifyCallback) {
+          const finalResult = task.context.finalResult as Record<string, unknown>;
+          const imageRefs = finalResult.imageRefs as Array<{ id: string; mimeType: string }> | undefined;
           this.notifyCallback({
             type: "completed",
             taskId: task.taskId,
             result: task.context.finalResult,
+            ...(imageRefs?.length ? { imageRefs } : {}),
           });
         }
         // Async post-task reflection (fire-and-forget)
         if (this.postReflector && shouldReflect(task.context)) {
           this._spawn(this._runPostReflection(task));
         }
+        this.notifyImageOffsets.delete(task.taskId);
         break;
 
       case TaskState.FAILED:
@@ -472,6 +506,7 @@ export class Agent {
             error: task.context.error ?? "unknown error",
           });
         }
+        this.notifyImageOffsets.delete(task.taskId);
         break;
     }
   }
@@ -657,7 +692,7 @@ export class Agent {
         const toolResult = await this.toolExecutor.execute(
           toolName,
           toolParams,
-          { taskId: task.context.id, tasksDir: this.storePaths.tasks, taskRegistry: this.taskRegistry, ...(this.storePaths.memory && { memoryDir: this.storePaths.memory }), mediaDir: `${this.settings.dataDir}/media`, extractModel: this.extractModel ?? undefined, backgroundManager: this.backgroundTaskManager, browserManager: this.browserManager ?? undefined },
+          { taskId: task.context.id, tasksDir: this.storePaths.tasks, taskRegistry: this.taskRegistry, ...(this.storePaths.memory && { memoryDir: this.storePaths.memory }), mediaDir: `${this.settings.dataDir}/media`, extractModel: this.extractModel ?? undefined, backgroundManager: this.backgroundTaskManager, browserManager: this.browserManager ?? undefined, storeImage: this.storeImage },
         );
 
         // Intercept spawn_task: create real task, wait for completion, return result
@@ -749,6 +784,25 @@ export class Agent {
         // Intercept notify tool: emit TASK_NOTIFY event + call notifyCallback
         if (toolName === "notify" && toolResult.success) {
           const { message } = toolResult.result as { action: string; message: string; taskId: string };
+
+          // Collect only NEW image refs since last notify (avoid re-sending all historical images)
+          const offset = this.notifyImageOffsets.get(task.taskId) ?? 0;
+          const imageRefs: Array<{ id: string; mimeType: string }> = [];
+          const seen = new Set<string>();
+          const msgs = task.context.messages;
+          for (let i = offset; i < msgs.length; i++) {
+            const msg = msgs[i]!;
+            if (msg.images) {
+              for (const img of msg.images) {
+                if (!seen.has(img.id)) {
+                  seen.add(img.id);
+                  imageRefs.push({ id: img.id, mimeType: img.mimeType });
+                }
+              }
+            }
+          }
+          this.notifyImageOffsets.set(task.taskId, msgs.length);
+
           await this.eventBus.emit(
             createEvent(EventType.TASK_NOTIFY, {
               source: "cognitive.act",
@@ -761,6 +815,7 @@ export class Agent {
               type: "notify",
               taskId: task.taskId,
               message,
+              ...(imageRefs.length ? { imageRefs } : {}),
             });
           }
         }
@@ -1000,11 +1055,28 @@ export class Agent {
     const respondAction = task.context.actionsDone.findLast((a) => a.actionType === "respond");
     const responseText = respondAction?.result as string | undefined;
 
+    // Collect unique image refs (id + mimeType) from task conversation messages.
+    // These are image refs produced by tools (screenshot, image_read, etc.)
+    // and need to be passed to MainAgent so the LLM can see them via hydration.
+    const imageRefs: Array<{ id: string; mimeType: string }> = [];
+    const seen = new Set<string>();
+    for (const msg of task.context.messages) {
+      if (msg.images) {
+        for (const img of msg.images) {
+          if (!seen.has(img.id)) {
+            seen.add(img.id);
+            imageRefs.push({ id: img.id, mimeType: img.mimeType });
+          }
+        }
+      }
+    }
+
     return {
       taskId: task.taskId,
       input: task.context.inputText,
       response: responseText ?? null,
       iterations: task.context.iteration,
+      ...(imageRefs.length > 0 ? { imageRefs } : {}),
     };
   }
 

@@ -71,6 +71,8 @@ export interface ExecutionResult {
   llmCallCount: number;
   /** Number of tools executed. */
   toolCallCount: number;
+  /** Image refs collected from tool results during execution. */
+  imageRefs?: Array<{ id: string; mimeType: string }>;
 }
 
 // ── ExecutionAgent ───────────────────────────────────
@@ -295,6 +297,23 @@ export class ExecutionAgent extends BaseAgent {
 
     // Build result
     const success = finishReason === "complete";
+
+    // Collect unique image refs from tool result messages (same logic as Agent._compileResult)
+    const imageRefs: Array<{ id: string; mimeType: string }> = [];
+    if (state) {
+      const seen = new Set<string>();
+      for (const msg of state.messages) {
+        if (msg.images) {
+          for (const img of msg.images) {
+            if (!seen.has(img.id)) {
+              seen.add(img.id);
+              imageRefs.push({ id: img.id, mimeType: img.mimeType });
+            }
+          }
+        }
+      }
+    }
+
     this._lastResult = {
       success,
       result: success ? text : undefined,
@@ -305,6 +324,7 @@ export class ExecutionAgent extends BaseAgent {
         : undefined,
       llmCallCount: state?.iteration ?? 0,
       toolCallCount: 0, // not tracked per-tool in new model
+      ...(imageRefs.length > 0 ? { imageRefs } : {}),
     };
 
     // Emit event
