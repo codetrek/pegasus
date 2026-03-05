@@ -48,6 +48,7 @@ import { ProjectAdapter } from "../projects/project-adapter.ts";
 import { SubAgentManager } from "../subagent/manager.ts";
 import { OwnerStore } from "../security/owner-store.ts";
 import { classifyMessage } from "../security/message-classifier.ts";
+import { TickManager } from "./tick-manager.ts";
 
 // Main Agent's curated tool set
 import { mainAgentTools, reflectionTools } from "../tools/builtins/index.ts";
@@ -112,10 +113,7 @@ export class MainAgent {
   private _copilotBaseURL?: string;
   private _copilotTokenProvider?: () => Promise<string>;
   private _mcpAuthDir: string;
-  private _tickTimer: ReturnType<typeof setTimeout> | null = null;
-  private _tickFirstIntervalMs = 30_000; // first tick after 30s
-  private _tickIntervalMs = 60_000; // subsequent ticks every 60s
-  private _tickIsFirst = true;
+  private tickManager: TickManager;
 
   constructor(deps: MainAgentDeps) {
     this.models = deps.models;
@@ -164,6 +162,16 @@ export class MainAgent {
         maxBytes: visionConfig?.maxImageBytes,
       });
     }
+
+    // Tick manager — periodic status injection for long-running work
+    this.tickManager = new TickManager({
+      getActiveWorkCount: () => ({
+        tasks: this.agent?.taskRegistry.activeCount ?? 0,
+        subagents: this.subAgentManager?.activeCount ?? 0,
+      }),
+      hasPendingWork: () => this.queue.length > 0,
+      onTick: (activeTasks, activeSubAgents) => this._handleTick(activeTasks, activeSubAgents),
+    });
   }
 
   /** Start the Main Agent and underlying Task System. */
@@ -347,7 +355,7 @@ export class MainAgent {
   /** Stop the Main Agent. */
   async stop(): Promise<void> {
     // Stop tick timer
-    this._stopTick();
+    this.tickManager.stop();
 
     // Stop active SubAgents first (they share the WorkerAdapter)
     if (this.subAgentManager) {
@@ -866,7 +874,7 @@ export class MainAgent {
 
     // No per-task callback — Agent calls onNotify automatically
     logger.info({ taskId, input, taskType }, "task_spawned");
-    this._startTick();
+    this.tickManager.start();
   }
 
   // ── Task resuming ──
@@ -890,7 +898,7 @@ export class MainAgent {
       await this.sessionStore.append(toolMsg);
 
       logger.info({ taskId: task_id, input }, "task_resumed");
-      this._startTick();
+      this.tickManager.start();
       return false; // No follow-up needed — notification arrives via onNotify
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
@@ -940,7 +948,7 @@ export class MainAgent {
     await this.sessionStore.append(toolMsg);
 
     logger.info({ subagentId, description }, "subagent_spawned");
-    this._startTick();
+    this.tickManager.start();
   }
 
   // ── SubAgent resuming ──
@@ -975,7 +983,7 @@ export class MainAgent {
       await this.sessionStore.append(toolMsg);
 
       logger.info({ subagentId: subagent_id }, "subagent_resumed");
-      this._startTick();
+      this.tickManager.start();
       return false; // No follow-up needed — SubAgent notifications arrive via send()
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
@@ -1018,46 +1026,31 @@ export class MainAgent {
 
     // Stop tick if no more active work
     if (notification.type !== "notify") {
-      this._checkStopTick();
+      this.tickManager.checkShouldStop();
     }
   }
 
-  // ── Active work tick ──
+  // ── Active work tick (callback for TickManager) ──
 
   /**
-   * Start periodic tick when tasks/subagents are active.
-   * First tick after 30s, then every 60s.
-   * Injects a status summary into the session so the LLM can decide
-   * whether to update the user on progress. Prevents silent waiting.
+   * Tick callback — inject status summary and trigger a think cycle.
+   * Called by TickManager when active work exists and queue is idle.
    */
-  private _startTick(): void {
-    if (this._tickTimer) return; // Already ticking
-    this._tickIsFirst = true;
-    this._scheduleTick();
-    logger.info("tick_started");
-  }
+  private _handleTick(activeTasks: number, activeSubAgents: number): void {
+    // Build status summary
+    const parts: string[] = [];
+    if (activeTasks > 0) parts.push(`${activeTasks} task(s) running`);
+    if (activeSubAgents > 0) parts.push(`${activeSubAgents} subagent(s) running`);
+    const summary = `[System: ${parts.join(", ")}. No results yet — you may update the user if appropriate.]`;
 
-  /** Schedule the next tick. */
-  private _scheduleTick(): void {
-    const delay = this._tickIsFirst ? this._tickFirstIntervalMs : this._tickIntervalMs;
-    this._tickTimer = setTimeout(() => this._onTick(), delay);
-  }
+    const statusMsg: Message = { role: "user", content: summary };
+    this.sessionMessages.push(statusMsg);
+    this.sessionStore.append(statusMsg, { type: "tick" });
 
-  /** Stop the tick timer when no active work remains. */
-  private _stopTick(): void {
-    if (!this._tickTimer) return;
-    clearTimeout(this._tickTimer);
-    this._tickTimer = null;
-    this._tickIsFirst = true;
-    logger.info("tick_stopped");
-  }
-
-  /** Check if tick should stop (no active tasks or subagents). */
-  private _checkStopTick(): void {
-    const activeTasks = this.agent.taskRegistry.activeCount;
-    const activeSubAgents = this.subAgentManager?.activeCount ?? 0;
-    if (activeTasks === 0 && activeSubAgents === 0) {
-      this._stopTick();
+    const lastChannel = this._getLastChannel();
+    if (lastChannel) {
+      this.queue.push({ kind: "think", channel: lastChannel });
+      this._processQueue();
     }
   }
 
@@ -1160,45 +1153,6 @@ export class MainAgent {
       { channelType, userId: message.channel.userId, project: projectName },
       "message_routed_to_channel_project",
     );
-  }
-
-  /** Tick handler — inject status summary and trigger a think cycle. */
-  private _onTick(): void {
-    this._tickTimer = null; // Timer fired, clear reference
-
-    const activeTasks = this.agent.taskRegistry.activeCount;
-    const activeSubAgents = this.subAgentManager?.activeCount ?? 0;
-
-    if (activeTasks === 0 && activeSubAgents === 0) {
-      this._stopTick();
-      return;
-    }
-
-    // Skip if queue already has pending work (avoid stale status before real results)
-    if (this.queue.length > 0) {
-      this._scheduleTick();
-      return;
-    }
-
-    // Build status summary
-    const parts: string[] = [];
-    if (activeTasks > 0) parts.push(`${activeTasks} task(s) running`);
-    if (activeSubAgents > 0) parts.push(`${activeSubAgents} subagent(s) running`);
-    const summary = `[System: ${parts.join(", ")}. No results yet — you may update the user if appropriate.]`;
-
-    const statusMsg: Message = { role: "user", content: summary };
-    this.sessionMessages.push(statusMsg);
-    this.sessionStore.append(statusMsg, { type: "tick" });
-
-    const lastChannel = this._getLastChannel();
-    if (lastChannel) {
-      this.queue.push({ kind: "think", channel: lastChannel });
-      this._processQueue();
-    }
-
-    // Schedule next tick (switch to regular interval after first)
-    this._tickIsFirst = false;
-    this._scheduleTick();
   }
 
   // ── Compact ──
@@ -1926,10 +1880,10 @@ export class MainAgent {
   /** Expose tick internals for testing. */
   get _tick() {
     return {
-      start: () => this._startTick(),
-      stop: () => this._stopTick(),
-      fire: () => this._onTick(),
-      isRunning: () => this._tickTimer !== null,
+      start: () => this.tickManager.start(),
+      stop: () => this.tickManager.stop(),
+      fire: () => this.tickManager.fire(),
+      isRunning: () => this.tickManager.isRunning,
       sessionMessages: this.sessionMessages,
     };
   }
