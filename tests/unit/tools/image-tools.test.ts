@@ -30,7 +30,7 @@ describe("image_read tool", () => {
   it("should read a stored image via filesystem", async () => {
     const ref = await manager.store(TEST_PNG, "image/png", "test");
     const result = await image_read.execute(
-      { id: ref.id },
+      { source: ref.id },
       { taskId: "test", mediaDir: tmpDir },
     );
     expect(result.success).toBe(true);
@@ -46,7 +46,7 @@ describe("image_read tool", () => {
   it("should return descriptive result text", async () => {
     const ref = await manager.store(TEST_PNG, "image/png", "test");
     const result = await image_read.execute(
-      { id: ref.id },
+      { source: ref.id },
       { taskId: "test", mediaDir: tmpDir },
     );
     expect(result.result).toContain(ref.id);
@@ -55,7 +55,7 @@ describe("image_read tool", () => {
 
   it("should fail for non-existent image", async () => {
     const result = await image_read.execute(
-      { id: "nonexistent1" },
+      { source: "nonexistent1" },
       { taskId: "test", mediaDir: tmpDir },
     );
     expect(result.success).toBe(false);
@@ -65,7 +65,7 @@ describe("image_read tool", () => {
 
   it("should fail when mediaDir is not configured", async () => {
     const result = await image_read.execute(
-      { id: "abc" },
+      { source: "abc" },
       { taskId: "test" }, // no mediaDir
     );
     expect(result.success).toBe(false);
@@ -74,7 +74,7 @@ describe("image_read tool", () => {
 
   it("should fail gracefully when images directory does not exist", async () => {
     const result = await image_read.execute(
-      { id: "abc" },
+      { source: "abc" },
       { taskId: "test", mediaDir: "/tmp/nonexistent-media-dir" },
     );
     expect(result.success).toBe(false);
@@ -95,7 +95,7 @@ describe("image_read tool", () => {
     writeFileSync(path.join(imagesDir, `${fakeId}.webp`), TEST_PNG);
 
     const result = await image_read.execute(
-      { id: fakeId },
+      { source: fakeId },
       { taskId: "test", mediaDir: tmpDir },
     );
     expect(result.success).toBe(true);
@@ -110,7 +110,7 @@ describe("image_read tool", () => {
     writeFileSync(path.join(imagesDir, `${fakeId}.gif`), TEST_PNG);
 
     const result = await image_read.execute(
-      { id: fakeId },
+      { source: fakeId },
       { taskId: "test", mediaDir: tmpDir },
     );
     expect(result.success).toBe(true);
@@ -125,7 +125,7 @@ describe("image_read tool", () => {
     writeFileSync(path.join(imagesDir, `${fakeId}.bmp`), TEST_PNG);
 
     const result = await image_read.execute(
-      { id: fakeId },
+      { source: fakeId },
       { taskId: "test", mediaDir: tmpDir },
     );
     expect(result.success).toBe(true);
@@ -141,10 +141,90 @@ describe("image_read tool", () => {
     mkdirSync(path.join(imagesDir, `${fakeId}.png`));
 
     const result = await image_read.execute(
-      { id: fakeId },
+      { source: fakeId },
       { taskId: "test", mediaDir: tmpDir },
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain("Failed to read image");
   });
+
+  // --- File path mode tests ---
+
+  it("should read an image from a file path", async () => {
+    // Write a test PNG to a temp file path
+    const testImagePath = path.join(tmpDir, "test-screenshot.png");
+    writeFileSync(testImagePath, TEST_PNG);
+
+    const result = await image_read.execute(
+      { source: testImagePath },
+      { taskId: "test", mediaDir: tmpDir },
+    );
+    expect(result.success).toBe(true);
+    expect(result.images).toBeDefined();
+    expect(result.images!).toHaveLength(1);
+    expect(result.images![0]!.data).toBeDefined();
+    expect(result.images![0]!.data!.length).toBeGreaterThan(0);
+    expect(result.images![0]!.mimeType).toBe("image/png");
+    expect(result.result).toContain(testImagePath);
+    expect(result.result).toContain("bytes");
+  }, { timeout: 15_000 });
+
+  it("should call storeImage when reading from file path", async () => {
+    const testImagePath = path.join(tmpDir, "stored-screenshot.png");
+    writeFileSync(testImagePath, TEST_PNG);
+
+    let storeImageCalled = false;
+    let storedMimeType = "";
+    let storedSource = "";
+    const mockStoreImage = async (_buffer: Buffer, mimeType: string, source: string) => {
+      storeImageCalled = true;
+      storedMimeType = mimeType;
+      storedSource = source;
+      return { id: "mock12345678", mimeType, placeholder: "[img://mock12345678]" };
+    };
+
+    const result = await image_read.execute(
+      { source: testImagePath },
+      { taskId: "test", mediaDir: tmpDir, storeImage: mockStoreImage },
+    );
+    expect(result.success).toBe(true);
+    expect(storeImageCalled).toBe(true);
+    expect(storedMimeType).toBe("image/png");
+    expect(storedSource).toBe("image_read");
+    expect(result.images![0]!.id).toBe("mock12345678");
+  }, { timeout: 15_000 });
+
+  it("should return error for non-existent file path", async () => {
+    const result = await image_read.execute(
+      { source: "/tmp/nonexistent-image-file-12345.png" },
+      { taskId: "test", mediaDir: tmpDir },
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Failed to read image");
+  }, { timeout: 15_000 });
+
+  it("should use hash ID mode when source has no path separators", async () => {
+    // This tests backward compatibility — hash ID mode still works
+    const ref = await manager.store(TEST_PNG, "image/png", "test");
+    const result = await image_read.execute(
+      { source: ref.id },
+      { taskId: "test", mediaDir: tmpDir },
+    );
+    expect(result.success).toBe(true);
+    expect(result.images).toBeDefined();
+    expect(result.images![0]!.id).toBe(ref.id);
+    // Hash ID mode result text uses "Image <id> loaded (...)"
+    expect(result.result).toContain(ref.id);
+  }, { timeout: 15_000 });
+
+  it("should detect backslash as path separator", async () => {
+    // Source with backslash should be treated as path mode
+    // This path won't exist, so we expect an error from readImageFile
+    const result = await image_read.execute(
+      { source: "C:\\Users\\test\\image.png" },
+      { taskId: "test", mediaDir: tmpDir },
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Failed to read image");
+  }, { timeout: 15_000 });
 });
