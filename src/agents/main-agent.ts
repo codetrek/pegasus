@@ -106,9 +106,18 @@ export class MainAgent extends ConversationAgent {
     const toolRegistry = new ToolRegistry();
     toolRegistry.registerMany(mainAgentTools);
 
+    // Placeholder model for BaseAgent — MainAgent overrides _think() and uses
+    // this.models directly, so BaseAgent.model is never called. We can't call
+    // models.getDefault() here because OAuth hasn't been initialized yet.
+    const placeholderModel: import("../infra/llm-types.ts").LanguageModel = {
+      provider: "placeholder",
+      modelId: "placeholder",
+      generate: async () => { throw new Error("MainAgent should not use BaseAgent.model"); },
+    };
+
     super({
       agentId: "main-agent",
-      model: deps.models.getDefault(),
+      model: placeholderModel,
       toolRegistry,
       persona: deps.persona,
       sessionDir: mainStorePaths.session,
