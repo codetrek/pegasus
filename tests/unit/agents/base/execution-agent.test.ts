@@ -629,6 +629,71 @@ describe("ExecutionAgent", () => {
     }, 10000);
   });
 
+  describe("processStep catch branch in run()", () => {
+    test("returns failure when processStep itself throws (not LLM error)", async () => {
+      const model = createMockModel();
+      const agent = new ExecutionAgent(createTaskDeps({ model }));
+
+      // Override processStep to throw before it can call onTaskComplete
+      const agentAny = agent as any;
+      agentAny.processStep = async (_taskId: string) => {
+        throw new Error("processStep exploded");
+      };
+
+      const result = await agent.run();
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("processStep exploded");
+    }, 5000);
+  });
+
+  describe("TASK_SUSPENDED via EventBus subscription handler", () => {
+    test("emitting TASK_SUSPENDED through EventBus reaches handleEvent via subscription", async () => {
+      const eventBus = new EventBus({ keepHistory: true });
+      const model = createMockModel(
+        mock(async () => ({
+          text: "done",
+          finishReason: "stop",
+          usage: { promptTokens: 10, completionTokens: 5 },
+        })),
+      );
+
+      const agent = new ExecutionAgent(
+        createTaskDeps({
+          model,
+          eventBus,
+          agentId: "suspend-bus-test",
+        }),
+      );
+
+      // start() subscribes to events via subscribeEvents()
+      await agent.start();
+
+      // Create a task state so handleEvent has something to suspend
+      const state = (agent as any).createTaskExecutionState("suspend-bus-test", [
+        { role: "user", content: "test" },
+      ]);
+      expect(state.aborted).toBe(false);
+
+      // Emit TASK_SUSPENDED through EventBus (not direct handleEvent)
+      await eventBus.emit(
+        createEvent(EventType.TASK_SUSPENDED, {
+          source: "suspend-bus-test",
+          taskId: "suspend-bus-test",
+          payload: { reason: "test suspend via bus" },
+        }),
+      );
+
+      // Wait for EventBus to dispatch the event
+      await new Promise((r) => setTimeout(r, 500));
+
+      // The subscription handler should have routed the event to handleEvent
+      expect(state.aborted).toBe(true);
+
+      await agent.stop();
+    }, 10000);
+  });
+
   describe("TASK_RESUMED resume flow", () => {
     test("TASK_RESUMED event re-starts execution via _startExecution", async () => {
       const eventBus = new EventBus({ keepHistory: true });
