@@ -11,6 +11,9 @@
  *   - listAll returns all active tasks
  *   - per-type tool registry uses allTaskTools by default
  *   - concurrent tasks — submit 2 tasks, both complete independently
+ *   - onNotify callback forwarded from ExecutionAgent
+ *   - setAdditionalTools clears tool registry cache
+ *   - run() promise rejection triggers failed notification (.catch branch)
  */
 
 import { describe, test, expect, mock } from "bun:test";
@@ -19,6 +22,7 @@ import type { TaskNotification } from "../../../src/agents/agent.ts";
 import type { LanguageModel } from "../../../src/infra/llm-types.ts";
 import { AITaskTypeRegistry } from "../../../src/aitask-types/registry.ts";
 import { allTaskTools } from "../../../src/tools/builtins/index.ts";
+import { ExecutionAgent } from "../../../src/agents/base/execution-agent.ts";
 
 // ── Helpers ──────────────────────────────────────────
 
@@ -295,6 +299,129 @@ describe("TaskRunner", () => {
       const completedIds = completedNotifs.map((n) => n.taskId);
       expect(completedIds).toContain(id1);
       expect(completedIds).toContain(id2);
+    }, 5000);
+  });
+
+  describe("onNotify callback forwarded from ExecutionAgent", () => {
+    test("sends notify notification when LLM returns notify tool call", async () => {
+      const notifications: TaskNotification[] = [];
+      const onNotification = mock((n: TaskNotification) => {
+        notifications.push(n);
+      });
+
+      let callIndex = 0;
+      const model = createMockModel(
+        mock(async () => {
+          callIndex++;
+          if (callIndex === 1) {
+            return {
+              text: "",
+              finishReason: "tool_calls",
+              toolCalls: [
+                {
+                  id: "tc-notify-1",
+                  name: "notify",
+                  arguments: { message: "progress 50%" },
+                },
+              ],
+              usage: { promptTokens: 10, completionTokens: 5 },
+            };
+          }
+          return {
+            text: "done",
+            finishReason: "stop",
+            toolCalls: [],
+            usage: { promptTokens: 10, completionTokens: 5 },
+          };
+        }),
+      );
+
+      const runner = new TaskRunner(createDeps({ model, onNotification }));
+      runner.submit("do work", "user", "general", "Notify test");
+
+      await waitForNotifications(500);
+
+      const notifyCall = notifications.find((n) => n.type === "notify");
+      expect(notifyCall).toBeDefined();
+      expect(notifyCall!.type).toBe("notify");
+      expect((notifyCall as any).message).toBe("progress 50%");
+    }, 5000);
+  });
+
+  describe("setAdditionalTools clears tool registry cache", () => {
+    test("clears cache so next submit builds fresh registry", () => {
+      const [model] = createBlockingModel();
+      const runner = new TaskRunner(createDeps({ model }));
+
+      // Submit a task to populate the cache for "general" type
+      runner.submit("task", "user", "general", "First");
+
+      const cacheBefore = (runner as any).toolRegistryCache as Map<string, unknown>;
+      expect(cacheBefore.size).toBeGreaterThan(0);
+
+      // setAdditionalTools should clear the cache
+      runner.setAdditionalTools([]);
+
+      expect(cacheBefore.size).toBe(0);
+    }, 5000);
+  });
+
+  describe("run() promise rejection triggers failed notification", () => {
+    test("catches thrown error from agent.run() in the .catch() branch", async () => {
+      const notifications: TaskNotification[] = [];
+      const onNotification = mock((n: TaskNotification) => {
+        notifications.push(n);
+      });
+
+      // Monkeypatch ExecutionAgent.prototype.run to reject its promise,
+      // simulating an unhandled exception escaping run() itself.
+      const originalRun = ExecutionAgent.prototype.run;
+      ExecutionAgent.prototype.run = async function () {
+        throw new Error("run() blew up");
+      };
+
+      try {
+        const runner = new TaskRunner(createDeps({ onNotification }));
+        runner.submit("do stuff", "user", "general", "Failing task");
+
+        await waitForNotifications(500);
+
+        // The .catch() branch should fire, producing a "failed" notification
+        const failedCall = notifications.find((n) => n.type === "failed");
+        expect(failedCall).toBeDefined();
+        expect(failedCall!.type).toBe("failed");
+        expect((failedCall as any).error).toBe("run() blew up");
+
+        // activeCount should be back to 0
+        expect(runner.activeCount).toBe(0);
+      } finally {
+        ExecutionAgent.prototype.run = originalRun;
+      }
+    }, 5000);
+
+    test("handles non-Error thrown from run() via String(err) path", async () => {
+      const notifications: TaskNotification[] = [];
+      const onNotification = mock((n: TaskNotification) => {
+        notifications.push(n);
+      });
+
+      const originalRun = ExecutionAgent.prototype.run;
+      ExecutionAgent.prototype.run = async function () {
+        throw "string error from run";
+      };
+
+      try {
+        const runner = new TaskRunner(createDeps({ onNotification }));
+        runner.submit("do stuff", "user", "general", "String error task");
+
+        await waitForNotifications(500);
+
+        const failedCall = notifications.find((n) => n.type === "failed");
+        expect(failedCall).toBeDefined();
+        expect((failedCall as any).error).toBe("string error from run");
+      } finally {
+        ExecutionAgent.prototype.run = originalRun;
+      }
     }, 5000);
   });
 });
