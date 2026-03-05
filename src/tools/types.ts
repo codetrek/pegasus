@@ -76,6 +76,13 @@ export interface ToolContext {
   extractModel?: LanguageModel; // Small model for content extraction (web_fetch)
   backgroundManager?: BackgroundTaskManager; // Background task execution manager (bg_run/bg_output/bg_stop)
   mediaDir?: string; // Directory for media storage (images, etc.)
+  /** Store an image via ImageManager. Injected by Agent/MainAgent so tools can persist images
+   *  without direct ImageManager references (works across thread boundaries). */
+  storeImage?: (
+    buffer: Buffer,
+    mimeType: string,
+    source: string,
+  ) => Promise<{ id: string; mimeType: string }>;
 }
 
 // ── ToolStats ─────────────────────────────────
