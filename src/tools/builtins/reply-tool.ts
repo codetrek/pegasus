@@ -31,7 +31,9 @@ export const reply: Tool = {
       .array(z.string())
       .optional()
       .describe(
-        "Image IDs to send with the reply. Use IDs from [img://ID] references in conversation.",
+        "Images to send with the reply. Accepts image IDs from [img://ID] references " +
+        "OR file paths (e.g., '/tmp/screenshot.png'). " +
+        "Images are automatically stored for persistence.",
       ),
   }),
   async execute(params: unknown, _context: ToolContext): Promise<ToolResult> {
