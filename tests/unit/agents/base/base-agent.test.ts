@@ -505,7 +505,7 @@ describe("BaseAgent", () => {
       await agent.testProcessStep("task-1");
 
       // Wait for async tool execution and next processStep
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 50));
 
       // Should have called LLM twice: first with tool calls, second with final answer
       expect(llmCallCount).toBe(2);
@@ -606,7 +606,7 @@ describe("BaseAgent", () => {
       agent.testCreateTaskState("task-1", [{ role: "user", content: "hi" }]);
 
       await agent.testProcessStep("task-1");
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 50));
 
       // First event should have hasToolCalls=true, toolCount=2
       expect(emittedEvents.length).toBeGreaterThanOrEqual(1);
@@ -720,7 +720,7 @@ describe("BaseAgent", () => {
       ]);
 
       await agent.testProcessStep("task-1");
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 50));
 
       expect(llmCallCount).toBe(2);
       expect(agent.onTaskCompleteMock).toHaveBeenCalledTimes(1);
@@ -777,7 +777,7 @@ describe("BaseAgent", () => {
       ]);
 
       await agent.testProcessStep("task-1");
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 50));
 
       // LLM should only be called once (second processStep should not fire)
       expect(llmCallCount).toBe(1);
@@ -945,7 +945,7 @@ describe("BaseAgent", () => {
       ]);
 
       await agent.testProcessStep("task-1");
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 50));
 
       // Should be called 3 times:
       // 1. assistant message with tool calls
@@ -1057,7 +1057,7 @@ describe("BaseAgent", () => {
 
       await agent.testProcessStep("task-1");
       // Wait for async tool execution chains to complete
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 100));
 
       // Verify: LLM called 3 times
       expect(llmCallCount).toBe(3);
@@ -1134,7 +1134,7 @@ describe("BaseAgent", () => {
 
       await agent.testProcessStep("task-1");
       // Wait for async tool execution and next processStep
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 100));
 
       // Collector should have completed despite the error
       expect(llmCallCount).toBe(2);

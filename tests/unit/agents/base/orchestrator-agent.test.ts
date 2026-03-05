@@ -205,7 +205,7 @@ describe("OrchestratorAgent", () => {
       const runPromise = agent.run();
 
       // Wait for spawn to happen
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 50));
 
       // Child should be tracked
       expect(agentAny.childTaskIds.has("child-spawn-1")).toBe(true);
@@ -369,7 +369,7 @@ describe("OrchestratorAgent", () => {
       await agentAny.handleEvent(event2);
 
       // Wait for async processStep
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 50));
 
       // All children done
       expect(agentAny.childTaskIds.size).toBe(0);
@@ -535,13 +535,13 @@ describe("OrchestratorAgent", () => {
       const runPromise = agent.run();
 
       // Wait for spawn to happen
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 50));
 
       // Reject the child's promise — this should trigger the .catch() branch
       deferred.reject(new Error("child crashed hard"));
 
       // Wait for the catch handler to run
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 50));
 
       // Complete child via event so run() can finish
       const completedEvent = createEvent(EventType.TASK_COMPLETED, {
@@ -596,7 +596,7 @@ describe("OrchestratorAgent", () => {
       );
 
       // Wait for dispatch
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 100));
 
       // Verify TASK_COMPLETED was emitted (agent processed the event)
       const completedEvents = eventBus.history.filter(
@@ -642,7 +642,7 @@ describe("OrchestratorAgent", () => {
       );
 
       // Wait for dispatch
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 100));
 
       // The subscription handler should have routed to handleEvent
       expect(state.aborted).toBe(true);

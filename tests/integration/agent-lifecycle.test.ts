@@ -69,7 +69,7 @@ describe("Agent lifecycle", () => {
         }),
       );
 
-      await sleep(500);
+      await sleep(200);
 
       const tasks = agent.taskRegistry.listAll();
       expect(tasks.length).toBeGreaterThanOrEqual(1);
@@ -104,7 +104,7 @@ describe("Agent lifecycle", () => {
         );
       }
 
-      await sleep(1500);
+      await sleep(200);
 
       const tasks = agent.taskRegistry.listAll();
       const completed = tasks.filter((t) => t.state === TaskState.COMPLETED);
@@ -129,7 +129,7 @@ describe("Agent lifecycle", () => {
         }),
       );
 
-      await sleep(500);
+      await sleep(200);
 
       const history = agent.eventBus.history;
       const types = history.map((e) => e.type);
@@ -227,7 +227,7 @@ describe("Agent lifecycle", () => {
       expect(taskId).toBeTruthy();
 
       // Wait for the error to propagate
-      await sleep(500);
+      await sleep(200);
 
       // Task should be failed
       const task = agent.taskRegistry.getOrNull(taskId);
