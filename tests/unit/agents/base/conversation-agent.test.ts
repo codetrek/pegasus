@@ -13,6 +13,7 @@ import { describe, test, expect, mock, beforeEach } from "bun:test";
 import {
   ConversationAgent,
   type ConversationAgentDeps,
+  type QueueItem,
 } from "../../../../src/agents/base/conversation-agent.ts";
 import type {
   LanguageModel,
@@ -714,6 +715,104 @@ describe("ConversationAgent", () => {
       const msgs = agent.getSessionMessages();
       expect(msgs.some((m) => m.role === "user" && m.content === "complete me")).toBe(true);
       expect(msgs.some((m) => m.role === "assistant" && m.content === "final answer")).toBe(true);
+
+      await agent.stop();
+    });
+  });
+
+  describe("_handleMessage can be overridden (protected)", () => {
+    test("subclass override of _handleMessage is called instead of default", async () => {
+      const handleMessageSpy = mock(async (_msg: InboundMessage) => {});
+
+      class CustomHandleAgent extends ConversationAgent {
+        protected buildSystemPrompt(): string {
+          return "custom prompt";
+        }
+        protected override async _handleMessage(message: InboundMessage): Promise<void> {
+          handleMessageSpy(message);
+        }
+        getSessionMessages(): Message[] {
+          return this.sessionMessages;
+        }
+      }
+
+      const agent = new CustomHandleAgent(createTestDeps());
+      await agent.start();
+
+      const msg = makeInboundMessage("override test");
+      agent.send(msg);
+
+      await new Promise((r) => setTimeout(r, 200));
+
+      expect(handleMessageSpy).toHaveBeenCalledTimes(1);
+      expect(handleMessageSpy.mock.calls[0]![0].text).toBe("override test");
+
+      // Since we overrode _handleMessage completely, session should be empty
+      // (no user message added)
+      expect(agent.getSessionMessages()).toHaveLength(0);
+
+      await agent.stop();
+    });
+  });
+
+  describe("pushQueue and onCustomQueueItem", () => {
+    test("pushQueue pushes custom item and triggers onCustomQueueItem", async () => {
+      const customItemSpy = mock(async (_item: QueueItem) => {});
+
+      class CustomQueueAgent extends ConversationAgent {
+        protected buildSystemPrompt(): string {
+          return "custom prompt";
+        }
+        protected override async onCustomQueueItem(item: QueueItem): Promise<void> {
+          await customItemSpy(item);
+        }
+        getSessionMessages(): Message[] {
+          return this.sessionMessages;
+        }
+        testPushQueue(item: QueueItem): void {
+          this.pushQueue(item);
+        }
+      }
+
+      const agent = new CustomQueueAgent(createTestDeps());
+      await agent.start();
+
+      const customItem: QueueItem = { kind: "custom_refresh", data: 42 };
+      agent.testPushQueue(customItem);
+
+      await new Promise((r) => setTimeout(r, 200));
+
+      expect(customItemSpy).toHaveBeenCalledTimes(1);
+      const receivedItem = customItemSpy.mock.calls[0]![0];
+      expect(receivedItem.kind).toBe("custom_refresh");
+      expect((receivedItem as any).data).toBe(42);
+
+      await agent.stop();
+    });
+
+    test("onCustomQueueItem default is no-op — unknown kind causes no error", async () => {
+      class DefaultQueueAgent extends ConversationAgent {
+        protected buildSystemPrompt(): string {
+          return "default prompt";
+        }
+        getSessionMessages(): Message[] {
+          return this.sessionMessages;
+        }
+        testPushQueue(item: QueueItem): void {
+          this.pushQueue(item);
+        }
+      }
+
+      const agent = new DefaultQueueAgent(createTestDeps());
+      await agent.start();
+
+      // Push unknown kind — should not throw
+      agent.testPushQueue({ kind: "unknown_kind" });
+
+      await new Promise((r) => setTimeout(r, 200));
+
+      // No error, agent still running
+      expect(agent.isRunning).toBe(true);
 
       await agent.stop();
     });

@@ -276,7 +276,9 @@ export abstract class BaseAgent {
       // No tool calls → task complete
       if (!result.toolCalls?.length) {
         if (result.text) {
-          state.messages.push({ role: "assistant", content: result.text });
+          const assistantMsg: Message = { role: "assistant", content: result.text };
+          state.messages.push(assistantMsg);
+          await this.onMessagesAppended(taskId, [assistantMsg]);
         }
         await this.eventBus.emit(createEvent(EventType.STEP_COMPLETED, {
           source: this.agentId, taskId,
@@ -294,6 +296,7 @@ export abstract class BaseAgent {
         toolCalls: result.toolCalls,
       };
       state.messages.push(assistantMsg);
+      await this.onMessagesAppended(taskId, [assistantMsg]);
 
       await this.eventBus.emit(createEvent(EventType.STEP_COMPLETED, {
         source: this.agentId, taskId,
@@ -315,8 +318,13 @@ export abstract class BaseAgent {
       // Return immediately — _onAllToolsDone will trigger next step
     } catch (err) {
       this.stateManager.markIdle();
-      logger.error({ err, taskId, agentId: this.agentId }, "process_step_error");
-      await this.onTaskComplete(taskId, "", "error");
+      const shouldRetry = await this.onLLMError(taskId, err);
+      if (shouldRetry) {
+        await this.processStep(taskId);
+      } else {
+        logger.error({ err, taskId, agentId: this.agentId }, "process_step_error");
+        await this.onTaskComplete(taskId, "", "error");
+      }
     }
   }
 
@@ -341,13 +349,16 @@ export abstract class BaseAgent {
     // Append tool result messages
     const results = state.activeCollector!.getResults();
     state.activeCollector = null;
+    const newMessages: Message[] = [];
     for (const r of results) {
       const msg: Message = { role: "tool", content: r.content, toolCallId: r.toolCallId };
       if (r.images?.length) {
         msg.images = r.images;
       }
       state.messages.push(msg);
+      newMessages.push(msg);
     }
+    await this.onMessagesAppended(taskId, newMessages);
 
     // Trigger next LLM call
     await this.processStep(taskId);
@@ -415,6 +426,22 @@ export abstract class BaseAgent {
 
   /** Hook called before each LLM call. Override for context window management. */
   protected async beforeLLMCall(_taskId: string): Promise<void> {}
+
+  /**
+   * Hook called when LLM call fails in processStep.
+   * Return true to retry processStep, false to fail the task.
+   * Default: return false (fail immediately).
+   */
+  protected async onLLMError(_taskId: string, _error: unknown): Promise<boolean> {
+    return false;
+  }
+
+  /**
+   * Hook called when new messages are added to task state during processStep.
+   * Subclasses can override for immediate per-message persistence.
+   * Default: no-op (ConversationAgent persists in batch after _think completes).
+   */
+  protected async onMessagesAppended(_taskId: string, _newMessages: Message[]): Promise<void> {}
 
   /** Create and register a TaskExecutionState. */
   protected createTaskExecutionState(
