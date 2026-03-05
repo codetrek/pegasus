@@ -35,6 +35,22 @@ MainAgent._handleMessage()
     │     └─ ImageAttachment without data → text "[img://id — use image_read]"
     │
     └─► LLM can call image_read tool to view older/pruned images
+
+Tool Image Flow (Task Agent):
+    Tool (read_file, browser_screenshot, image_read)
+        │ detects image / captures screenshot
+        ▼
+    image-helpers.readImageFile() or direct context.storeImage()
+        │ buffer → ToolContext.storeImage(buffer, mime, source)
+        ▼
+    ImageManager.store() — compress, dedup, persist
+        │ returns { id, mimeType }
+        ▼
+    ToolResult { images: [{ id, mimeType, data }] }
+        │ pushed to task context.messages
+        ▼
+    notify → TaskNotification { imageRefs } (incremental, new images only)
+    completed → _compileResult() { imageRefs } (all images from task)
 ```
 
 ## Components
@@ -69,6 +85,22 @@ Sharp wrapper with OpenClaw-inspired compression algorithm:
 
 Allows LLM to re-read pruned images. Filesystem-only (no SQLite) — scans `images/{id}.*`.
 Registered in all tool collections (mainAgent, allTask, explore, plan).
+
+### Image Helpers (`src/media/image-helpers.ts`)
+
+Shared utilities for image detection and reading across tools:
+- `isImageFile()` / `extToMime()` — extension-based image detection and MIME mapping
+- `readImageFile()` — reads image from disk, stores via `context.storeImage`, returns ToolResult with image data
+
+Used by: `read_file` (image detection branch), `image_read` (file path mode), `browser_screenshot` (after capture).
+
+### ToolContext.storeImage (`src/tools/types.ts`)
+
+Callback injected into ToolContext by Agent/MainAgent. Allows any tool to persist images through ImageManager without direct dependency:
+```typescript
+storeImage?: (buffer: Buffer, mimeType: string, source: string) => Promise<{ id: string; mimeType: string }>
+```
+Agent resolves this from either an injected callback (MainAgent path) or a self-provisioned ImageManager.
 
 ## Message Model
 
@@ -112,10 +144,13 @@ vision:
 
 ## Task Agent Image Passing
 
-When MainAgent spawns a task that needs image context:
-1. Simple image analysis (describe, OCR) is handled directly by MainAgent
-2. For tasks needing images: MainAgent includes `[img://id]` in the task input text
-3. Task Agent calls `image_read` tool to load the referenced image
+Images flow between Task Agent and MainAgent via structured `imageRefs` in TaskNotification:
+
+1. **Mid-task notify**: Agent collects image refs from new messages since the last notify (incremental — avoids re-sending all historical images). Sends `TaskNotification { type: "notify", imageRefs }`.
+2. **Task completion**: `_compileResult()` scans ALL task messages to collect every image ref. Sends `TaskNotification { type: "completed", imageRefs }`.
+3. **MainAgent receives** `imageRefs` and hydrates them into its own context so the LLM can see task-produced images.
+
+Tools produce images via `ToolContext.storeImage` → ImageManager → `ToolResult.images` → `context.messages`. The `image_read` tool is also available for the task LLM to re-read any stored image by ID.
 
 ## What Does NOT Change
 
