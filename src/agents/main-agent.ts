@@ -30,6 +30,7 @@ import { ImageManager } from "../media/image-manager.ts";
 import { hydrateImages } from "../media/image-prune.ts";
 import { Agent } from "./agent.ts";
 import type { TaskNotification } from "./agent.ts";
+import { TaskRunner } from "./task-runner.ts";
 import type { ToolCall } from "../models/tool.ts";
 import { computeTokenBudget, calculateMaxToolResultChars, truncateToolResult, isContextOverflowError, MAX_OVERFLOW_COMPACT_RETRIES, ModelLimitsCache } from "../context/index.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
@@ -53,6 +54,7 @@ import { EventBus } from "../events/bus.ts";
 import { mainAgentTools } from "../tools/builtins/index.ts";
 import { MCPManager, wrapMCPTools } from "../mcp/index.ts";
 import type { MCPServerConfig } from "../mcp/index.ts";
+import type { Tool } from "../tools/types.ts";
 import { TokenRefreshMonitor } from "../mcp/auth/refresh-monitor.ts";
 import type { DeviceCodeAuthConfig } from "../mcp/auth/types.ts";
 import { buildMainAgentPaths } from "../storage/paths.ts";
@@ -72,6 +74,7 @@ export class MainAgent extends ConversationAgent {
   private models: ModelRegistry;
   private settings: Settings;
   private agent!: Agent; // Task execution engine — initialized in start()
+  private taskRunner!: TaskRunner; // New task execution — initialized in start()
   private mcpManager: MCPManager | null = null;
   private tokenRefreshMonitor: TokenRefreshMonitor | null = null;
   private replyCallback: ((msg: OutboundMessage) => void) | null = null;
@@ -162,7 +165,7 @@ export class MainAgent extends ConversationAgent {
     // Tick manager — periodic status injection for long-running work
     this.tickManager = new TickManager({
       getActiveWorkCount: () => ({
-        tasks: this.agent?.taskRegistry.activeCount ?? 0,
+        tasks: this.taskRunner?.activeCount ?? 0,
         subagents: this.subAgentManager?.activeCount ?? 0,
       }),
       hasPendingWork: () => this.hasQueuedWork(),
@@ -374,6 +377,29 @@ export class MainAgent extends ConversationAgent {
     this.aiTaskTypeRegistry.registerMany(loadAITaskTypeDefinitions(builtinAITaskTypeDir, userAITaskTypeDir));
     this.agent.setAITaskTypeRegistry(this.aiTaskTypeRegistry);
     logger.info({ aiTaskTypeCount: this.aiTaskTypeRegistry.listAll().length }, "aitask_types_loaded");
+
+    // Initialize TaskRunner — uses AITaskTypeRegistry for per-type tool resolution
+    this.taskRunner = new TaskRunner({
+      model: this.models.getForTier("balanced"),
+      taskTypeRegistry: this.aiTaskTypeRegistry,
+      onNotification: (notification) => {
+        this.pushQueue({ kind: "task_notify", notification } as QueueItem);
+      },
+    });
+
+    // Register MCP tools in TaskRunner (if MCP is active)
+    if (this.mcpManager && mcpConfigs.length > 0) {
+      const mcpToolsList: Tool[] = [];
+      for (const config of mcpConfigs.filter((c) => c.enabled)) {
+        try {
+          const mcpToolsForRunner = await this.mcpManager.listTools(config.name);
+          mcpToolsList.push(...wrapMCPTools(config.name, mcpToolsForRunner, this.mcpManager));
+        } catch { /* already logged during MainAgent MCP registration */ }
+      }
+      if (mcpToolsList.length > 0) {
+        this.taskRunner.setAdditionalTools(mcpToolsList);
+      }
+    }
 
     // Load projects
     this.projectManager.loadAll();
@@ -722,7 +748,7 @@ export class MainAgent extends ConversationAgent {
           } else if (skill.context === "fork") {
             const body = this.skillRegistry.loadBody(skillName, skillArgs);
             const taskType = skill.agent || "general";
-            const taskId = await this.agent.submit(body ?? "", "skill:" + skillName, taskType);
+            const taskId = this.taskRunner.submit(body ?? "", "skill:" + skillName, taskType, `Skill: ${skillName}`);
             const toolMsg: Message = {
               role: "tool",
               content: JSON.stringify({ taskId, status: "spawned", skill: skillName }),
@@ -769,7 +795,7 @@ export class MainAgent extends ConversationAgent {
               memoryDir: this.mainStorePaths.memory!,
               sessionDir: this.mainStorePaths.session,
               tasksDir: this.mainStorePaths.tasks,
-              taskRegistry: this.agent.taskRegistry,
+              taskRegistry: this.taskRunner,
               projectManager: this.projectManager,
               ownerStore: this.ownerStore,
               mediaDir: this.imageManager
@@ -873,7 +899,7 @@ export class MainAgent extends ConversationAgent {
     if (skill.context === "fork") {
       // Spawn task with skill content
       const taskType = skill.agent || "general";
-      const taskId = await this.agent.submit(body, "skill:" + name, taskType);
+      const taskId = this.taskRunner.submit(body, "skill:" + name, taskType, `Skill: ${name}`);
       const systemMsg: Message = {
         role: "user",
         content: `[Skill "${name}" spawned as task ${taskId}]`,
@@ -915,7 +941,7 @@ export class MainAgent extends ConversationAgent {
   private async _handleSpawnTask(tc: ToolCall): Promise<void> {
     const { description, input, type } = tc.arguments as { description: string; input: string; type?: string };
     const taskType = type ?? "general";
-    const taskId = await this.agent.submit(input, "main-agent", taskType, description);
+    const taskId = this.taskRunner.submit(input, "main-agent", taskType, description);
 
     const toolMsg: Message = {
       role: "tool",
@@ -1366,6 +1392,11 @@ export class MainAgent extends ConversationAgent {
   /** Expose agent for testing. */
   get taskAgent(): Agent {
     return this.agent;
+  }
+
+  /** Expose TaskRunner for testing. */
+  get _taskRunner(): TaskRunner {
+    return this.taskRunner;
   }
 
   // ── Skill reload (event-driven, NOT polling) ────────
