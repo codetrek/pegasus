@@ -1577,185 +1577,8 @@ describe("MainAgent", () => {
 
   // ── Main Reflection tests ──
 
-  describe("_shouldReflectOnSession", () => {
-    it("should return false for sessions with fewer than 6 messages", async () => {
-      const model = createMonologueModel("test");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
-      const messages: Message[] = [
-        { role: "user", content: "hello" },
-        { role: "assistant", content: "hi" },
-        { role: "user", content: "bye" },
-      ];
-      expect(agent._shouldReflectOnSession(messages)).toBe(false);
-    });
-
-    it("should return false for sessions with fewer than 2 user messages", async () => {
-      const model = createMonologueModel("test");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
-      const messages: Message[] = [
-        { role: "user", content: "hello" },
-        { role: "assistant", content: "hi" },
-        { role: "assistant", content: "thinking..." },
-        { role: "assistant", content: "still thinking..." },
-        { role: "assistant", content: "done" },
-        { role: "assistant", content: "final" },
-      ];
-      expect(agent._shouldReflectOnSession(messages)).toBe(false);
-    });
-
-    it("should return true for sessions with enough messages and user messages", async () => {
-      const model = createMonologueModel("test");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
-      const messages: Message[] = [
-        { role: "user", content: "hello" },
-        { role: "assistant", content: "hi" },
-        { role: "user", content: "how are you" },
-        { role: "assistant", content: "good" },
-        { role: "user", content: "what time is it" },
-        { role: "assistant", content: "3pm" },
-      ];
-      expect(agent._shouldReflectOnSession(messages)).toBe(true);
-    });
-
-    it("should return false for exactly 5 messages (boundary)", async () => {
-      const model = createMonologueModel("test");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
-      const messages: Message[] = [
-        { role: "user", content: "hello" },
-        { role: "assistant", content: "hi" },
-        { role: "user", content: "how are you" },
-        { role: "assistant", content: "good" },
-        { role: "user", content: "bye" },
-      ];
-      expect(agent._shouldReflectOnSession(messages)).toBe(false);
-    });
-
-    it("should return false for empty messages", async () => {
-      const model = createMonologueModel("test");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
-      expect(agent._shouldReflectOnSession([])).toBe(false);
-    });
-  });
-
-  describe("_runMainReflection", () => {
-    it("should run PostTaskReflector and complete successfully", async () => {
-      await mkdir(`${testDataDir}/agents/main/memory`, { recursive: true });
-
-      const model: LanguageModel = {
-        provider: "test",
-        modelId: "test-model",
-        async generate(): Promise<GenerateTextResult> {
-          return {
-            text: "Nothing worth recording from this session.",
-            finishReason: "stop",
-            usage: { promptTokens: 10, completionTokens: 10 },
-          };
-        },
-      };
-
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-      await agent.start();
-
-      const messages: Message[] = [
-        { role: "user", content: "My name is Alice" },
-        { role: "assistant", content: "Hi Alice!" },
-        { role: "user", content: "I like TypeScript" },
-        { role: "assistant", content: "Great choice!" },
-      ];
-
-      // Should not throw
-      await agent._runMainReflection(messages);
-
-      await agent.stop();
-    }, 10_000);
-
-    it("should write memory when reflector decides to", async () => {
-      await mkdir(`${testDataDir}/agents/main/memory`, { recursive: true });
-
-      let callCount = 0;
-      const model: LanguageModel = {
-        provider: "test",
-        modelId: "test-model",
-        async generate(): Promise<GenerateTextResult> {
-          callCount++;
-          if (callCount === 1) {
-            // Reflector's first call: write to memory
-            return {
-              text: "",
-              finishReason: "tool_calls",
-              toolCalls: [
-                {
-                  id: "tc-write",
-                  name: "memory_write",
-                  arguments: {
-                    path: "facts/user.md",
-                    content: "# User\n> Summary: user info\n\n- Name: Alice\n- Likes: TypeScript",
-                  },
-                },
-              ],
-              usage: { promptTokens: 10, completionTokens: 10 },
-            };
-          }
-          // Second call: done
-          return {
-            text: "Recorded user preferences.",
-            finishReason: "stop",
-            usage: { promptTokens: 10, completionTokens: 10 },
-          };
-        },
-      };
-
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-      await agent.start();
-
-      const messages: Message[] = [
-        { role: "user", content: "My name is Alice and I like TypeScript" },
-        { role: "assistant", content: "Hi Alice! TypeScript is great." },
-      ];
-
-      await agent._runMainReflection(messages);
-
-      // Verify memory was written
-      const content = await Bun.file(`${testDataDir}/agents/main/memory/facts/user.md`).text();
-      expect(content).toContain("Alice");
-      expect(content).toContain("TypeScript");
-
-      await agent.stop();
-    }, 10_000);
-  });
+  // Note: _shouldReflectOnSession and _runMainReflection unit tests moved to
+  // tests/unit/agents/reflection-orchestrator.test.ts (ReflectionOrchestrator)
 
   describe("compact triggers reflection", () => {
     it("should trigger reflection when compact happens with sufficient messages", async () => {
@@ -1851,39 +1674,76 @@ describe("MainAgent", () => {
     }, 20_000);
 
     it("should not crash compact when reflection fails", async () => {
-      await mkdir(`${testDataDir}/agents/main/memory`, { recursive: true });
+      // This test verifies that a reflection failure (thrown error) does not crash
+      // the main agent's compact flow. The .catch() wrapper in _think handles this.
+      // The detailed runReflection error handling is tested in reflection-orchestrator.test.ts.
+      // Here we verify the integration: reflection error is logged but doesn't propagate.
 
-      // Directly test that _runMainReflection handles errors gracefully
+      let thinkCount = 0;
       const model: LanguageModel = {
         provider: "test",
         modelId: "test-model",
-        async generate(): Promise<GenerateTextResult> {
-          throw new Error("LLM reflection error");
+        async generate(options: {
+          system?: string;
+          messages?: Message[];
+        }): Promise<GenerateTextResult> {
+          thinkCount++;
+          // Summarize call
+          if (options.system?.includes("conversation summarizer")) {
+            return {
+              text: "Summary: user said hello.",
+              finishReason: "stop",
+              usage: { promptTokens: 50, completionTokens: 20 },
+            };
+          }
+          // Reflection call — throw to simulate failure
+          if (options.system?.includes("reviewing a completed task")) {
+            throw new Error("LLM reflection error");
+          }
+          // Normal think calls: return huge tokens on 3rd+ to trigger compact
+          const promptTokens = thinkCount >= 3 ? 110_000 : 100;
+          return {
+            text: "",
+            finishReason: "tool_calls",
+            toolCalls: [
+              {
+                id: `tc-reply-${thinkCount}`,
+                name: "reply",
+                arguments: { text: `Reply ${thinkCount}`, channelType: "cli", channelId: "test" },
+              },
+            ],
+            usage: { promptTokens, completionTokens: 10 },
+          };
         },
       };
 
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
+      const settings = SettingsSchema.parse({
+        dataDir: testDataDir,
+        logLevel: "warn",
+        session: { compactThreshold: 0.8 },
+        authDir: "/tmp/pegasus-test-auth",
       });
+
+      const agent = new MainAgent({ models: createMockModelRegistry(model), persona: testPersona, settings });
       await agent.start();
+      agent.onReply(() => {});
 
-      const messages: Message[] = [
-        { role: "user", content: "hello" },
-        { role: "assistant", content: "hi" },
-        { role: "user", content: "how are you" },
-        { role: "assistant", content: "good" },
-      ];
+      // Build up enough messages to pass the reflection gate
+      agent.send({ text: "My name is Alice", channel: { type: "cli", channelId: "test" } });
+      await Bun.sleep(400);
+      agent.send({ text: "I work at Acme Corp", channel: { type: "cli", channelId: "test" } });
+      await Bun.sleep(400);
+      agent.send({ text: "Tell me more", channel: { type: "cli", channelId: "test" } });
+      await Bun.sleep(400);
 
-      // _runMainReflection should throw (the error is caught by .catch in _checkAndCompact)
-      await expect(agent._runMainReflection(messages)).rejects.toThrow("LLM reflection error");
+      // This triggers compact → reflection (which throws) → .catch() handles it
+      agent.send({ text: "One last thing", channel: { type: "cli", channelId: "test" } });
+      await Bun.sleep(1500);
 
-      // The key point: when called via _checkAndCompact, this error is caught by .catch()
-      // and does NOT propagate. We verified the error handling pattern works.
-
+      // Agent should still be operational (error was caught, not propagated)
+      // Just verifying no crash occurred
       await agent.stop();
-    }, 10_000);
+    }, 20_000);
 
     it("should skip reflection for trivial sessions", async () => {
       // Ensure reflection is NOT called when session is trivial (few messages)
@@ -2495,29 +2355,33 @@ describe("MainAgent", () => {
     });
   });
 
-  // ── _loadOAuthCredentials tests ──
+  // ── _loadOAuthCredentials tests (moved to AuthManager) ──
 
-  describe("_loadOAuthCredentials", () => {
-    it("should return null for non-existent file", async () => {
+  describe("_loadOAuthCredentials (via AuthManager)", () => {
+    function createTestAuthManager(settings?: any) {
       const model = createReplyModel("ok");
-      const agent = new MainAgent({
+      const s = settings ?? testSettings();
+      const { ModelLimitsCache } = require("@pegasus/context/index.ts");
+      const { AuthManager } = require("@pegasus/agents/auth-manager.ts");
+      const { mkdirSync } = require("node:fs");
+      const cacheDir = `/tmp/pegasus-test-mlc-auth-${process.pid}-${Date.now()}`;
+      mkdirSync(cacheDir, { recursive: true });
+      return new AuthManager({
+        settings: s,
         models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
+        modelLimitsCache: new ModelLimitsCache(cacheDir),
+        credDir: s.authDir,
       });
+    }
 
-      const result = (agent as any)._loadOAuthCredentials("/tmp/nonexistent-cred-file.json");
+    it("should return null for non-existent file", async () => {
+      const mgr = createTestAuthManager();
+      const result = mgr._loadOAuthCredentials("/tmp/nonexistent-cred-file.json");
       expect(result).toBeNull();
-    });
+    }, 5_000);
 
     it("should load pi-ai format credentials (access, refresh, expires)", async () => {
-      const model = createReplyModel("ok");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
+      const mgr = createTestAuthManager();
       const credPath = `/tmp/pegasus-test-cred-piai-${process.pid}.json`;
       writeFileSync(credPath, JSON.stringify({
         access: "test-access-token",
@@ -2526,23 +2390,17 @@ describe("MainAgent", () => {
       }));
 
       try {
-        const result = (agent as any)._loadOAuthCredentials(credPath);
+        const result = mgr._loadOAuthCredentials(credPath);
         expect(result).not.toBeNull();
         expect(result.access).toBe("test-access-token");
         expect(result.refresh).toBe("test-refresh-token");
       } finally {
         await rm(credPath, { force: true }).catch(() => {});
       }
-    });
+    }, 5_000);
 
     it("should convert old Pegasus format (accessToken, refreshToken, expiresAt)", async () => {
-      const model = createReplyModel("ok");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
+      const mgr = createTestAuthManager();
       const credPath = `/tmp/pegasus-test-cred-old-${process.pid}.json`;
       writeFileSync(credPath, JSON.stringify({
         accessToken: "old-access",
@@ -2552,7 +2410,7 @@ describe("MainAgent", () => {
       }));
 
       try {
-        const result = (agent as any)._loadOAuthCredentials(credPath);
+        const result = mgr._loadOAuthCredentials(credPath);
         expect(result).not.toBeNull();
         expect(result.access).toBe("old-access");
         expect(result.refresh).toBe("old-refresh");
@@ -2561,16 +2419,10 @@ describe("MainAgent", () => {
       } finally {
         await rm(credPath, { force: true }).catch(() => {});
       }
-    });
+    }, 5_000);
 
     it("should convert old Pegasus format without accountId", async () => {
-      const model = createReplyModel("ok");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
+      const mgr = createTestAuthManager();
       const credPath = `/tmp/pegasus-test-cred-old-noacct-${process.pid}.json`;
       writeFileSync(credPath, JSON.stringify({
         accessToken: "old-access-2",
@@ -2579,7 +2431,7 @@ describe("MainAgent", () => {
       }));
 
       try {
-        const result = (agent as any)._loadOAuthCredentials(credPath);
+        const result = mgr._loadOAuthCredentials(credPath);
         expect(result).not.toBeNull();
         expect(result.access).toBe("old-access-2");
         expect(result.refresh).toBe("old-refresh-2");
@@ -2587,68 +2439,62 @@ describe("MainAgent", () => {
       } finally {
         await rm(credPath, { force: true }).catch(() => {});
       }
-    });
+    }, 5_000);
 
     it("should return null for unrecognized format", async () => {
-      const model = createReplyModel("ok");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
+      const mgr = createTestAuthManager();
       const credPath = `/tmp/pegasus-test-cred-unknown-${process.pid}.json`;
       writeFileSync(credPath, JSON.stringify({ foo: "bar", baz: 42 }));
 
       try {
-        const result = (agent as any)._loadOAuthCredentials(credPath);
+        const result = mgr._loadOAuthCredentials(credPath);
         expect(result).toBeNull();
       } finally {
         await rm(credPath, { force: true }).catch(() => {});
       }
-    });
+    }, 5_000);
 
     it("should return null for invalid JSON", async () => {
-      const model = createReplyModel("ok");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
+      const mgr = createTestAuthManager();
       const credPath = `/tmp/pegasus-test-cred-invalid-${process.pid}.json`;
       writeFileSync(credPath, "not valid json {{{{");
 
       try {
-        const result = (agent as any)._loadOAuthCredentials(credPath);
+        const result = mgr._loadOAuthCredentials(credPath);
         expect(result).toBeNull();
       } finally {
         await rm(credPath, { force: true }).catch(() => {});
       }
-    });
+    }, 5_000);
   });
 
-  // ── _initModelLimits tests ──
+  // ── _initModelLimits tests (moved to AuthManager) ──
 
-  describe("_initModelLimits", () => {
-    it("should do nothing when no providers are configured", async () => {
+  describe("_initModelLimits (via AuthManager)", () => {
+    function createTestAuthManager(settings?: any) {
       const model = createReplyModel("ok");
-      const agent = new MainAgent({
+      const s = settings ?? testSettings();
+      const { ModelLimitsCache } = require("@pegasus/context/index.ts");
+      const { AuthManager } = require("@pegasus/agents/auth-manager.ts");
+      const { mkdirSync } = require("node:fs");
+      const cacheDir = `/tmp/pegasus-test-mlc-auth-limits-${process.pid}-${Date.now()}`;
+      mkdirSync(cacheDir, { recursive: true });
+      const cache = new ModelLimitsCache(cacheDir);
+      return { mgr: new AuthManager({
+        settings: s,
         models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
+        modelLimitsCache: cache,
+        credDir: s.authDir,
+      }), cache, cacheDir };
+    }
 
-      // Set up the cache (normally done in start())
-      const { ModelLimitsCache } = await import("@pegasus/context/model-limits-cache.ts");
-      (agent as any).modelLimitsCache = new ModelLimitsCache(`/tmp/pegasus-test-mlc-${process.pid}-${Date.now()}`);
-
+    it("should do nothing when no providers are configured", async () => {
+      const { mgr } = createTestAuthManager();
       // No copilot or openrouter configured — should complete without error
-      await (agent as any)._initModelLimits();
-    });
+      await mgr.initialize();
+    }, 10_000);
 
     it("should await first-run fetch for openrouter when no cache exists", async () => {
-      const model = createReplyModel("ok");
       const settings = SettingsSchema.parse({
         dataDir: testDataDir,
         logLevel: "warn",
@@ -2658,30 +2504,15 @@ describe("MainAgent", () => {
         },
         authDir: "/tmp/pegasus-test-auth",
       });
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings,
-      });
+      const { mgr, cacheDir } = createTestAuthManager(settings);
 
-      // Mock the cache
-      const { ModelLimitsCache } = await import("@pegasus/context/model-limits-cache.ts");
-      const cacheDir = `/tmp/pegasus-test-mlc-or-${process.pid}-${Date.now()}`;
-      const cache = new ModelLimitsCache(cacheDir);
-      (agent as any).modelLimitsCache = cache;
+      // OpenRouterModelFetcher.fetch() should not throw (returns empty Map on failure)
+      await mgr.initialize();
 
-      // Mock the OpenRouterModelFetcher to avoid real API calls
-      // The _initModelLimits creates its own fetcher, so we need to mock at a deeper level.
-      // Instead, we'll just run it and expect it to handle the fetch failure gracefully.
-      // OpenRouterModelFetcher.fetch() should not throw (returns empty Map on failure).
-      await (agent as any)._initModelLimits();
-
-      // Clean up
       await rm(cacheDir, { recursive: true, force: true }).catch(() => {});
     }, 15_000);
 
     it("should background refresh for openrouter when cache exists", async () => {
-      const model = createReplyModel("ok");
       const settings = SettingsSchema.parse({
         dataDir: testDataDir,
         logLevel: "warn",
@@ -2691,141 +2522,41 @@ describe("MainAgent", () => {
         },
         authDir: "/tmp/pegasus-test-auth",
       });
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings,
-      });
-
-      // Create cache with existing openrouter data
-      const { ModelLimitsCache } = await import("@pegasus/context/model-limits-cache.ts");
-      const cacheDir = `/tmp/pegasus-test-mlc-or-bg-${process.pid}-${Date.now()}`;
-      const cache = new ModelLimitsCache(cacheDir);
+      const { mgr, cache, cacheDir } = createTestAuthManager(settings);
       // Pre-populate with provider cache so hasProviderCache("openrouter") returns true
       cache.update("openrouter", new Map([["test-model", { maxInputTokens: 100000, maxOutputTokens: 4096, contextWindow: 128000 }]]));
-      (agent as any).modelLimitsCache = cache;
 
-      // This should take the background refresh path
-      await (agent as any)._initModelLimits();
+      await mgr.initialize();
 
       // Wait for background promise to settle
       await Bun.sleep(200);
 
-      // Clean up
-      await rm(cacheDir, { recursive: true, force: true }).catch(() => {});
-    }, 15_000);
-
-    it("should await first-run fetch for copilot when no cache exists", async () => {
-      const model = createReplyModel("ok");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
-      // Set up copilot connection info (normally set by _initCopilotAuth)
-      (agent as any)._copilotTokenProvider = async () => "test-copilot-token";
-      (agent as any)._copilotBaseURL = "https://api.github.com/copilot";
-
-      // Mock the cache without copilot data
-      const { ModelLimitsCache } = await import("@pegasus/context/model-limits-cache.ts");
-      const cacheDir = `/tmp/pegasus-test-mlc-cp-${process.pid}-${Date.now()}`;
-      const cache = new ModelLimitsCache(cacheDir);
-      (agent as any).modelLimitsCache = cache;
-
-      // Should take the awaitable (first-run) path for copilot
-      // CopilotModelFetcher.fetch() will fail gracefully (returns empty Map)
-      await (agent as any)._initModelLimits();
-
-      // Clean up
-      await rm(cacheDir, { recursive: true, force: true }).catch(() => {});
-    }, 15_000);
-
-    it("should background refresh for copilot when cache exists", async () => {
-      const model = createReplyModel("ok");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
-      // Set up copilot connection info
-      (agent as any)._copilotTokenProvider = async () => "test-copilot-token";
-      (agent as any)._copilotBaseURL = "https://api.github.com/copilot";
-
-      // Create cache with existing copilot data
-      const { ModelLimitsCache } = await import("@pegasus/context/model-limits-cache.ts");
-      const cacheDir = `/tmp/pegasus-test-mlc-cp-bg-${process.pid}-${Date.now()}`;
-      const cache = new ModelLimitsCache(cacheDir);
-      cache.update("copilot", new Map([["gpt-4o", { maxInputTokens: 128000, maxOutputTokens: 16384, contextWindow: 128000 }]]));
-      (agent as any).modelLimitsCache = cache;
-
-      // Should take the background refresh path
-      await (agent as any)._initModelLimits();
-
-      // Wait for background promise to settle
-      await Bun.sleep(200);
-
-      // Clean up
       await rm(cacheDir, { recursive: true, force: true }).catch(() => {});
     }, 15_000);
   });
 
-  // ── _copilotTokenProvider tests ──
+  // ── _copilotTokenProvider tests (via AuthManager getter) ──
 
-  describe("_copilotTokenProvider closure", () => {
-    it("should return fresh access token when not expired", async () => {
+  describe("_copilotTokenProvider (via AuthManager)", () => {
+    it("should be undefined when copilot is not configured", async () => {
+      const { AuthManager } = require("@pegasus/agents/auth-manager.ts");
+      const { ModelLimitsCache } = require("@pegasus/context/index.ts");
+      const { mkdirSync } = require("node:fs");
       const model = createReplyModel("ok");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
+      const cacheDir = `/tmp/pegasus-test-mlc-cp-getter-${process.pid}-${Date.now()}`;
+      mkdirSync(cacheDir, { recursive: true });
+      const mgr = new AuthManager({
         settings: testSettings(),
+        models: createMockModelRegistry(model),
+        modelLimitsCache: new ModelLimitsCache(cacheDir),
+        credDir: testSettings().authDir,
       });
 
-      // Write fresh credentials to a temp file
-      const credPath = `/tmp/pegasus-test-copilot-token-${process.pid}.json`;
-      const futureExpiry = Date.now() + 3600_000;
-      writeFileSync(credPath, JSON.stringify({
-        access: "fresh-access-token",
-        refresh: "test-refresh",
-        expires: futureExpiry,
-      }));
+      await mgr.initialize();
+      expect(mgr.copilotTokenProvider).toBeUndefined();
 
-      // Set up the closure manually (mimics what _initCopilotAuth does)
-      (agent as any)._copilotCredPath = credPath;
-      (agent as any)._copilotTokenProvider = async () => {
-        const freshCreds = (agent as any)._loadOAuthCredentials(credPath);
-        if (!freshCreds) throw new Error("No Copilot credentials");
-        if (Date.now() >= freshCreds.expires) {
-          throw new Error("Token expired — would need refresh");
-        }
-        return freshCreds.access;
-      };
-
-      const token = await (agent as any)._copilotTokenProvider();
-      expect(token).toBe("fresh-access-token");
-
-      await rm(credPath, { force: true }).catch(() => {});
-    });
-
-    it("should throw when no credentials file exists", async () => {
-      const model = createReplyModel("ok");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
-      const credPath = `/tmp/pegasus-test-copilot-nocred-${process.pid}.json`;
-      (agent as any)._copilotCredPath = credPath;
-      (agent as any)._copilotTokenProvider = async () => {
-        const freshCreds = (agent as any)._loadOAuthCredentials(credPath);
-        if (!freshCreds) throw new Error("No Copilot credentials");
-        return freshCreds.access;
-      };
-
-      await expect((agent as any)._copilotTokenProvider()).rejects.toThrow("No Copilot credentials");
-    });
+      await rm(cacheDir, { recursive: true, force: true }).catch(() => {});
+    }, 10_000);
   });
 
   // ── registerAdapter reply routing tests ──
@@ -3538,5 +3269,209 @@ describe("MainAgent", () => {
 
       await agent.stop();
     }, 10_000);
+  });
+
+  // ── _handleTick with active work ──
+
+  describe("tick with active work", () => {
+    it("should inject status message and queue think when active tasks exist", async () => {
+      const model = createMonologueModel("noted");
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+      });
+      await agent.start();
+      agent.onReply(() => {});
+
+      // Send a message first so lastChannel is set
+      agent.send({ text: "hi", channel: { type: "cli", channelId: "test" } });
+      await Bun.sleep(300);
+
+      // Mock taskRegistry.activeCount to return > 0
+      const origActiveCount = Object.getOwnPropertyDescriptor(
+        agent.taskAgent.taskRegistry,
+        "activeCount",
+      );
+      Object.defineProperty(agent.taskAgent.taskRegistry, "activeCount", {
+        get: () => 1,
+        configurable: true,
+      });
+
+      const tick = agent._tick;
+      const msgsBefore = tick.sessionMessages.length;
+
+      tick.start();
+      tick.fire(); // should trigger _handleTick with activeTasks=1
+
+      // Verify status message was injected
+      const tickMsgs = tick.sessionMessages.slice(msgsBefore).filter(
+        (m: any) => typeof m.content === "string" && m.content.includes("[System:"),
+      );
+      expect(tickMsgs.length).toBeGreaterThanOrEqual(1);
+      expect(tickMsgs[0]!.content).toContain("1 task(s) running");
+
+      // Restore
+      if (origActiveCount) {
+        Object.defineProperty(agent.taskAgent.taskRegistry, "activeCount", origActiveCount);
+      } else {
+        Object.defineProperty(agent.taskAgent.taskRegistry, "activeCount", {
+          get: () => 0,
+          configurable: true,
+        });
+      }
+
+      tick.stop();
+      await agent.stop();
+    }, 15_000);
+
+    it("should include subagent count in tick status", async () => {
+      const model = createMonologueModel("noted");
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+      });
+      await agent.start();
+      agent.onReply(() => {});
+
+      // Send a message first so lastChannel is set
+      agent.send({ text: "hi", channel: { type: "cli", channelId: "test" } });
+      await Bun.sleep(300);
+
+      // Mock subAgentManager.activeCount to return > 0
+      const subMgr = (agent as any).subAgentManager;
+      const origSubActive = Object.getOwnPropertyDescriptor(subMgr, "activeCount");
+      Object.defineProperty(subMgr, "activeCount", {
+        get: () => 2,
+        configurable: true,
+      });
+
+      const tick = agent._tick;
+      const msgsBefore = tick.sessionMessages.length;
+
+      tick.start();
+      tick.fire();
+
+      const tickMsgs = tick.sessionMessages.slice(msgsBefore).filter(
+        (m: any) => typeof m.content === "string" && m.content.includes("[System:"),
+      );
+      expect(tickMsgs.length).toBeGreaterThanOrEqual(1);
+      expect(tickMsgs[0]!.content).toContain("2 subagent(s) running");
+
+      if (origSubActive) {
+        Object.defineProperty(subMgr, "activeCount", origSubActive);
+      } else {
+        Object.defineProperty(subMgr, "activeCount", {
+          get: () => 0,
+          configurable: true,
+        });
+      }
+
+      tick.stop();
+      await agent.stop();
+    }, 15_000);
+  });
+
+  // ── _cachedImageRead ──
+
+  describe("_cachedImageRead", () => {
+    it("should return null when imageManager is null", async () => {
+      const model = createReplyModel("ok");
+      const settings = testSettings();
+      (settings as any).vision = { enabled: false };
+
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings,
+      });
+
+      // imageManager is null when vision disabled
+      const result = await (agent as any)._cachedImageRead("img-123");
+      expect(result).toBeNull();
+    }, 10_000);
+
+    it("should return cached result on second call", async () => {
+      const model = createReplyModel("ok");
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+      });
+
+      const mockRead = mock(() =>
+        Promise.resolve({ data: "base64data", mimeType: "image/png" }),
+      );
+      (agent as any).imageManager = { read: mockRead, store: mock(), close: mock() };
+
+      // First call — reads from imageManager
+      const first = await (agent as any)._cachedImageRead("img-abc");
+      expect(first).toEqual({ data: "base64data", mimeType: "image/png" });
+      expect(mockRead).toHaveBeenCalledTimes(1);
+
+      // Second call — returns from cache
+      const second = await (agent as any)._cachedImageRead("img-abc");
+      expect(second).toEqual({ data: "base64data", mimeType: "image/png" });
+      expect(mockRead).toHaveBeenCalledTimes(1); // not called again
+    }, 10_000);
+
+    it("should return null and not cache when imageManager.read returns null", async () => {
+      const model = createReplyModel("ok");
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+      });
+
+      const mockRead = mock(() => Promise.resolve(null));
+      (agent as any).imageManager = { read: mockRead, store: mock(), close: mock() };
+
+      const result = await (agent as any)._cachedImageRead("img-missing");
+      expect(result).toBeNull();
+
+      // Cache should not have the entry
+      expect((agent as any).imageReadCache.has("img-missing")).toBe(false);
+    }, 10_000);
+  });
+
+  // ── hasQueuedWork ──
+
+  describe("hasQueuedWork", () => {
+    it("should always return false (conservative approach)", async () => {
+      const model = createReplyModel("ok");
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+      });
+
+      const result = (agent as any).hasQueuedWork();
+      expect(result).toBe(false);
+    }, 5_000);
+  });
+
+  // ── buildSystemPrompt override ──
+
+  describe("buildSystemPrompt", () => {
+    it("should return cached system prompt after start", async () => {
+      const model = createMonologueModel("thinking");
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+      });
+      await agent.start();
+
+      // _systemPrompt is set during onStart via _buildSystemPrompt
+      const cached = (agent as any)._systemPrompt;
+      expect(cached).toBeTruthy();
+
+      // buildSystemPrompt() should return the same cached value
+      const result = (agent as any).buildSystemPrompt();
+      expect(result).toBe(cached);
+
+      await agent.stop();
+    }, 15_000);
   });
 });

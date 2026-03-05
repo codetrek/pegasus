@@ -7,24 +7,16 @@ import { mkdir, rm } from "node:fs/promises";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 
-// ── Credential loading tests (via MainAgent private method) ──
+// ── Credential loading tests (via AuthManager) ──
 
-import { MainAgent } from "@pegasus/agents/main-agent.ts";
+import { AuthManager } from "@pegasus/agents/auth-manager.ts";
 import { ModelRegistry } from "@pegasus/infra/model-registry.ts";
 import type { LanguageModel, GenerateTextResult } from "@pegasus/infra/llm-types.ts";
-import type { Persona } from "@pegasus/identity/persona.ts";
 import type { LLMConfig } from "@pegasus/infra/config-schema.ts";
 import { SettingsSchema } from "@pegasus/infra/config.ts";
+import { ModelLimitsCache } from "@pegasus/context/index.ts";
 
 const testDir = "/tmp/pegasus-test-oauth";
-
-const testPersona: Persona = {
-  name: "TestBot",
-  role: "test assistant",
-  personality: ["helpful"],
-  style: "concise",
-  values: ["accuracy"],
-};
 
 function createMockModel(): LanguageModel {
   return {
@@ -71,7 +63,7 @@ describe("OAuth credential loading", () => {
     await rm(testDir, { recursive: true, force: true });
   });
 
-  function createAgent() {
+  function createAuthManager() {
     const model = createMockModel();
     const models = createMockModelRegistry(model);
     const settings = SettingsSchema.parse({
@@ -82,7 +74,11 @@ describe("OAuth credential loading", () => {
       dataDir,
       authDir,
     });
-    return new MainAgent({ models, persona: testPersona, settings });
+    const cacheDir = path.join(dataDir, "model-limits");
+    const { mkdirSync } = require("node:fs");
+    mkdirSync(cacheDir, { recursive: true });
+    const modelLimitsCache = new ModelLimitsCache(cacheDir);
+    return new AuthManager({ settings, models, modelLimitsCache, credDir: authDir });
   }
 
   it("loads new pi-ai format credentials", () => {
@@ -93,14 +89,14 @@ describe("OAuth credential loading", () => {
       expires: 9999999999999,
     }));
 
-    const agent = createAgent();
-    const result = (agent as any)._loadOAuthCredentials(credPath);
+    const mgr = createAuthManager();
+    const result = mgr._loadOAuthCredentials(credPath);
 
     expect(result).not.toBeNull();
-    expect(result.access).toBe("new-access-token");
-    expect(result.refresh).toBe("new-refresh-token");
-    expect(result.expires).toBe(9999999999999);
-  });
+    expect(result!.access).toBe("new-access-token");
+    expect(result!.refresh).toBe("new-refresh-token");
+    expect(result!.expires).toBe(9999999999999);
+  }, 5_000);
 
   it("loads and converts old Pegasus format credentials", () => {
     const credPath = path.join(authDir, "test-old.json");
@@ -111,15 +107,15 @@ describe("OAuth credential loading", () => {
       accountId: "acct_12345",
     }));
 
-    const agent = createAgent();
-    const result = (agent as any)._loadOAuthCredentials(credPath);
+    const mgr = createAuthManager();
+    const result = mgr._loadOAuthCredentials(credPath);
 
     expect(result).not.toBeNull();
-    expect(result.access).toBe("old-access-token");
-    expect(result.refresh).toBe("old-refresh-token");
-    expect(result.expires).toBe(1234567890000);
-    expect(result.accountId).toBe("acct_12345");
-  });
+    expect(result!.access).toBe("old-access-token");
+    expect(result!.refresh).toBe("old-refresh-token");
+    expect(result!.expires).toBe(1234567890000);
+    expect((result as any).accountId).toBe("acct_12345");
+  }, 5_000);
 
   it("converts old format without accountId", () => {
     const credPath = path.join(authDir, "test-old-no-acct.json");
@@ -129,30 +125,30 @@ describe("OAuth credential loading", () => {
       expiresAt: 1234567890000,
     }));
 
-    const agent = createAgent();
-    const result = (agent as any)._loadOAuthCredentials(credPath);
+    const mgr = createAuthManager();
+    const result = mgr._loadOAuthCredentials(credPath);
 
     expect(result).not.toBeNull();
-    expect(result.access).toBe("old-access-token");
-    expect(result.refresh).toBe("old-refresh-token");
-    expect(result.expires).toBe(1234567890000);
-    expect(result.accountId).toBeUndefined();
-  });
+    expect(result!.access).toBe("old-access-token");
+    expect(result!.refresh).toBe("old-refresh-token");
+    expect(result!.expires).toBe(1234567890000);
+    expect((result as any).accountId).toBeUndefined();
+  }, 5_000);
 
   it("returns null for missing file", () => {
-    const agent = createAgent();
-    const result = (agent as any)._loadOAuthCredentials("/tmp/nonexistent.json");
+    const mgr = createAuthManager();
+    const result = mgr._loadOAuthCredentials("/tmp/nonexistent.json");
     expect(result).toBeNull();
-  });
+  }, 5_000);
 
   it("returns null for invalid JSON", () => {
     const credPath = path.join(authDir, "test-invalid.json");
     writeFileSync(credPath, "not json");
 
-    const agent = createAgent();
-    const result = (agent as any)._loadOAuthCredentials(credPath);
+    const mgr = createAuthManager();
+    const result = mgr._loadOAuthCredentials(credPath);
     expect(result).toBeNull();
-  });
+  }, 5_000);
 
   it("returns null for unrecognized format", () => {
     const credPath = path.join(authDir, "test-unknown.json");
@@ -161,10 +157,10 @@ describe("OAuth credential loading", () => {
       secret: "else",
     }));
 
-    const agent = createAgent();
-    const result = (agent as any)._loadOAuthCredentials(credPath);
+    const mgr = createAuthManager();
+    const result = mgr._loadOAuthCredentials(credPath);
     expect(result).toBeNull();
-  });
+  }, 5_000);
 
   it("prefers new format when both fields are present", () => {
     const credPath = path.join(authDir, "test-both.json");
@@ -177,19 +173,19 @@ describe("OAuth credential loading", () => {
       expiresAt: 1111111111111,
     }));
 
-    const agent = createAgent();
-    const result = (agent as any)._loadOAuthCredentials(credPath);
+    const mgr = createAuthManager();
+    const result = mgr._loadOAuthCredentials(credPath);
 
     expect(result).not.toBeNull();
     // New format takes precedence
-    expect(result.access).toBe("new-token");
-    expect(result.refresh).toBe("new-refresh");
-    expect(result.expires).toBe(9999999999999);
-  });
+    expect(result!.access).toBe("new-token");
+    expect(result!.refresh).toBe("new-refresh");
+    expect(result!.expires).toBe(9999999999999);
+  }, 5_000);
 
   it("saves credentials in pi-ai format", () => {
     const credPath = path.join(authDir, "test-save.json");
-    const agent = createAgent();
+    const mgr = createAuthManager();
 
     const creds = {
       access: "saved-access",
@@ -197,16 +193,16 @@ describe("OAuth credential loading", () => {
       expires: 8888888888888,
       accountId: "acct_saved",
     };
-    (agent as any)._saveOAuthCredentials(credPath, creds);
+    mgr._saveOAuthCredentials(credPath, creds as any);
 
     // Read back and verify it's in new format
-    const loaded = (agent as any)._loadOAuthCredentials(credPath);
+    const loaded = mgr._loadOAuthCredentials(credPath);
     expect(loaded).not.toBeNull();
-    expect(loaded.access).toBe("saved-access");
-    expect(loaded.refresh).toBe("saved-refresh");
-    expect(loaded.expires).toBe(8888888888888);
-    expect(loaded.accountId).toBe("acct_saved");
-  });
+    expect(loaded!.access).toBe("saved-access");
+    expect(loaded!.refresh).toBe("saved-refresh");
+    expect(loaded!.expires).toBe(8888888888888);
+    expect((loaded as any).accountId).toBe("acct_saved");
+  }, 5_000);
 });
 
 // ── Device code login tests ──
