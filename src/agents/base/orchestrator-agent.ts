@@ -87,6 +87,9 @@ export class OrchestratorAgent extends BaseAgent {
   /** Holds the last orchestration result for backward-compat run() to resolve. */
   private _lastResult: OrchestratorResult | null = null;
 
+  /** Guard: prevent duplicate event handler registration. */
+  private _subscribed = false;
+
   constructor(deps: OrchestratorAgentDeps) {
     super(deps);
     this.taskDescription = deps.taskDescription;
@@ -330,6 +333,9 @@ export class OrchestratorAgent extends BaseAgent {
   // ═══════════════════════════════════════════════════
 
   protected override subscribeEvents(): void {
+    if (this._subscribed) return;
+    this._subscribed = true;
+
     // TASK_CREATED: start orchestration when our task is created
     this.eventBus.subscribe(EventType.TASK_CREATED, async (event: Event) => {
       if (event.taskId === this.agentId || event.source === this.agentId) {
