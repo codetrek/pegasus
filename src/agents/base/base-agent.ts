@@ -547,8 +547,8 @@ export abstract class BaseAgent {
 
   /**
    * Check token budget and trigger compaction if messages exceed threshold.
-   * Subclasses override for custom budget computation (e.g. MainAgent uses
-   * ModelRegistry for dynamic model resolution and configurable thresholds).
+   * Uses computeBudgetOptions() for budget parameters — subclasses override
+   * that hook for custom model/threshold, not this method.
    */
   protected async compactIfNeeded(taskId: string): Promise<void> {
     const state = this.taskStates.get(taskId);
@@ -561,23 +561,32 @@ export abstract class BaseAgent {
       estimatedTokens = state.lastPromptTokens;
     } else {
       const allText = state.messages.map((m) => {
-        let text = m.content;
+        let text = typeof m.content === "string" ? m.content : String(m.content);
         if (m.toolCalls) text += JSON.stringify(m.toolCalls);
         return text;
       }).join("\n");
       estimatedTokens = await this.tokenCounter.count(allText);
     }
 
-    const budget = computeTokenBudget({
-      modelId: this.model.modelId,
-      configContextWindow: this.contextWindow,
-      compactThreshold: TASK_COMPACT_THRESHOLD,
-      modelLimitsCache: this.modelLimitsCache,
-    });
+    const budget = computeTokenBudget(this.computeBudgetOptions());
 
     if (estimatedTokens < budget.compactTrigger) return;
 
     await this._compactState(taskId);
+  }
+
+  /**
+   * Compute budget options for compaction threshold.
+   * Subclasses override to use ModelRegistry for dynamic model resolution,
+   * provider-aware caching, and configurable thresholds.
+   */
+  protected computeBudgetOptions(): import("../../context/index.ts").BudgetOptions {
+    return {
+      modelId: this.model.modelId,
+      configContextWindow: this.contextWindow,
+      compactThreshold: TASK_COMPACT_THRESHOLD,
+      modelLimitsCache: this.modelLimitsCache,
+    };
   }
 
   /**
@@ -623,10 +632,13 @@ export abstract class BaseAgent {
   /**
    * Compact the message history for a task: summarize, archive, and reload.
    * Falls back to mechanical summary if LLM summarization fails.
+   * After compaction, calls onCompacted() hook for post-compact actions.
    */
-  private async _compactState(taskId: string): Promise<void> {
+  protected async _compactState(taskId: string): Promise<void> {
     const state = this.taskStates.get(taskId);
     if (!state) return;
+
+    const preCompactMessages = [...state.messages];
 
     let summary: string;
     try {
@@ -651,7 +663,18 @@ export abstract class BaseAgent {
       { taskId, agentId: this.agentId },
       "state_compacted",
     );
+
+    await this.onCompacted(preCompactMessages);
   }
+
+  /**
+   * Hook called after compaction completes.
+   * Subclasses override for post-compact actions: memory re-injection,
+   * cache clearing, reflection, etc.
+   *
+   * @param preCompactMessages - snapshot of messages before compaction
+   */
+  protected async onCompacted(_preCompactMessages: Message[]): Promise<void> {}
 }
 
 // ── Private Helpers ──────────────────────────────────

@@ -22,7 +22,6 @@ import type { Persona } from "../identity/persona.ts";
 import { buildSystemPrompt, formatSize } from "../prompts/index.ts";
 import type { Settings } from "../infra/config.ts";
 import { getSettings } from "../infra/config.ts";
-import { errorToString } from "../infra/errors.ts";
 import { getLogger } from "../infra/logger.ts";
 import { ToolRegistry } from "../tools/registry.ts";
 import type { OutboundMessage, StoreImageFn } from "../channels/types.ts";
@@ -31,7 +30,7 @@ import { hydrateImages } from "../media/image-prune.ts";
 import { extToMime } from "../media/image-helpers.ts";
 import { TaskRunner } from "./task-runner.ts";
 import type { TaskNotification } from "./task-runner.ts";
-import { computeTokenBudget, summarizeMessages, calculateMaxToolResultChars, isContextOverflowError, MAX_OVERFLOW_COMPACT_RETRIES, ModelLimitsCache } from "../context/index.ts";
+import { computeTokenBudget, calculateMaxToolResultChars, ModelLimitsCache } from "../context/index.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
@@ -46,7 +45,6 @@ import { TickManager } from "./tick-manager.ts";
 import { AuthManager } from "./auth-manager.ts";
 import { ReflectionOrchestrator } from "./reflection-orchestrator.ts";
 import { ConversationAgent, type QueueItem } from "./base/conversation-agent.ts";
-import { mechanicalSummary } from "./base/base-agent.ts";
 import { EventBus } from "../events/bus.ts";
 
 // Main Agent's curated tool set
@@ -96,7 +94,6 @@ export class MainAgent extends ConversationAgent {
   private models: ModelRegistry;
   private settings: Settings;
   private taskRunner!: TaskRunner;
-  private _mainOverflowRetryCount = 0;
   private skillRegistry!: SkillRegistry;
   private skillDirs: Array<{ dir: string; source: "builtin" | "user" }> = [];
   private aiTaskTypeRegistry!: AITaskTypeRegistry;
@@ -275,36 +272,16 @@ export class MainAgent extends ConversationAgent {
   }
 
   // ═══════════════════════════════════════════════════
-  // Compaction override — MainAgent uses ModelRegistry
+  // Compaction — custom budget + post-compact hooks
   // ═══════════════════════════════════════════════════
 
   /**
-   * Custom compaction check using ModelRegistry for dynamic model resolution,
+   * Budget options using ModelRegistry for dynamic model resolution,
    * provider-aware caching, and configurable threshold.
-   *
-   * Image hydration is handled by BaseAgent.hydrateImagesForLLM() via the
-   * imageHydrator injected through BaseAgentDeps — no override needed.
    */
-  protected override async compactIfNeeded(taskId: string): Promise<void> {
-    const state = this.taskStates.get(taskId);
-    if (!state || state.messages.length < 8) return;
-
-    // Use actual token count from last API response when available;
-    // fall back to token counter for the first call.
-    let estimatedTokens: number;
-    if (state.lastPromptTokens > 0) {
-      estimatedTokens = state.lastPromptTokens;
-    } else {
-      const allText = state.messages.map((m) => {
-        let text = typeof m.content === "string" ? m.content : String(m.content);
-        if (m.toolCalls) text += JSON.stringify(m.toolCalls);
-        return text;
-      }).join("\n");
-      estimatedTokens = await this.tokenCounter.count(allText);
-    }
-
+  protected override computeBudgetOptions(): import("../context/index.ts").BudgetOptions {
     const defaultModel = this.models.getDefault();
-    const budget = computeTokenBudget({
+    return {
       modelId: defaultModel.modelId,
       provider: defaultModel.provider,
       configContextWindow:
@@ -312,76 +289,16 @@ export class MainAgent extends ConversationAgent {
         this.settings.llm.contextWindow,
       compactThreshold: this.settings.session?.compactThreshold,
       modelLimitsCache: this.modelLimitsCache,
-    });
-
-    if (estimatedTokens < budget.compactTrigger) return;
-
-    await this._compactAndReloadSession();
+    };
   }
 
   /**
-   * Reset overflow retry counter on successful LLM call.
-   * BaseAgent resets its own counter, but MainAgent has a separate one
-   * for its custom compaction logic.
+   * Post-compact hook: re-inject memory index, clear image cache,
+   * and fire-and-forget reflection on archived session.
    */
-  protected override async onLLMUsage(_result: import("../infra/llm-types.ts").GenerateTextResult): Promise<void> {
-    this._mainOverflowRetryCount = 0;
-  }
-
-  /**
-   * Overflow error handler.
-   *
-   * Called by BaseAgent.processStep when generateText() fails with a context
-   * overflow. Forces compaction and returns true if the caller should retry.
-   */
-  protected override async onLLMError(_taskId: string, error: unknown): Promise<boolean> {
-    if (!isContextOverflowError(error)) return false;
-    if (this._mainOverflowRetryCount >= MAX_OVERFLOW_COMPACT_RETRIES) return false;
-
-    this._mainOverflowRetryCount++;
-    logger.warn(
-      { error: errorToString(error), attempt: this._mainOverflowRetryCount },
-      "context_overflow_detected_forcing_compact",
-    );
-
-    await this._compactAndReloadSession();
-    return true;
-  }
-
-  /**
-   * Compact session messages, reload from store, and re-inject memory.
-   * Shared by beforeLLMCall (proactive) and onLLMError (reactive).
-   */
-  private async _compactAndReloadSession(): Promise<void> {
-    const preCompactMessages = [...this.sessionMessages];
-
-    // Generate summary via LLM with mechanical fallback
-    let summary: string;
-    try {
-      summary = await summarizeMessages({
-        messages: this.sessionMessages,
-        model: this.models.getForTier("fast"),
-        configContextWindow: this.models.getContextWindowForTier("fast"),
-        modelLimitsCache: this.modelLimitsCache,
-      });
-    } catch (err) {
-      logger.warn(
-        { error: errorToString(err) },
-        "session_summary_failed_using_mechanical",
-      );
-      summary = mechanicalSummary(this.sessionMessages);
-    }
-
-    await this.sessionStore.compact(summary);
-    // Reload session from store — mutate in-place to preserve array reference
-    // (task state's messages may reference this.sessionMessages via _think).
-    const reloaded = await this.sessionStore.load();
-    this.sessionMessages.length = 0;
-    this.sessionMessages.push(...reloaded);
+  protected override async onCompacted(preCompactMessages: Message[]): Promise<void> {
     await this._injectMemoryIndex();
     this.imageReadCache.clear();
-
-    logger.info({ agentId: this.agentId }, "session_compacted");
 
     // Fire-and-forget reflection on the archived session
     if (this.reflectionOrchestrator.shouldReflect(preCompactMessages)) {
