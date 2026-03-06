@@ -7,7 +7,7 @@
 
 import { describe, test, expect, mock, beforeEach } from "bun:test";
 import { TaskRunner, type TaskRunnerDeps } from "../../../src/agents/task-runner.ts";
-import type { TaskNotification } from "../../../src/agents/agent.ts";
+import type { TaskNotification } from "../../../src/agents/task-runner.ts";
 import type { LanguageModel } from "../../../src/infra/llm-types.ts";
 import { AITaskTypeRegistry } from "../../../src/aitask-types/registry.ts";
 import { ExecutionAgent } from "../../../src/agents/base/execution-agent.ts";
