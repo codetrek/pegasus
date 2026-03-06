@@ -2223,6 +2223,165 @@ describe("MainAgent", () => {
       await agent.stop();
     }, 10_000);
 
+    it("should extract imageRefs from subagent notify metadata into session message", async () => {
+      let capturedMessages: Message[] = [];
+      const model: LanguageModel = {
+        provider: "test",
+        modelId: "test-model",
+        async generate(options: {
+          messages?: Message[];
+        }): Promise<GenerateTextResult> {
+          capturedMessages = options.messages ?? [];
+          return {
+            text: "thinking...",
+            finishReason: "stop",
+            usage: { promptTokens: 5, completionTokens: 0 },
+          };
+        },
+      };
+
+      const mockWA = createMockWorkerAdapter();
+      const projectAdapter = new ProjectAdapter(mockWA);
+
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+        _projectAdapter: projectAdapter,
+      });
+
+      await agent.start();
+
+      const replies: OutboundMessage[] = [];
+      agent.onReply((msg) => replies.push(msg));
+
+      // Simulate a SubAgent sending a notification with imageRefs in metadata
+      agent.send({
+        text: "Analysis complete with screenshots",
+        channel: { type: "subagent", channelId: "sa_img_test" },
+        metadata: {
+          imageRefs: [
+            { id: "img_abc123", mimeType: "image/png" },
+            { id: "img_def456", mimeType: "image/jpeg" },
+          ],
+        },
+      });
+
+      await Bun.sleep(50);
+
+      // The user message sent to the LLM should have images attached
+      const userMsgs = capturedMessages.filter((m: Message) => m.role === "user");
+      const lastUser = userMsgs[userMsgs.length - 1];
+      expect(lastUser).toBeDefined();
+      expect(lastUser!.images).toBeDefined();
+      expect(lastUser!.images).toHaveLength(2);
+      expect(lastUser!.images![0]).toEqual({ id: "img_abc123", mimeType: "image/png" });
+      expect(lastUser!.images![1]).toEqual({ id: "img_def456", mimeType: "image/jpeg" });
+
+      await agent.stop();
+    }, 10_000);
+
+    it("should not attach images when subagent message has no imageRefs", async () => {
+      let capturedMessages: Message[] = [];
+      const model: LanguageModel = {
+        provider: "test",
+        modelId: "test-model",
+        async generate(options: {
+          messages?: Message[];
+        }): Promise<GenerateTextResult> {
+          capturedMessages = options.messages ?? [];
+          return {
+            text: "thinking...",
+            finishReason: "stop",
+            usage: { promptTokens: 5, completionTokens: 0 },
+          };
+        },
+      };
+
+      const mockWA = createMockWorkerAdapter();
+      const projectAdapter = new ProjectAdapter(mockWA);
+
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+        _projectAdapter: projectAdapter,
+      });
+
+      await agent.start();
+
+      // Send a subagent message without imageRefs
+      agent.send({
+        text: "Analysis complete, no images",
+        channel: { type: "subagent", channelId: "sa_no_img" },
+      });
+
+      await Bun.sleep(50);
+
+      // The user message sent to the LLM should NOT have images
+      const userMsgs = capturedMessages.filter((m: Message) => m.role === "user");
+      const lastUser = userMsgs[userMsgs.length - 1];
+      expect(lastUser).toBeDefined();
+      expect(lastUser!.images).toBeUndefined();
+
+      await agent.stop();
+    }, 10_000);
+
+    it("should merge imageRefs with existing images on inbound message", async () => {
+      let capturedMessages: Message[] = [];
+      const model: LanguageModel = {
+        provider: "test",
+        modelId: "test-model",
+        async generate(options: {
+          messages?: Message[];
+        }): Promise<GenerateTextResult> {
+          capturedMessages = options.messages ?? [];
+          return {
+            text: "thinking...",
+            finishReason: "stop",
+            usage: { promptTokens: 5, completionTokens: 0 },
+          };
+        },
+      };
+
+      const mockWA = createMockWorkerAdapter();
+      const projectAdapter = new ProjectAdapter(mockWA);
+
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+        _projectAdapter: projectAdapter,
+      });
+
+      await agent.start();
+
+      // Send a message that already has images AND has imageRefs in metadata
+      agent.send({
+        text: "Analysis with both sources",
+        channel: { type: "subagent", channelId: "sa_merge" },
+        images: [{ id: "existing_img", mimeType: "image/webp" }],
+        metadata: {
+          imageRefs: [
+            { id: "ref_img", mimeType: "image/png" },
+          ],
+        },
+      });
+
+      await Bun.sleep(50);
+
+      // Should merge: existing images + imageRefs
+      const userMsgs = capturedMessages.filter((m: Message) => m.role === "user");
+      const lastUser = userMsgs[userMsgs.length - 1];
+      expect(lastUser).toBeDefined();
+      expect(lastUser!.images).toBeDefined();
+      expect(lastUser!.images).toHaveLength(2);
+      expect(lastUser!.images![0]).toEqual({ id: "existing_img", mimeType: "image/webp" });
+      expect(lastUser!.images![1]).toEqual({ id: "ref_img", mimeType: "image/png" });
+
+      await agent.stop();
+    }, 10_000);
+
     it("should stop active subagents on agent.stop()", async () => {
       let callCount = 0;
       const model: LanguageModel = {
@@ -2286,6 +2445,273 @@ describe("MainAgent", () => {
       // stopWorker should have been called for the subagent
       expect(mockWA.stopWorker).toHaveBeenCalled();
     }, 10_000);
+
+    it("should detect subagent crash via addOnWorkerClose callback (lines 440-454)", async () => {
+      let callCount = 0;
+      const model: LanguageModel = {
+        provider: "test",
+        modelId: "test-model",
+        async generate(): Promise<GenerateTextResult> {
+          callCount++;
+          if (callCount === 1) {
+            return {
+              text: "Spawning subagent.",
+              finishReason: "tool_calls",
+              toolCalls: [
+                {
+                  id: "tc-spawn-sa",
+                  name: "spawn_subagent",
+                  arguments: {
+                    description: "Crashable task",
+                    input: "do something that crashes",
+                  },
+                },
+              ],
+              usage: { promptTokens: 10, completionTokens: 10 },
+            };
+          }
+          return {
+            text: "",
+            finishReason: "stop",
+            usage: { promptTokens: 5, completionTokens: 0 },
+          };
+        },
+      };
+
+      // Capture the addOnWorkerClose callback so we can invoke it
+      let workerCloseCallback: ((channelType: string, channelId: string) => void) | null = null;
+      const mockWA = {
+        shutdownTimeoutMs: 30_000,
+        activeCount: 0,
+        startWorker: mock(() => {}),
+        stopWorker: mock(async () => {}),
+        stopAll: mock(async () => {}),
+        deliver: mock(() => true),
+        has: mock(() => false),
+        hasByKey: mock(() => false),
+        setModelRegistry: mock(() => {}),
+        setOnNotify: mock(() => {}),
+        setOnReply: mock(() => {}),
+        setOnWorkerClose: mock(() => {}),
+        addOnWorkerClose: mock((cb: (channelType: string, channelId: string) => void) => {
+          workerCloseCallback = cb;
+        }),
+      } as unknown as WorkerAdapter;
+
+      const projectAdapter = new ProjectAdapter(mockWA);
+
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+        _projectAdapter: projectAdapter,
+      });
+
+      await agent.start();
+      agent.onReply(() => {});
+
+      agent.send({
+        text: "start crashable task",
+        channel: { type: "cli", channelId: "test" },
+      });
+      await Bun.sleep(50);
+
+      // Verify subagent is active
+      const entries = agent.subAgents!.list("active");
+      expect(entries).toHaveLength(1);
+      const subagentId = entries[0]!.id;
+
+      // The addOnWorkerClose callback should have been captured
+      expect(workerCloseCallback).not.toBeNull();
+
+      // Invoke the callback simulating a Worker crash (close while still "active")
+      workerCloseCallback!("subagent", subagentId);
+
+      // Wait for async fail() to fire
+      await Bun.sleep(50);
+
+      // The subagent should now be marked as failed
+      const updatedEntry = agent.subAgents!.get(subagentId);
+      expect(updatedEntry).toBeDefined();
+      expect(updatedEntry!.status).toBe("failed");
+
+      await agent.stop();
+    }, 10_000);
+
+    it("should ignore worker close for non-subagent channels (line 441 branch)", async () => {
+      let workerCloseCallback: ((channelType: string, channelId: string) => void) | null = null;
+      const mockWA = {
+        shutdownTimeoutMs: 30_000,
+        activeCount: 0,
+        startWorker: mock(() => {}),
+        stopWorker: mock(async () => {}),
+        stopAll: mock(async () => {}),
+        deliver: mock(() => true),
+        has: mock(() => false),
+        hasByKey: mock(() => false),
+        setModelRegistry: mock(() => {}),
+        setOnNotify: mock(() => {}),
+        setOnReply: mock(() => {}),
+        setOnWorkerClose: mock(() => {}),
+        addOnWorkerClose: mock((cb: (channelType: string, channelId: string) => void) => {
+          workerCloseCallback = cb;
+        }),
+      } as unknown as WorkerAdapter;
+
+      const projectAdapter = new ProjectAdapter(mockWA);
+      const model = createReplyModel("ok");
+
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+        _projectAdapter: projectAdapter,
+      });
+
+      await agent.start();
+      agent.onReply(() => {});
+
+      // Invoke the callback with a non-subagent channel — should be a no-op
+      expect(workerCloseCallback).not.toBeNull();
+      workerCloseCallback!("project", "some-project");
+
+      // No crash, no errors
+      await agent.stop();
+    }, 10_000);
+
+    it("should ignore worker close when subagent is already done (line 443 branch)", async () => {
+      let callCount = 0;
+      const model: LanguageModel = {
+        provider: "test",
+        modelId: "test-model",
+        async generate(): Promise<GenerateTextResult> {
+          callCount++;
+          if (callCount === 1) {
+            return {
+              text: "Spawning subagent.",
+              finishReason: "tool_calls",
+              toolCalls: [
+                {
+                  id: "tc-spawn-sa",
+                  name: "spawn_subagent",
+                  arguments: {
+                    description: "Normal task",
+                    input: "do something",
+                  },
+                },
+              ],
+              usage: { promptTokens: 10, completionTokens: 10 },
+            };
+          }
+          return {
+            text: "",
+            finishReason: "stop",
+            usage: { promptTokens: 5, completionTokens: 0 },
+          };
+        },
+      };
+
+      let workerCloseCallback: ((channelType: string, channelId: string) => void) | null = null;
+      const mockWA = {
+        shutdownTimeoutMs: 30_000,
+        activeCount: 0,
+        startWorker: mock(() => {}),
+        stopWorker: mock(async () => {}),
+        stopAll: mock(async () => {}),
+        deliver: mock(() => true),
+        has: mock(() => false),
+        hasByKey: mock(() => false),
+        setModelRegistry: mock(() => {}),
+        setOnNotify: mock(() => {}),
+        setOnReply: mock(() => {}),
+        setOnWorkerClose: mock(() => {}),
+        addOnWorkerClose: mock((cb: (channelType: string, channelId: string) => void) => {
+          workerCloseCallback = cb;
+        }),
+      } as unknown as WorkerAdapter;
+
+      const projectAdapter = new ProjectAdapter(mockWA);
+
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+        _projectAdapter: projectAdapter,
+      });
+
+      await agent.start();
+      agent.onReply(() => {});
+
+      agent.send({
+        text: "start task",
+        channel: { type: "cli", channelId: "test" },
+      });
+      await Bun.sleep(50);
+
+      // Subagent should be active
+      const entries = agent.subAgents!.list("active");
+      expect(entries).toHaveLength(1);
+      const subagentId = entries[0]!.id;
+
+      // Mark it as done (simulating normal completion path)
+      agent.subAgents!.markDone(subagentId, "completed");
+      expect(agent.subAgents!.get(subagentId)!.status).toBe("completed");
+
+      // Now invoke the worker close callback — should NOT call fail() because already done
+      workerCloseCallback!("subagent", subagentId);
+      await Bun.sleep(50);
+
+      // Status should still be completed (not failed)
+      expect(agent.subAgents!.get(subagentId)!.status).toBe("completed");
+
+      await agent.stop();
+    }, 10_000);
+  });
+
+  // ── _getStoreImageCallback tests ──
+  describe("_getStoreImageCallback (lines 1535-1541)", () => {
+    it("should return undefined when imageManager is null (vision disabled)", () => {
+      const model = createReplyModel("ok");
+      const settings = testSettings();
+      (settings as any).vision = { enabled: false };
+
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings,
+      });
+
+      // Access private method
+      const cb = (agent as any)._getStoreImageCallback();
+      expect(cb).toBeUndefined();
+    });
+
+    it("should return a function that calls imageManager.store (lines 1538-1539)", async () => {
+      const model = createReplyModel("ok");
+      const settings = testSettings();
+      // Vision enabled by default
+
+      const agent = new MainAgent({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings,
+      });
+
+      // Mock the imageManager to avoid filesystem operations
+      const mockStore = mock(() =>
+        Promise.resolve({ id: "img-xyz789", mimeType: "image/jpeg", path: "/fake/path.jpg" }),
+      );
+      (agent as any).imageManager = { store: mockStore, read: mock(), close: mock() };
+
+      const cb = (agent as any)._getStoreImageCallback();
+      expect(cb).toBeDefined();
+      expect(typeof cb).toBe("function");
+
+      // Invoke the callback — exercises lines 1538-1539
+      const result = await cb(Buffer.from("fake-image"), "image/jpeg", "test-source");
+      expect(result).toEqual({ id: "img-xyz789", mimeType: "image/jpeg" });
+      expect(mockStore).toHaveBeenCalledTimes(1);
+    });
   });
 
   // ── Vision support tests ──

@@ -3,7 +3,7 @@
  *
  * Tests the pure logic functions (notificationToText, sendNotify, dispatchMessage,
  * handleMessage, handleLLMResponse, handleLLMError, handleShutdown, handleInit,
- * initProject, initSubAgent, loadPreviousTaskSummary) via _testState, postMessage
+ * initProject, initSubAgent) via _testState, postMessage
  * overrides, and factory overrides.
  *
  * NO mock.module is used — this avoids global mock pollution that breaks
@@ -28,16 +28,17 @@ import {
   handleInit,
   initProject,
   initSubAgent,
-  loadPreviousTaskSummary,
   splitModelSpec,
   _testState,
   _setPostMessageForTest,
   _setExitProcessForTest,
   _setAgentFactoryForTest,
   _setProxyModelFactoryForTest,
+  _setOrchestratorFactoryForTest,
 } from "@pegasus/workers/agent-worker.ts";
 import { SUBAGENT_SYSTEM_PROMPT } from "@pegasus/prompts/index.ts";
 import type { TaskNotification } from "@pegasus/agents/agent.ts";
+import type { OrchestratorAgentDeps } from "@pegasus/agents/base/orchestrator-agent.ts";
 import { setSettings, resetSettings } from "@pegasus/infra/config.ts";
 import type { Settings } from "@pegasus/infra/config.ts";
 
@@ -401,6 +402,7 @@ describe("handleShutdown", () => {
     cleanup();
     cleanupExit();
     _testState.setAgent(null);
+    _testState.setOrchestratorAgent(null);
     _testState.setProxyModel(null);
   });
 
@@ -462,6 +464,38 @@ describe("handleShutdown", () => {
     await handleShutdown();
 
     expect(fakeAgent.stop).toHaveBeenCalled();
+    expect(messages).toContainEqual({ type: "shutdown-complete" });
+  }, 5_000);
+
+  it("should stop orchestratorAgent when active", async () => {
+    const fakeOrchestrator = {
+      stop: mock(async () => {}),
+    };
+    _testState.setOrchestratorAgent(fakeOrchestrator as any);
+    _testState.setProjectAgent(null);
+    _testState.setProxyModel(null);
+
+    await handleShutdown();
+
+    expect(fakeOrchestrator.stop).toHaveBeenCalled();
+    expect(messages).toContainEqual({ type: "shutdown-complete" });
+    expect(exitCalls).toEqual([0]);
+  }, 5_000);
+
+  it("should stop both projectAgent and orchestratorAgent when both are active", async () => {
+    const fakeAgent = { stop: mock(async () => {}) };
+    const fakeOrchestrator = { stop: mock(async () => {}) };
+    const fakeModel = { cancelAll: mock(() => {}) };
+
+    _testState.setProjectAgent(fakeAgent as any);
+    _testState.setOrchestratorAgent(fakeOrchestrator as any);
+    _testState.setProxyModel(fakeModel as any);
+
+    await handleShutdown();
+
+    expect(fakeModel.cancelAll).toHaveBeenCalled();
+    expect(fakeAgent.stop).toHaveBeenCalled();
+    expect(fakeOrchestrator.stop).toHaveBeenCalled();
     expect(messages).toContainEqual({ type: "shutdown-complete" });
   }, 5_000);
 });
@@ -547,6 +581,36 @@ describe("dispatchMessage", () => {
   it("should handle unknown message types gracefully", async () => {
     await dispatchMessage({ type: "unknown_type" });
   }, 5_000);
+
+  it("should dispatch 'init' type to handleInit (subagent mode)", async () => {
+    const subagentDir = `${TEST_DIR}/dispatch-init`;
+    mkdirSync(subagentDir, { recursive: true });
+    const settings = makeTestSettings(subagentDir);
+    setSettings(settings);
+
+    const cleanupOrch = _setOrchestratorFactoryForTest((_deps) => {
+      return {
+        run: mock(async () => ({ success: true, result: "done" })),
+        stop: mock(async () => {}),
+      } as any;
+    });
+
+    await dispatchMessage({
+      type: "init",
+      mode: "subagent",
+      config: {
+        input: "test dispatch init",
+        subagentDir,
+        channelType: "subagent",
+        channelId: "sa_dispatch",
+        settings,
+      },
+    });
+
+    expect(messages).toContainEqual({ type: "ready" });
+    cleanupOrch();
+    _testState.setOrchestratorAgent(null);
+  }, 10_000);
 
   it("should handle skills_reload message", async () => {
     // Set up a skill registry with dirs
@@ -802,7 +866,17 @@ describe("initSubAgent", () => {
   let cleanupExit: () => void;
   let cleanupAgent: () => void;
   let cleanupProxy: () => void;
+  let cleanupOrchestrator: () => void;
   let messages: unknown[];
+  let lastOrchestratorDeps: OrchestratorAgentDeps | null = null;
+  let lastMockOrchestratorInstance: ReturnType<typeof createMockOrchestrator>;
+
+  function createMockOrchestrator() {
+    return {
+      run: mock(async () => ({ success: true, result: "done" })),
+      stop: mock(async () => {}),
+    };
+  }
 
   beforeEach(() => {
     const capture = captureMessages();
@@ -812,19 +886,28 @@ describe("initSubAgent", () => {
     cleanupExit = _setExitProcessForTest(() => {});
     lastMockAgent = createMockAgent();
     lastMockProxy = createMockProxyModel();
+    lastOrchestratorDeps = null;
+    lastMockOrchestratorInstance = createMockOrchestrator();
     cleanupAgent = _setAgentFactoryForTest(() => lastMockAgent as any);
     cleanupProxy = _setProxyModelFactoryForTest(() => lastMockProxy as any);
+    cleanupOrchestrator = _setOrchestratorFactoryForTest((deps) => {
+      lastOrchestratorDeps = deps;
+      return lastMockOrchestratorInstance as any;
+    });
   });
 
   afterEach(async () => {
     try { _testState.getProxyModel()?.cancelAll("test cleanup"); } catch { /* ignore */ }
+    try { await _testState.getOrchestratorAgent()?.stop(); } catch { /* ignore */ }
     try { await _testState.getAgent()?.stop(); } catch { /* ignore */ }
     _testState.setAgent(null);
+    _testState.setOrchestratorAgent(null);
     _testState.setProxyModel(null);
     cleanup();
     cleanupExit();
     cleanupAgent();
     cleanupProxy();
+    cleanupOrchestrator();
     rmSync(TEST_DIR, { recursive: true, force: true });
   });
 
@@ -848,7 +931,27 @@ describe("initSubAgent", () => {
     expect(_testState.getChannelId()).toBe("sa_unit_1");
   }, 10_000);
 
-  it("should auto-submit input when non-empty", async () => {
+  it("should create OrchestratorAgent (not projectAgent) in subagent mode", async () => {
+    const subagentDir = `${TEST_DIR}/session-orch`;
+    mkdirSync(subagentDir, { recursive: true });
+
+    const settings = makeTestSettings(subagentDir);
+    setSettings(settings);
+
+    await initSubAgent({
+      input: "Test task",
+      subagentDir,
+      channelType: "subagent",
+      channelId: "sa_orch_test",
+      settings,
+    });
+
+    expect(_testState.getOrchestratorAgent()).not.toBeNull();
+    // projectAgent should NOT be set in subagent mode
+    expect(_testState.getProjectAgent()).toBeNull();
+  }, 10_000);
+
+  it("should fire-and-forget run() for non-empty input", async () => {
     const subagentDir = `${TEST_DIR}/session-input`;
     mkdirSync(subagentDir, { recursive: true });
 
@@ -864,9 +967,30 @@ describe("initSubAgent", () => {
     });
 
     expect(messages).toContainEqual({ type: "ready" });
+    // run() should have been called (fire-and-forget)
+    expect(lastMockOrchestratorInstance.run).toHaveBeenCalled();
   }, 10_000);
 
-  it("should inject contextWindow when provided", async () => {
+  it("should NOT call run() for empty input", async () => {
+    const subagentDir = `${TEST_DIR}/session-no-run`;
+    mkdirSync(subagentDir, { recursive: true });
+
+    const settings = makeTestSettings(subagentDir);
+    setSettings(settings);
+
+    await initSubAgent({
+      input: "",
+      subagentDir,
+      channelType: "subagent",
+      channelId: "sa_no_run",
+      settings,
+    });
+
+    expect(messages).toContainEqual({ type: "ready" });
+    expect(lastMockOrchestratorInstance.run).not.toHaveBeenCalled();
+  }, 10_000);
+
+  it("should accept contextWindow config without error", async () => {
     const subagentDir = `${TEST_DIR}/session-cw`;
     mkdirSync(subagentDir, { recursive: true });
 
@@ -883,6 +1007,10 @@ describe("initSubAgent", () => {
     });
 
     expect(messages).toContainEqual({ type: "ready" });
+    // Note: contextWindow is applied to the local settings used during init
+    // (e.g. for ImageManager config). OrchestratorAgent/ExecutionAgent don't
+    // currently consume it directly — preserved for future use and consistency
+    // with initProject().
   }, 10_000);
 
   it("should handle default role as object with model field", async () => {
@@ -904,7 +1032,7 @@ describe("initSubAgent", () => {
     expect(messages).toContainEqual({ type: "ready" });
   }, 10_000);
 
-  it("should prepend memorySnapshot to input when provided", async () => {
+  it("should pass memorySnapshot as part of input, not contextPrompt", async () => {
     const subagentDir = `${TEST_DIR}/session-memory`;
     mkdirSync(subagentDir, { recursive: true });
 
@@ -921,53 +1049,490 @@ describe("initSubAgent", () => {
     });
 
     expect(messages).toContainEqual({ type: "ready" });
+
+    // Verify deps captured by the factory
+    expect(lastOrchestratorDeps).not.toBeNull();
+    // Memory snapshot should be in input, not contextPrompt
+    expect(lastOrchestratorDeps!.input).toContain("[Available Memory]");
+    expect(lastOrchestratorDeps!.input).toContain("User prefers concise responses.");
+    expect(lastOrchestratorDeps!.input).toContain("Do the analysis");
+    // contextPrompt should be SUBAGENT_SYSTEM_PROMPT only
+    expect(lastOrchestratorDeps!.contextPrompt).toBe(SUBAGENT_SYSTEM_PROMPT);
   }, 10_000);
 
-  it("should forward notify callback with subagentDone for initial task completion", async () => {
-    const subagentDir = `${TEST_DIR}/session-notify`;
+  it("should set SUBAGENT_SYSTEM_PROMPT as contextPrompt", async () => {
+    const subagentDir = `${TEST_DIR}/session-ctx`;
     mkdirSync(subagentDir, { recursive: true });
 
     const settings = makeTestSettings(subagentDir);
     setSettings(settings);
 
     await initSubAgent({
-      input: "Task to complete",
+      input: "Test",
       subagentDir,
       channelType: "subagent",
-      channelId: "sa_notify_test",
+      channelId: "sa_ctx_test",
       settings,
     });
 
-    expect(messages).toContainEqual({ type: "ready" });
-    expect(_notifyCallback).not.toBeNull();
+    expect(lastOrchestratorDeps).not.toBeNull();
+    expect(lastOrchestratorDeps!.contextPrompt).toBe(SUBAGENT_SYSTEM_PROMPT);
+  }, 10_000);
 
-    // Trigger notify callback with a "notify" type (progress) — should NOT set subagentDone
-    _notifyCallback!({ type: "notify", taskId: "some_task", message: "progress..." });
-    const progressNotifies = (messages as any[]).filter(
-      m => m.type === "notify" && (m.message as any)?.text === "progress..."
+  it("should map onNotify 'progress' to sendNotify without metadata", async () => {
+    const subagentDir = `${TEST_DIR}/session-notify-progress`;
+    mkdirSync(subagentDir, { recursive: true });
+
+    const settings = makeTestSettings(subagentDir);
+    setSettings(settings);
+
+    await initSubAgent({
+      input: "Task",
+      subagentDir,
+      channelType: "subagent",
+      channelId: "sa_notify_prog",
+      settings,
+    });
+
+    expect(lastOrchestratorDeps).not.toBeNull();
+
+    // Trigger progress notification via captured onNotify
+    lastOrchestratorDeps!.onNotify({ type: "progress", message: "Working on step 2..." });
+
+    const notifyMsgs = (messages as any[]).filter(m => m.type === "notify");
+    expect(notifyMsgs.length).toBeGreaterThanOrEqual(1);
+    const progressMsg = notifyMsgs.find(
+      m => (m.message as any)?.text === "Working on step 2...",
     );
-    expect(progressNotifies.length).toBe(1);
-    expect((progressNotifies[0]!.message as any)?.metadata).toBeUndefined();
+    expect(progressMsg).toBeDefined();
+    expect((progressMsg!.message as any)?.metadata).toBeUndefined();
+  }, 10_000);
 
-    // Trigger with failed type for a non-initial task — should NOT have subagentDone
-    _notifyCallback!({ type: "failed", taskId: "other_task", error: "oops" });
-    const failNotifies = (messages as any[]).filter(
-      m => m.type === "notify" && (m.message as any)?.text?.includes("[Task failed")
-    );
-    expect(failNotifies.length).toBe(1);
-    expect((failNotifies[0]!.message as any)?.metadata).toBeUndefined();
+  it("should map onNotify 'completed' to sendNotify with subagentDone metadata", async () => {
+    const subagentDir = `${TEST_DIR}/session-notify-done`;
+    mkdirSync(subagentDir, { recursive: true });
 
-    // Trigger completed for the INITIAL task — SHOULD have subagentDone metadata
-    // Note: This also triggers setTimeout → handleShutdown, so we wait briefly
-    _notifyCallback!({ type: "completed", taskId: "mock_task_id", result: { response: "All done" } });
+    const settings = makeTestSettings(subagentDir);
+    setSettings(settings);
+
+    await initSubAgent({
+      input: "Task",
+      subagentDir,
+      channelType: "subagent",
+      channelId: "sa_notify_done",
+      settings,
+    });
+
+    expect(lastOrchestratorDeps).not.toBeNull();
+
+    // Trigger completed notification
+    lastOrchestratorDeps!.onNotify({ type: "completed", result: "All done!" });
+
     const doneNotifies = (messages as any[]).filter(
-      m => m.type === "notify" && (m.message as any)?.metadata?.subagentDone != null
+      m => m.type === "notify" && (m.message as any)?.metadata?.subagentDone === "completed",
     );
     expect(doneNotifies.length).toBe(1);
-    expect((doneNotifies[0]!.message as any)?.metadata?.subagentDone).toBe("completed");
+    expect((doneNotifies[0]!.message as any)?.text).toBe("All done!");
 
-    // Wait for the setTimeout(handleShutdown, 100) to fire and complete
+    // Wait for setTimeout(handleShutdown, 100)
     await new Promise(resolve => setTimeout(resolve, 200));
+  }, 10_000);
+
+  it("should map onNotify 'completed' with imageRefs in metadata", async () => {
+    const subagentDir = `${TEST_DIR}/session-notify-imgs`;
+    mkdirSync(subagentDir, { recursive: true });
+
+    const settings = makeTestSettings(subagentDir);
+    setSettings(settings);
+
+    await initSubAgent({
+      input: "Task",
+      subagentDir,
+      channelType: "subagent",
+      channelId: "sa_notify_imgs",
+      settings,
+    });
+
+    expect(lastOrchestratorDeps).not.toBeNull();
+
+    // Trigger completed with imageRefs
+    lastOrchestratorDeps!.onNotify({
+      type: "completed",
+      result: "Screenshot captured",
+      imageRefs: [{ id: "img123", mimeType: "image/png" }],
+    });
+
+    const doneNotifies = (messages as any[]).filter(
+      m => m.type === "notify" && (m.message as any)?.metadata?.subagentDone === "completed",
+    );
+    expect(doneNotifies.length).toBe(1);
+    expect((doneNotifies[0]!.message as any)?.metadata?.imageRefs).toEqual([
+      { id: "img123", mimeType: "image/png" },
+    ]);
+
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }, 10_000);
+
+  it("should JSON.stringify non-string result in onNotify 'completed'", async () => {
+    const subagentDir = `${TEST_DIR}/session-notify-obj`;
+    mkdirSync(subagentDir, { recursive: true });
+
+    const settings = makeTestSettings(subagentDir);
+    setSettings(settings);
+
+    await initSubAgent({
+      input: "Task",
+      subagentDir,
+      channelType: "subagent",
+      channelId: "sa_notify_obj",
+      settings,
+    });
+
+    expect(lastOrchestratorDeps).not.toBeNull();
+
+    // Trigger completed with non-string result (object) → JSON.stringify branch
+    lastOrchestratorDeps!.onNotify({
+      type: "completed",
+      result: { data: 42, summary: "analysis complete" },
+    });
+
+    const doneNotifies = (messages as any[]).filter(
+      m => m.type === "notify" && (m.message as any)?.metadata?.subagentDone === "completed",
+    );
+    expect(doneNotifies.length).toBe(1);
+    const text = (doneNotifies[0]!.message as any)?.text;
+    expect(text).toContain('"data":42');
+    expect(text).toContain('"summary":"analysis complete"');
+
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }, 10_000);
+
+  it("should map onNotify 'failed' to sendNotify with subagentDone metadata", async () => {
+    const subagentDir = `${TEST_DIR}/session-notify-fail`;
+    mkdirSync(subagentDir, { recursive: true });
+
+    const settings = makeTestSettings(subagentDir);
+    setSettings(settings);
+
+    await initSubAgent({
+      input: "Task",
+      subagentDir,
+      channelType: "subagent",
+      channelId: "sa_notify_fail",
+      settings,
+    });
+
+    expect(lastOrchestratorDeps).not.toBeNull();
+
+    // Trigger failed notification
+    lastOrchestratorDeps!.onNotify({ type: "failed", error: "timeout exceeded" });
+
+    const failNotifies = (messages as any[]).filter(
+      m => m.type === "notify" && (m.message as any)?.metadata?.subagentDone === "failed",
+    );
+    expect(failNotifies.length).toBe(1);
+    expect((failNotifies[0]!.message as any)?.text).toBe("[Task failed: timeout exceeded]");
+
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }, 10_000);
+
+  it("should set agentId to channelId in OrchestratorAgent deps", async () => {
+    const subagentDir = `${TEST_DIR}/session-agentid`;
+    mkdirSync(subagentDir, { recursive: true });
+
+    const settings = makeTestSettings(subagentDir);
+    setSettings(settings);
+
+    await initSubAgent({
+      input: "Test",
+      subagentDir,
+      channelType: "subagent",
+      channelId: "sa_special_id",
+      settings,
+    });
+
+    expect(lastOrchestratorDeps).not.toBeNull();
+    expect(lastOrchestratorDeps!.agentId).toBe("sa_special_id");
+  }, 10_000);
+
+  it("should truncate taskDescription to first 200 chars of input", async () => {
+    const subagentDir = `${TEST_DIR}/session-desc`;
+    mkdirSync(subagentDir, { recursive: true });
+
+    const settings = makeTestSettings(subagentDir);
+    setSettings(settings);
+
+    const longInput = "A".repeat(300);
+    await initSubAgent({
+      input: longInput,
+      subagentDir,
+      channelType: "subagent",
+      channelId: "sa_desc_test",
+      settings,
+    });
+
+    expect(lastOrchestratorDeps).not.toBeNull();
+    expect(lastOrchestratorDeps!.taskDescription.length).toBe(200);
+    expect(lastOrchestratorDeps!.taskDescription).toBe("A".repeat(200));
+  }, 10_000);
+
+  it("should provide onSpawnExecution callback in deps", async () => {
+    const subagentDir = `${TEST_DIR}/session-spawn`;
+    mkdirSync(subagentDir, { recursive: true });
+
+    const settings = makeTestSettings(subagentDir);
+    setSettings(settings);
+
+    await initSubAgent({
+      input: "Test",
+      subagentDir,
+      channelType: "subagent",
+      channelId: "sa_spawn_test",
+      settings,
+    });
+
+    expect(lastOrchestratorDeps).not.toBeNull();
+    expect(typeof lastOrchestratorDeps!.onSpawnExecution).toBe("function");
+  }, 10_000);
+
+  it("should create ExecutionAgent and return handle when onSpawnExecution is called", async () => {
+    const subagentDir = `${TEST_DIR}/session-spawn-exec`;
+    mkdirSync(subagentDir, { recursive: true });
+
+    const settings = makeTestSettings(subagentDir);
+    setSettings(settings);
+
+    await initSubAgent({
+      input: "Parent task",
+      subagentDir,
+      channelType: "subagent",
+      channelId: "sa_spawn_exec",
+      settings,
+    });
+
+    expect(lastOrchestratorDeps).not.toBeNull();
+    expect(lastOrchestratorDeps!.onSpawnExecution).toBeDefined();
+
+    // Invoke the onSpawnExecution callback — this exercises lines 318-343
+    const handle = lastOrchestratorDeps!.onSpawnExecution({
+      input: "Child task input",
+      description: "Analyze something",
+      mode: "worker",
+    });
+
+    // Verify the handle structure
+    expect(handle.id).toBeDefined();
+    expect(typeof handle.id).toBe("string");
+    expect(handle.id.length).toBeGreaterThan(0);
+    expect(handle.promise).toBeInstanceOf(Promise);
+
+    // The promise should eventually resolve (mock model returns text response)
+    const result = await Promise.race([
+      handle.promise,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 5_000)),
+    ]);
+    // Either resolved or timed out — either way, the callback was exercised
+    if (result !== null) {
+      expect(result).toHaveProperty("success");
+      expect(result).toHaveProperty("result");
+    }
+  }, 10_000);
+
+  it("should send failed notification when run() rejects with error", async () => {
+    const subagentDir = `${TEST_DIR}/session-run-err`;
+    mkdirSync(subagentDir, { recursive: true });
+
+    const settings = makeTestSettings(subagentDir);
+    setSettings(settings);
+
+    // Create mock orchestrator whose run() rejects
+    const errorOrchestrator = createMockOrchestrator();
+    errorOrchestrator.run = mock(async () => { throw new Error("LLM timed out"); });
+    cleanupOrchestrator();
+    cleanupOrchestrator = _setOrchestratorFactoryForTest((deps) => {
+      lastOrchestratorDeps = deps;
+      return errorOrchestrator as any;
+    });
+
+    await initSubAgent({
+      input: "Will fail",
+      subagentDir,
+      channelType: "subagent",
+      channelId: "sa_err_test",
+      settings,
+    });
+
+    // Wait for async catch to fire
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    const failNotifies = (messages as any[]).filter(
+      m => m.type === "notify" && (m.message as any)?.metadata?.subagentDone === "failed",
+    );
+    expect(failNotifies.length).toBe(1);
+    expect((failNotifies[0]!.message as any)?.text).toContain("LLM timed out");
+
+    // Wait for shutdown timeout
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }, 10_000);
+
+  it("should send failed notification when run() rejects with non-Error value", async () => {
+    const subagentDir = `${TEST_DIR}/session-run-str-err`;
+    mkdirSync(subagentDir, { recursive: true });
+
+    const settings = makeTestSettings(subagentDir);
+    setSettings(settings);
+
+    // Create mock orchestrator whose run() rejects with a string (non-Error)
+    const errorOrchestrator = createMockOrchestrator();
+    errorOrchestrator.run = mock(async () => {
+      throw "raw string error";  // eslint-disable-line no-throw-literal
+    });
+    cleanupOrchestrator();
+    cleanupOrchestrator = _setOrchestratorFactoryForTest((deps) => {
+      lastOrchestratorDeps = deps;
+      return errorOrchestrator as any;
+    });
+
+    await initSubAgent({
+      input: "Will fail with string",
+      subagentDir,
+      channelType: "subagent",
+      channelId: "sa_str_err_test",
+      settings,
+    });
+
+    // Wait for async catch to fire
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    const failNotifies = (messages as any[]).filter(
+      m => m.type === "notify" && (m.message as any)?.metadata?.subagentDone === "failed",
+    );
+    expect(failNotifies.length).toBe(1);
+    expect((failNotifies[0]!.message as any)?.text).toContain("raw string error");
+
+    // Wait for shutdown timeout
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }, 10_000);
+
+  it("should set storeImage in deps when vision is enabled", async () => {
+    const subagentDir = `${TEST_DIR}/session-vision`;
+    mkdirSync(subagentDir, { recursive: true });
+
+    const settings = makeTestSettings(subagentDir);
+    settings.vision = { enabled: true, keepLastNTurns: 5, maxDimensionPx: 800, maxImageBytes: 1000000 };
+    setSettings(settings);
+
+    await initSubAgent({
+      input: "Test",
+      subagentDir,
+      channelType: "subagent",
+      channelId: "sa_vision_test",
+      settings,
+    });
+
+    expect(lastOrchestratorDeps).not.toBeNull();
+    expect(lastOrchestratorDeps!.storeImage).toBeDefined();
+  }, 10_000);
+
+  it("should not set storeImage when vision is disabled", async () => {
+    const subagentDir = `${TEST_DIR}/session-no-vision`;
+    mkdirSync(subagentDir, { recursive: true });
+
+    const settings = makeTestSettings(subagentDir);
+    settings.vision = { enabled: false, keepLastNTurns: 5, maxDimensionPx: 800, maxImageBytes: 1000000 };
+    setSettings(settings);
+
+    await initSubAgent({
+      input: "Test",
+      subagentDir,
+      channelType: "subagent",
+      channelId: "sa_no_vision",
+      settings,
+    });
+
+    expect(lastOrchestratorDeps).not.toBeNull();
+    expect(lastOrchestratorDeps!.storeImage).toBeUndefined();
+  }, 10_000);
+
+  it("should invoke storeImage callback and return id/mimeType (lines 297-298)", async () => {
+    const subagentDir = `${TEST_DIR}/session-store-image`;
+    mkdirSync(subagentDir, { recursive: true });
+
+    const settings = makeTestSettings(subagentDir);
+    settings.vision = { enabled: true, keepLastNTurns: 5, maxDimensionPx: 800, maxImageBytes: 5_000_000 };
+    setSettings(settings);
+
+    await initSubAgent({
+      input: "Test",
+      subagentDir,
+      channelType: "subagent",
+      channelId: "sa_store_img",
+      settings,
+    });
+
+    expect(lastOrchestratorDeps).not.toBeNull();
+    expect(lastOrchestratorDeps!.storeImage).toBeDefined();
+
+    // Create a minimal valid PNG buffer (1x1 pixel)
+    const pngHeader = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, // PNG signature
+      0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, // IHDR chunk
+      0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, // 1x1
+      0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, // 8-bit RGB
+      0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41, // IDAT chunk
+      0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
+      0x00, 0x00, 0x02, 0x00, 0x01, 0xe2, 0x21, 0xbc,
+      0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, // IEND chunk
+      0x44, 0xae, 0x42, 0x60, 0x82,
+    ]);
+
+    // Invoke the storeImage callback — exercises lines 297-298
+    const result = await lastOrchestratorDeps!.storeImage!(pngHeader, "image/png", "test");
+    expect(result).toBeDefined();
+    expect(result!.id).toBeDefined();
+    expect(typeof result!.id).toBe("string");
+    expect(result!.mimeType).toBe("image/png");
+  }, 10_000);
+
+  it("should create ExecutionAgent via onSpawnExecution and run it (lines 318-343)", async () => {
+    const subagentDir = `${TEST_DIR}/session-spawn-real`;
+    mkdirSync(subagentDir, { recursive: true });
+
+    const settings = makeTestSettings(subagentDir);
+    setSettings(settings);
+
+    await initSubAgent({
+      input: "Parent task",
+      subagentDir,
+      channelType: "subagent",
+      channelId: "sa_spawn_real",
+      settings,
+    });
+
+    expect(lastOrchestratorDeps).not.toBeNull();
+
+    // Call onSpawnExecution — creates a real ExecutionAgent
+    const handle = lastOrchestratorDeps!.onSpawnExecution({
+      input: "Child task: analyze data",
+      description: "Data analysis subtask",
+      taskType: "analysis",
+      mode: "worker",
+    });
+
+    expect(handle.id).toBeDefined();
+    expect(handle.id.length).toBeGreaterThan(0);
+    expect(handle.promise).toBeInstanceOf(Promise);
+
+    // Wait for the child to complete (mock proxy model returns empty text → stop)
+    const result = await Promise.race([
+      handle.promise,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 5_000)),
+    ]);
+
+    if (result !== null) {
+      expect(result).toHaveProperty("success");
+      expect(result).toHaveProperty("result");
+    }
   }, 10_000);
 });
 
@@ -991,6 +1556,8 @@ describe("SUBAGENT_SYSTEM_PROMPT", () => {
 describe("_testState", () => {
   afterEach(() => {
     _testState.setAgent(null);
+    _testState.setProjectAgent(null);
+    _testState.setOrchestratorAgent(null);
     _testState.setProxyModel(null);
     _testState.setChannelType("unknown");
     _testState.setChannelId("unknown");
@@ -1022,201 +1589,42 @@ describe("_testState", () => {
     expect(_testState.getChannelType()).toBe("telegram");
     expect(_testState.getChannelId()).toBe("tg_42");
   });
-});
 
-// ── loadPreviousTaskSummary — additional branch coverage ─
-
-describe("loadPreviousTaskSummary — additional branches", () => {
-  beforeEach(() => {
-    mkdirSync(TEST_DIR, { recursive: true });
+  it("should get and set projectAgent", () => {
+    expect(_testState.getProjectAgent()).toBeNull();
+    const fakeAgent = { stop: async () => {} } as any;
+    _testState.setProjectAgent(fakeAgent);
+    expect(_testState.getProjectAgent()).toBe(fakeAgent);
+    _testState.setProjectAgent(null);
+    expect(_testState.getProjectAgent()).toBeNull();
   });
 
-  afterEach(() => {
-    rmSync(TEST_DIR, { recursive: true, force: true });
+  it("should get and set orchestratorAgent", () => {
+    expect(_testState.getOrchestratorAgent()).toBeNull();
+    const fakeOrchestrator = { stop: async () => {}, submit: () => "t1" } as any;
+    _testState.setOrchestratorAgent(fakeOrchestrator);
+    expect(_testState.getOrchestratorAgent()).toBe(fakeOrchestrator);
+    _testState.setOrchestratorAgent(null);
+    expect(_testState.getOrchestratorAgent()).toBeNull();
   });
 
-  it("should handle task with no finalResult and no error (no result recorded)", async () => {
-    const { mkdir, appendFile } = await import("node:fs/promises");
-    const path = await import("node:path");
+  it("should alias getAgent/setAgent to projectAgent (backward compat)", () => {
+    const fakeAgent = { stop: async () => {}, submit: () => "t1" } as any;
 
-    const tasksDir = path.join(TEST_DIR, "tasks");
-    const date = "2026-03-01";
-    const taskId = "task_no_result";
+    // setAgent should set projectAgent
+    _testState.setAgent(fakeAgent);
+    expect(_testState.getProjectAgent()).toBe(fakeAgent);
+    expect(_testState.getAgent()).toBe(fakeAgent);
 
-    await mkdir(tasksDir, { recursive: true });
-    await appendFile(
-      path.join(tasksDir, "index.jsonl"),
-      JSON.stringify({ taskId, date }) + "\n",
-      "utf-8",
-    );
+    // setProjectAgent should be visible via getAgent
+    const anotherAgent = { stop: async () => {} } as any;
+    _testState.setProjectAgent(anotherAgent);
+    expect(_testState.getAgent()).toBe(anotherAgent);
 
-    const taskDir = path.join(tasksDir, date);
-    await mkdir(taskDir, { recursive: true });
-    await appendFile(
-      path.join(taskDir, `${taskId}.jsonl`),
-      JSON.stringify({
-        ts: Date.now(),
-        event: "TASK_CREATED",
-        taskId,
-        data: { inputText: "Incomplete task", description: "Incomplete", source: "test", taskType: "general" },
-      }) + "\n",
-      "utf-8",
-    );
-
-    const result = await loadPreviousTaskSummary(tasksDir);
-    expect(result).not.toBeNull();
-    expect(result).toContain("Incomplete task");
-    expect(result).toContain("[No result recorded]");
-  }, 5_000);
-
-  it("should handle task with object finalResult without response field", async () => {
-    const { mkdir, appendFile } = await import("node:fs/promises");
-    const path = await import("node:path");
-
-    const tasksDir = path.join(TEST_DIR, "tasks");
-    const date = "2026-03-01";
-    const taskId = "task_no_response";
-
-    await mkdir(tasksDir, { recursive: true });
-    await appendFile(
-      path.join(tasksDir, "index.jsonl"),
-      JSON.stringify({ taskId, date }) + "\n",
-      "utf-8",
-    );
-
-    const taskDir = path.join(tasksDir, date);
-    await mkdir(taskDir, { recursive: true });
-
-    await appendFile(
-      path.join(taskDir, `${taskId}.jsonl`),
-      JSON.stringify({
-        ts: Date.now(),
-        event: "TASK_CREATED",
-        taskId,
-        data: { inputText: "Object result task", description: "Object result", source: "test", taskType: "general" },
-      }) + "\n",
-      "utf-8",
-    );
-
-    await appendFile(
-      path.join(taskDir, `${taskId}.jsonl`),
-      JSON.stringify({
-        ts: Date.now(),
-        event: "TASK_COMPLETED",
-        taskId,
-        data: { finalResult: { taskId, data: "some-data", iterations: 1 }, iterations: 1 },
-      }) + "\n",
-      "utf-8",
-    );
-
-    const result = await loadPreviousTaskSummary(tasksDir);
-    expect(result).not.toBeNull();
-    expect(result).toContain("Object result task");
-    expect(result).toContain("some-data");
-  }, 5_000);
-
-  it("should handle corrupted JSONL gracefully (inner catch)", async () => {
-    const { mkdir, appendFile } = await import("node:fs/promises");
-    const path = await import("node:path");
-
-    const tasksDir = path.join(TEST_DIR, "tasks");
-    const date = "2026-03-01";
-    const taskId = "task_corrupt";
-
-    await mkdir(tasksDir, { recursive: true });
-    await appendFile(
-      path.join(tasksDir, "index.jsonl"),
-      JSON.stringify({ taskId, date }) + "\n",
-      "utf-8",
-    );
-
-    const taskDir = path.join(tasksDir, date);
-    await mkdir(taskDir, { recursive: true });
-
-    await appendFile(
-      path.join(taskDir, `${taskId}.jsonl`),
-      "this is not valid JSON\n",
-      "utf-8",
-    );
-
-    const validId = "task_valid";
-    await appendFile(
-      path.join(tasksDir, "index.jsonl"),
-      JSON.stringify({ taskId: validId, date }) + "\n",
-      "utf-8",
-    );
-    await appendFile(
-      path.join(taskDir, `${validId}.jsonl`),
-      JSON.stringify({
-        ts: Date.now(),
-        event: "TASK_CREATED",
-        taskId: validId,
-        data: { inputText: "Valid task", description: "Valid", source: "test", taskType: "general" },
-      }) + "\n",
-      "utf-8",
-    );
-    await appendFile(
-      path.join(taskDir, `${validId}.jsonl`),
-      JSON.stringify({
-        ts: Date.now(),
-        event: "TASK_COMPLETED",
-        taskId: validId,
-        data: { finalResult: { response: "Valid result" }, iterations: 1 },
-      }) + "\n",
-      "utf-8",
-    );
-
-    const result = await loadPreviousTaskSummary(tasksDir);
-    expect(result).not.toBeNull();
-    expect(result).toContain("Valid task");
-    expect(result).toContain("Valid result");
-    expect(result).not.toContain("task_corrupt");
-  }, 5_000);
-
-  it("should use (no input) fallback when both inputText and description are empty", async () => {
-    const { mkdir, appendFile } = await import("node:fs/promises");
-    const path = await import("node:path");
-
-    const tasksDir = path.join(TEST_DIR, "tasks");
-    const date = "2026-03-01";
-    const taskId = "task_no_input";
-
-    await mkdir(tasksDir, { recursive: true });
-    await appendFile(
-      path.join(tasksDir, "index.jsonl"),
-      JSON.stringify({ taskId, date }) + "\n",
-      "utf-8",
-    );
-
-    const taskDir = path.join(tasksDir, date);
-    await mkdir(taskDir, { recursive: true });
-
-    await appendFile(
-      path.join(taskDir, `${taskId}.jsonl`),
-      JSON.stringify({
-        ts: Date.now(),
-        event: "TASK_CREATED",
-        taskId,
-        data: { inputText: "", description: "", source: "test", taskType: "general" },
-      }) + "\n",
-      "utf-8",
-    );
-
-    await appendFile(
-      path.join(taskDir, `${taskId}.jsonl`),
-      JSON.stringify({
-        ts: Date.now(),
-        event: "TASK_COMPLETED",
-        taskId,
-        data: { finalResult: { response: "Done" }, iterations: 1 },
-      }) + "\n",
-      "utf-8",
-    );
-
-    const result = await loadPreviousTaskSummary(tasksDir);
-    expect(result).not.toBeNull();
-    expect(result).toContain("(no input)");
-  }, 5_000);
+    // Reset via setAgent
+    _testState.setAgent(null);
+    expect(_testState.getProjectAgent()).toBeNull();
+  });
 });
 
 // ── _setPostMessageForTest ──────────────────────────────

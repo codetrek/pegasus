@@ -36,7 +36,9 @@ function isNewRunner(registry: unknown): registry is {
 export const task_status: Tool = {
   name: "task_status",
   description:
-    "Check the runtime status of spawned tasks. Shows all in-memory tasks with their current state (reasoning, acting, completed, failed, etc). Use when a task result hasn't arrived or you suspect a task may have failed silently.",
+    "Check the runtime status of spawned tasks. Shows all in-memory tasks with their current state. " +
+    "IMPORTANT: Task results arrive automatically via notification — do NOT call this tool repeatedly to poll. " +
+    "Only use this for one-off diagnostics when you suspect a task may have failed silently after a long time.",
   category: ToolCategory.DATA,
   parameters: z.object({
     taskId: z

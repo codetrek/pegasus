@@ -3,7 +3,8 @@
  *
  * Supports two modes:
  *   - "project" — loads PROJECT.md, builds project persona, persistent session
- *   - "subagent" — receives input directly, temporary session, auto-submits initial input
+ *   - "subagent" — runs OrchestratorAgent with Worker-local EventBus,
+ *     input provided at init, fire-and-forget via run()
  *
  * Communicates with the main thread via postMessage/onmessage:
  *   Receives: init, message, llm_response, llm_error, shutdown
@@ -14,9 +15,17 @@
 declare var self: Worker;
 
 import path from "node:path";
-import { existsSync } from "node:fs";
 import { Agent } from "../agents/agent.ts";
 import type { AgentDeps, TaskNotification } from "../agents/agent.ts";
+import { OrchestratorAgent } from "../agents/base/orchestrator-agent.ts";
+import type { OrchestratorAgentDeps, ExecutionSpawnConfig, ExecutionHandle, OrchestratorNotification } from "../agents/base/orchestrator-agent.ts";
+import { ExecutionAgent } from "../agents/base/execution-agent.ts";
+import { EventBus } from "../events/bus.ts";
+import { ToolRegistry } from "../tools/registry.ts";
+import { subAgentTools, allTaskTools } from "../tools/builtins/index.ts";
+import { shortId } from "../infra/id.ts";
+import { ImageManager } from "../media/image-manager.ts";
+import type { ToolContext } from "../tools/types.ts";
 import { getSettings, setSettings } from "../infra/config.ts";
 import type { Settings } from "../infra/config.ts";
 import type { GenerateTextResult } from "../infra/llm-types.ts";
@@ -24,9 +33,7 @@ import type { Persona } from "../identity/persona.ts";
 import type { InboundMessage } from "../channels/types.ts";
 import { parseProjectFile } from "../projects/loader.ts";
 import { ProxyLanguageModel } from "../projects/proxy-language-model.ts";
-import { spawn_task } from "../tools/builtins/index.ts";
 import { SUBAGENT_SYSTEM_PROMPT } from "../prompts/index.ts";
-import { TaskPersister } from "../task/persister.ts";
 import { buildProjectAgentPaths, buildSubAgentPaths } from "../storage/paths.ts";
 import { SkillRegistry } from "../skills/registry.ts";
 
@@ -56,7 +63,8 @@ export interface SubAgentConfig extends BaseConfig {
 
 // ── Module-level state (initialized on "init") ──────
 
-let agent: Agent | null = null;
+let projectAgent: Agent | null = null;
+let orchestratorAgent: OrchestratorAgent | null = null;
 let proxyModel: ProxyLanguageModel | null = null;
 
 // Skill registry for project Workers (null for subagent mode)
@@ -72,8 +80,12 @@ let workerChannelId: string = "unknown";
  * Not used in production — only accessed by tests to verify state transitions.
  */
 export const _testState = {
-  getAgent: () => agent,
-  setAgent: (a: Agent | null) => { agent = a; },
+  getAgent: () => projectAgent,           // backward compat
+  setAgent: (a: Agent | null) => { projectAgent = a; },
+  getProjectAgent: () => projectAgent,
+  setProjectAgent: (a: Agent | null) => { projectAgent = a; },
+  getOrchestratorAgent: () => orchestratorAgent,
+  setOrchestratorAgent: (a: OrchestratorAgent | null) => { orchestratorAgent = a; },
   getProxyModel: () => proxyModel,
   setProxyModel: (m: ProxyLanguageModel | null) => { proxyModel = m; },
   getChannelType: () => workerChannelType,
@@ -235,7 +247,7 @@ export async function initProject(config: ProjectConfig): Promise<void> {
   workerChannelId = projectDef.name;
 
   // 8. Create Agent (with SkillRegistry for skill metadata in system prompt)
-  agent = _createAgent({
+  projectAgent = _createAgent({
     model: proxyModel,
     persona,
     settings: agentSettings,
@@ -244,12 +256,12 @@ export async function initProject(config: ProjectConfig): Promise<void> {
   });
 
   // 9. Register notify callback → forward to main thread as InboundMessage
-  agent.onNotify((notification: TaskNotification) => {
+  projectAgent.onNotify((notification: TaskNotification) => {
     sendNotify(notificationToText(notification));
   });
 
   // 10. Start agent
-  await agent.start();
+  await projectAgent.start();
 
   // 11. Signal ready
   postToParent({ type: "ready" });
@@ -260,8 +272,11 @@ export async function initProject(config: ProjectConfig): Promise<void> {
 export async function initSubAgent(config: SubAgentConfig): Promise<void> {
   const { input, subagentDir, channelType, channelId, contextWindow, memorySnapshot, proxyModelId } = config;
 
-  // 1. Load global settings
-  const settings = getSettings();
+  // 1. Load global settings — override contextWindow if provided
+  const baseSettings = getSettings();
+  const settings: Settings = contextWindow != null
+    ? { ...baseSettings, llm: { ...baseSettings.llm, contextWindow } }
+    : baseSettings;
 
   // 2. Create ProxyLanguageModel
   //    Use proxyModelId from WorkerAdapter when available (matches actual proxy model).
@@ -275,94 +290,140 @@ export async function initSubAgent(config: SubAgentConfig): Promise<void> {
     (msg: unknown) => postToParent(msg),
   );
 
-  // 3. Build subagent persona (with SubAgent system prompt injected via background)
-  const persona: Persona = {
-    name: "SubAgent",
-    role: "autonomous orchestrator",
-    personality: ["focused", "systematic", "autonomous"],
-    style: "concise and task-oriented",
-    values: ["accuracy", "efficiency", "thoroughness"],
-    background: SUBAGENT_SYSTEM_PROMPT,
-  };
+  // 3. Create Worker-local ImageManager for storeImage (if vision enabled)
+  let storeImage: ToolContext["storeImage"] | undefined;
+  if (settings.vision?.enabled !== false) {
+    const mediaDir = path.join(settings.dataDir, "media");
+    const imgMgr = new ImageManager(mediaDir, {
+      maxDimensionPx: settings.vision?.maxDimensionPx,
+      maxBytes: settings.vision?.maxImageBytes,
+    });
+    storeImage = async (buffer: Buffer, mimeType: string, source: string) => {
+      const ref = await imgMgr.store(buffer, mimeType, source);
+      return { id: ref.id, mimeType: ref.mimeType };
+    };
+  }
 
-  // 4. Build agent settings — only override contextWindow if provided
-  const agentSettings: Settings = contextWindow != null
-    ? { ...settings, llm: { ...settings.llm, contextWindow } }
-    : settings;
-
-  // 5. Store channel info (used to tag notify messages back to MainAgent)
+  // 4. Store channel info (used to tag notify messages back to MainAgent)
   workerChannelType = channelType;
   workerChannelId = channelId;
 
-  // 6. Create Agent (with spawn_task so SubAgent can orchestrate AITasks)
+  // 5. Create Worker-local EventBus
+  const eventBus = new EventBus();
+
+  // 6. Build ToolRegistry from subAgentTools
+  const toolRegistry = new ToolRegistry();
+  toolRegistry.registerMany(subAgentTools);
+
+  // 7. Build storage paths
   const storePaths = buildSubAgentPaths(subagentDir);
-  agent = _createAgent({
+
+  // 8. Build onSpawnExecution callback that creates child ExecutionAgents
+  const onSpawnExecution = (spawnConfig: ExecutionSpawnConfig): ExecutionHandle => {
+    const taskId = shortId();
+    const childToolRegistry = new ToolRegistry();
+    childToolRegistry.registerMany(allTaskTools);
+
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const sessionDir = path.join(storePaths.tasks, dateStr, taskId);
+
+    const agent = new ExecutionAgent({
+      agentId: taskId,
+      model: proxyModel!,
+      toolRegistry: childToolRegistry,
+      eventBus,
+      input: spawnConfig.input,
+      description: spawnConfig.description,
+      mode: "worker",
+      sessionDir,
+      storeImage,
+    });
+
+    const promise = agent.run().then((execResult) => ({
+      success: execResult.success,
+      result: execResult.result,
+      error: execResult.error,
+    }));
+
+    return { id: taskId, promise };
+  };
+
+  // 9. Build input: memorySnapshot as prefix in user message, NOT in system prompt
+  const fullInput = [
+    memorySnapshot ? `[Available Memory]\n${memorySnapshot}` : null,
+    input,
+  ].filter(Boolean).join("\n\n---\n\n");
+
+  // 10. Build onNotify callback
+  const onNotify = (notification: OrchestratorNotification): void => {
+    switch (notification.type) {
+      case "progress":
+        sendNotify(notification.message);
+        break;
+      case "completed": {
+        const resultText = typeof notification.result === "string"
+          ? notification.result
+          : JSON.stringify(notification.result);
+        sendNotify(resultText, {
+          subagentDone: "completed",
+          ...(notification.imageRefs?.length ? { imageRefs: notification.imageRefs } : {}),
+        });
+        setTimeout(async () => {
+          await handleShutdown();
+        }, 100);
+        break;
+      }
+      case "failed":
+        sendNotify(`[Task failed: ${notification.error}]`, { subagentDone: "failed" });
+        setTimeout(async () => {
+          await handleShutdown();
+        }, 100);
+        break;
+    }
+  };
+
+  // 11. Create OrchestratorAgent
+  const orchestrator = _createOrchestrator({
+    agentId: channelId,
     model: proxyModel,
-    persona,
-    settings: agentSettings,
-    additionalTools: [spawn_task],
-    storePaths,
-    enableReflection: false,
+    toolRegistry,
+    eventBus,
+    taskDescription: input.slice(0, 200),
+    input: fullInput,
+    contextPrompt: SUBAGENT_SYSTEM_PROMPT,
+    sessionDir: storePaths.session,
+    onSpawnExecution,
+    onNotify,
+    storeImage,
   });
 
-  // 7. Register notify callback → forward to main thread as InboundMessage
-  //    SubAgent mode: auto-shutdown when task completes or fails.
-  //    The final notify is tagged with metadata.subagentDone so MainAgent
-  //    can call markDone() before the Worker close event fires.
-  //
-  //    IMPORTANT: Only trigger shutdown when the INITIAL task (the one created
-  //    by agent.submit()) completes — NOT child tasks spawned via spawn_task.
-  //    Child task completions fire notifyCallback too, but shutting down on
-  //    those would kill the parent task prematurely.
-  let initialTaskId: string | null = null;
+  // 12. Store module-level ref for handleShutdown()
+  orchestratorAgent = orchestrator;
 
-  agent.onNotify((notification: TaskNotification) => {
-    const isDone = notification.type === "completed" || notification.type === "failed";
-    const isInitialTask = isDone && initialTaskId !== null && notification.taskId === initialTaskId;
+  // 13. Signal ready
+  postToParent({ type: "ready" });
 
-    const metadata = isInitialTask
-      ? { subagentDone: notification.type }
-      : undefined;
-
-    sendNotify(notificationToText(notification), metadata);
-
-    if (isInitialTask) {
-      // Give a short delay for the notify message to be delivered
+  // 14. Fire-and-forget: run() blocks until completion,
+  //     but JS event loop still processes llm_response messages
+  if (input) {
+    orchestrator.run().catch((err) => {
+      sendNotify(
+        `[SubAgent error: ${err instanceof Error ? err.message : String(err)}]`,
+        { subagentDone: "failed" },
+      );
       setTimeout(async () => {
         await handleShutdown();
       }, 100);
-    }
-  });
-
-  // 8. Start agent
-  await agent.start();
-
-  // 9. Signal ready
-  postToParent({ type: "ready" });
-
-  // 10. Auto-submit initial input (subagent mode only)
-  //     If memorySnapshot is available, prepend it to the input so the
-  //     SubAgent's first reasoning cycle has access to long-term memory.
-  //     If resuming (previous tasks exist on disk), load their results
-  //     as context so the SubAgent knows what was already accomplished.
-  //     Capture the returned taskId so onNotify only shuts down for THIS task.
-  if (input) {
-    const previousContext = await loadPreviousTaskSummary(storePaths.tasks);
-    const fullInput = [
-      previousContext ? `[Previous Session Context]\n${previousContext}` : null,
-      memorySnapshot ? `[Available Memory]\n${memorySnapshot}` : null,
-      input,
-    ].filter(Boolean).join("\n\n---\n\n");
-    initialTaskId = await agent.submit(fullInput, "main-agent");
+    });
   }
 }
 
 // ── Message handling ─────────────────────────────────
 
 export function handleMessage(message: { text: string }): void {
-  if (!agent) return;
+  if (!projectAgent) return;
   const text = typeof message === "string" ? message : message.text;
-  agent.submit(text, "main-agent");
+  projectAgent.submit(text, "main-agent");
 }
 
 /** Re-scan skill directories and update the project's SkillRegistry. */
@@ -389,8 +450,11 @@ export async function handleShutdown(): Promise<void> {
   if (proxyModel) {
     proxyModel.cancelAll("Worker shutting down");
   }
-  if (agent) {
-    await agent.stop();
+  if (projectAgent) {
+    await projectAgent.stop();
+  }
+  if (orchestratorAgent) {
+    await orchestratorAgent.stop();
   }
   postToParent({ type: "shutdown-complete" });
   _exitProcess(0);
@@ -416,64 +480,6 @@ export function splitModelSpec(
   const fbSlash = fallbackSpec.indexOf("/");
   const provider = fbSlash !== -1 ? fallbackSpec.slice(0, fbSlash) : "openai";
   return { provider, model: spec };
-}
-
-/**
- * Load a summary of previous task results from a tasks directory.
- *
- * When a SubAgent is resumed, the new Agent starts fresh with no memory of
- * previous tasks. This function reads completed JSONL task logs from disk
- * and extracts their input + final result, providing context so the resumed
- * SubAgent knows what was already accomplished.
- *
- * @param tasksDir — the tasks directory (contains index.jsonl, date dirs).
- * @returns summary string, or null if no previous tasks found.
- */
-export async function loadPreviousTaskSummary(tasksDir: string): Promise<string | null> {
-  if (!existsSync(tasksDir)) return null;
-
-  try {
-    const index = await TaskPersister.loadIndex(tasksDir);
-    if (index.size === 0) return null;
-
-    const summaries: string[] = [];
-
-    for (const [taskId, date] of index) {
-      const filePath = path.join(tasksDir, date, `${taskId}.jsonl`);
-      if (!existsSync(filePath)) continue;
-
-      try {
-        const ctx = await TaskPersister.replay(filePath);
-
-        // Extract meaningful summary from the task
-        const input = ctx.inputText || ctx.description || "(no input)";
-        let outcome: string;
-
-        if (ctx.finalResult != null) {
-          // Task completed — extract the response text
-          if (typeof ctx.finalResult === "object" && ctx.finalResult !== null) {
-            const response = (ctx.finalResult as Record<string, unknown>).response;
-            outcome = typeof response === "string" ? response : JSON.stringify(ctx.finalResult);
-          } else {
-            outcome = String(ctx.finalResult);
-          }
-        } else if (ctx.error) {
-          outcome = `[Failed: ${ctx.error}]`;
-        } else {
-          outcome = "[No result recorded]";
-        }
-
-        summaries.push(`Task: ${input}\nResult: ${outcome}`);
-      } catch {
-        // Skip tasks with corrupted JSONL
-      }
-    }
-
-    if (summaries.length === 0) return null;
-    return summaries.join("\n\n");
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -571,9 +577,11 @@ export function _setExitProcessForTest(fn: (code: number) => void): () => void {
 
 type AgentFactory = (opts: AgentDeps) => Agent;
 type ProxyModelFactory = (provider: string, modelId: string, send: (msg: unknown) => void) => ProxyLanguageModel;
+type OrchestratorFactory = (deps: OrchestratorAgentDeps) => OrchestratorAgent;
 
 let _agentFactory: AgentFactory | null = null;
 let _proxyModelFactory: ProxyModelFactory | null = null;
+let _orchestratorFactory: OrchestratorFactory | null = null;
 
 /** Override Agent constructor for testing. Returns cleanup function. */
 export function _setAgentFactoryForTest(fn: AgentFactory): () => void {
@@ -587,6 +595,12 @@ export function _setProxyModelFactoryForTest(fn: ProxyModelFactory): () => void 
   return () => { _proxyModelFactory = null; };
 }
 
+/** Override OrchestratorAgent constructor for testing. Returns cleanup function. */
+export function _setOrchestratorFactoryForTest(fn: OrchestratorFactory): () => void {
+  _orchestratorFactory = fn;
+  return () => { _orchestratorFactory = null; };
+}
+
 function _createAgent(opts: AgentDeps): Agent {
   if (_agentFactory) return _agentFactory(opts);
   return new Agent(opts);
@@ -595,4 +609,9 @@ function _createAgent(opts: AgentDeps): Agent {
 function _createProxyModel(provider: string, modelId: string, send: (msg: unknown) => void): ProxyLanguageModel {
   if (_proxyModelFactory) return _proxyModelFactory(provider, modelId, send);
   return new ProxyLanguageModel(provider, modelId, send);
+}
+
+function _createOrchestrator(deps: OrchestratorAgentDeps): OrchestratorAgent {
+  if (_orchestratorFactory) return _orchestratorFactory(deps);
+  return new OrchestratorAgent(deps);
 }
