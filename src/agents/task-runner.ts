@@ -18,8 +18,9 @@ import { allTaskTools } from "../tools/builtins/index.ts";
 import type { AITaskTypeRegistry } from "../aitask-types/registry.ts";
 import { shortId } from "../infra/id.ts";
 import { getLogger } from "../infra/logger.ts";
-import { appendFile, mkdir } from "node:fs/promises";
+import { appendFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import { SessionStore } from "../session/store.ts";
 
 const logger = getLogger("task_runner");
 
@@ -118,9 +119,108 @@ export class TaskRunner {
       source,
       startedAt: Date.now(),
     };
+
+    this._runAgent(agent, taskId, taskType, info);
+
+    return taskId;
+  }
+
+  /**
+   * Resume a previously-submitted task by appending new user input
+   * and re-running the ExecutionAgent from its persisted session.
+   *
+   * Returns taskId immediately; the agent runs fire-and-forget in the background.
+   */
+  async resume(
+    taskId: string,
+    newInput: string,
+    taskType?: string,
+    description?: string,
+  ): Promise<string> {
+    const index = await this._loadIndex();
+    const date = index.get(taskId);
+    if (!date) {
+      throw new Error(`Task ${taskId} not found in task index`);
+    }
+
+    const sessionDir = path.join(this.tasksDir, date, taskId);
+    const sessionStore = new SessionStore(sessionDir);
+    await sessionStore.append({ role: "user", content: newInput });
+
+    const resolvedType = taskType ?? "general";
+    const resolvedDescription = description ?? `Resumed task ${taskId}`;
+    const toolRegistry = this.getToolRegistryForType(resolvedType);
+
+    const agent = new ExecutionAgent({
+      agentId: taskId,
+      model: this.model,
+      toolRegistry,
+      input: newInput,
+      description: resolvedDescription,
+      mode: "worker",
+      sessionDir,
+      contextPrompt: this.taskTypeRegistry.getPrompt(resolvedType),
+      storeImage: this.storeImage,
+      onNotify: (message: string) => {
+        this.onNotification({ type: "notify", taskId, message });
+      },
+    });
+
+    const info: TaskInfo = {
+      taskId,
+      input: newInput,
+      taskType: resolvedType,
+      description: resolvedDescription,
+      source: "resume",
+      startedAt: Date.now(),
+    };
+
+    this._runAgent(agent, taskId, resolvedType, info);
+
+    return taskId;
+  }
+
+  /** Number of currently running tasks. */
+  get activeCount(): number {
+    return this.activeTasks.size;
+  }
+
+  /** Get info about a running task, or null if not found / already completed. */
+  getStatus(taskId: string): TaskInfo | null {
+    return this.activeTasks.get(taskId) ?? null;
+  }
+
+  /** List all currently active tasks. */
+  listAll(): TaskInfo[] {
+    return [...this.activeTasks.values()];
+  }
+
+  /**
+   * Register additional tools (e.g. MCP tools) that should be available
+   * to all task types. Clears the tool registry cache so new tasks
+   * pick up the updated tool set.
+   */
+  setAdditionalTools(tools: Tool[]): void {
+    this.additionalTools = tools;
+    this.toolRegistryCache.clear();
+  }
+
+  // ═══════════════════════════════════════════════════
+  // Internal
+  // ═══════════════════════════════════════════════════
+
+  /**
+   * Fire-and-forget: add to activeTasks, run the agent,
+   * and handle completion/failure notifications.
+   */
+  private _runAgent(
+    agent: ExecutionAgent,
+    taskId: string,
+    taskType: string,
+    info: TaskInfo,
+  ): void {
     this.activeTasks.set(taskId, info);
 
-    // Fire-and-forget: run the agent, handle completion/failure
     agent
       .run()
       .then((result: ExecutionResult) => {
@@ -154,38 +254,27 @@ export class TaskRunner {
         });
         logger.error({ taskId, taskType, err }, "task_runner_error");
       });
-
-    return taskId;
-  }
-
-  /** Number of currently running tasks. */
-  get activeCount(): number {
-    return this.activeTasks.size;
-  }
-
-  /** Get info about a running task, or null if not found / already completed. */
-  getStatus(taskId: string): TaskInfo | null {
-    return this.activeTasks.get(taskId) ?? null;
-  }
-
-  /** List all currently active tasks. */
-  listAll(): TaskInfo[] {
-    return [...this.activeTasks.values()];
   }
 
   /**
-   * Register additional tools (e.g. MCP tools) that should be available
-   * to all task types. Clears the tool registry cache so new tasks
-   * pick up the updated tool set.
+   * Read the task index file (index.jsonl) and return a map of taskId → date.
+   * Returns an empty map if the file does not exist.
    */
-  setAdditionalTools(tools: Tool[]): void {
-    this.additionalTools = tools;
-    this.toolRegistryCache.clear();
+  private async _loadIndex(): Promise<Map<string, string>> {
+    const indexPath = path.join(this.tasksDir, "index.jsonl");
+    const map = new Map<string, string>();
+    try {
+      const content = await readFile(indexPath, "utf-8");
+      const lines = content.trim().split("\n").filter(Boolean);
+      for (const line of lines) {
+        const entry = JSON.parse(line) as { taskId: string; date: string };
+        map.set(entry.taskId, entry.date);
+      }
+    } catch {
+      // File doesn't exist or unreadable — return empty map
+    }
+    return map;
   }
-
-  // ═══════════════════════════════════════════════════
-  // Internal
-  // ═══════════════════════════════════════════════════
 
   /**
    * Build or retrieve a cached ToolRegistry for a given task type.
