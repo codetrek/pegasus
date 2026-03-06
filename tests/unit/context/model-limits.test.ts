@@ -20,7 +20,7 @@ describe("ModelLimits", () => {
 
   describe("DEFAULT_MODEL_LIMITS values", () => {
     it("has expected default values", () => {
-      expect(DEFAULT_MODEL_LIMITS.maxInputTokens).toBe(128_000);
+      expect(DEFAULT_MODEL_LIMITS.maxInputTokens).toBe(128_000 - 16_000);
       expect(DEFAULT_MODEL_LIMITS.maxOutputTokens).toBe(16_000);
       expect(DEFAULT_MODEL_LIMITS.contextWindow).toBe(128_000);
     });
@@ -29,6 +29,12 @@ describe("ModelLimits", () => {
       expect(DEFAULT_MODEL_LIMITS.maxInputTokens).toBeLessThanOrEqual(
         DEFAULT_MODEL_LIMITS.contextWindow,
       );
+    });
+
+    it("maxInputTokens + maxOutputTokens = contextWindow", () => {
+      expect(
+        DEFAULT_MODEL_LIMITS.maxInputTokens + DEFAULT_MODEL_LIMITS.maxOutputTokens,
+      ).toBe(DEFAULT_MODEL_LIMITS.contextWindow);
     });
 
     it("maxOutputTokens matches DEFAULT_MAX_OUTPUT_TOKENS constant", () => {
@@ -42,6 +48,7 @@ describe("ModelLimits", () => {
     it("contains known OpenAI models", () => {
       expect(MODEL_LIMITS["gpt-4o"]).toBeDefined();
       expect(MODEL_LIMITS["gpt-4.1"]).toBeDefined();
+      expect(MODEL_LIMITS["gpt-5.4"]).toBeDefined();
       expect(MODEL_LIMITS["o3"]).toBeDefined();
     });
 
@@ -85,6 +92,14 @@ describe("ModelLimits", () => {
       }
     });
 
+    it("every entry has maxInputTokens + maxOutputTokens <= contextWindow", () => {
+      for (const [, limits] of Object.entries(MODEL_LIMITS)) {
+        expect(limits.maxInputTokens + limits.maxOutputTokens).toBeLessThanOrEqual(
+          limits.contextWindow,
+        );
+      }
+    });
+
     it("deepseek-r1 has maxInputTokens < contextWindow", () => {
       const r1 = MODEL_LIMITS["deepseek-r1"]!;
       expect(r1).toBeDefined();
@@ -102,6 +117,56 @@ describe("ModelLimits", () => {
       }
     });
 
+    it("GPT-4.1 family has 32k maxOutputTokens", () => {
+      for (const modelId of ["gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"]) {
+        const limits = MODEL_LIMITS[modelId]!;
+        expect(limits).toBeDefined();
+        expect(limits.contextWindow).toBe(1_047_576);
+        expect(limits.maxOutputTokens).toBe(32_768);
+      }
+    });
+
+    it("GPT-5.4 family has 1M context and 128k maxOutputTokens", () => {
+      for (const modelId of ["gpt-5.4", "gpt-5.4-pro"]) {
+        const limits = MODEL_LIMITS[modelId]!;
+        expect(limits).toBeDefined();
+        expect(limits.contextWindow).toBe(1_050_000);
+        expect(limits.maxOutputTokens).toBe(128_000);
+      }
+    });
+
+    it("GPT-5.x codex/pro variants have 128k maxOutputTokens", () => {
+      for (const modelId of ["gpt-5.3-codex", "gpt-5.2", "gpt-5.2-codex", "gpt-5.2-pro"]) {
+        const limits = MODEL_LIMITS[modelId]!;
+        expect(limits).toBeDefined();
+        expect(limits.maxOutputTokens).toBe(128_000);
+      }
+    });
+
+    it("Claude models have 32k maxOutputTokens (capped for agent use)", () => {
+      for (const modelId of [
+        "claude-sonnet-4.6", "claude-opus-4.6",
+        "claude-sonnet-4.5", "claude-opus-4.5", "claude-haiku-4.5",
+        "claude-opus-4", "claude-opus-4.1", "claude-sonnet-4",
+      ]) {
+        expect(MODEL_LIMITS[modelId]!.maxOutputTokens).toBe(32_000);
+      }
+    });
+
+    it("Claude models use 200K standard context window", () => {
+      for (const modelId of [
+        "claude-sonnet-4.6", "claude-opus-4.6",
+        "claude-sonnet-4.5", "claude-opus-4.5", "claude-haiku-4.5",
+        "claude-opus-4", "claude-opus-4.1", "claude-sonnet-4",
+      ]) {
+        expect(MODEL_LIMITS[modelId]!.contextWindow).toBe(200_000);
+      }
+    });
+
+    it("DeepSeek V3.2 has 65k maxOutputTokens", () => {
+      expect(MODEL_LIMITS["deepseek-v3.2"]!.maxOutputTokens).toBe(65_536);
+    });
+
     it("Gemini models have 65k maxOutputTokens", () => {
       for (const modelId of ["gemini-2.5-pro", "gemini-2.5-flash"]) {
         const limits = MODEL_LIMITS[modelId]!;
@@ -116,7 +181,7 @@ describe("ModelLimits", () => {
       const limits = getModelLimits("gpt-4o")!;
       expect(limits).toBeDefined();
       expect(limits.contextWindow).toBe(128_000);
-      expect(limits.maxInputTokens).toBe(128_000);
+      expect(limits.maxInputTokens).toBe(128_000 - 16_384);
     });
 
     it("strips YYYYMMDD date suffix", () => {

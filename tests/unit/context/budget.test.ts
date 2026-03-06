@@ -18,9 +18,9 @@ describe("computeTokenBudget", () => {
   it("computes budget for a known model (gpt-4o = 128k)", () => {
     const budget = computeTokenBudget({ modelId: "gpt-4o" });
     expect(budget.contextWindow).toBe(128_000);
-    // gpt-4o: maxInputTokens = 128_000, maxOutputTokens = 16_384
+    // gpt-4o: contextWindow=128k, maxOutputTokens=16384, maxInputTokens=128k-16384
     expect(budget.maxOutputTokens).toBe(16_384);
-    expect(budget.maxInputTokens).toBe(128_000);
+    expect(budget.maxInputTokens).toBe(128_000 - 16_384);
     expect(budget.effectiveInputBudget).toBe(
       Math.floor(budget.maxInputTokens / TOKEN_ESTIMATION_SAFETY_MARGIN),
     );
@@ -45,17 +45,17 @@ describe("computeTokenBudget", () => {
   it("falls back to default for unknown models", () => {
     const budget = computeTokenBudget({ modelId: "unknown-model-xyz" });
     expect(budget.contextWindow).toBe(DEFAULT_CONTEXT_WINDOW);
-    expect(budget.maxInputTokens).toBe(DEFAULT_CONTEXT_WINDOW);
+    expect(budget.maxInputTokens).toBe(DEFAULT_CONTEXT_WINDOW - DEFAULT_MAX_OUTPUT_TOKENS);
     expect(budget.maxOutputTokens).toBe(DEFAULT_MAX_OUTPUT_TOKENS);
     expect(budget.source).toBe("default");
   });
 
   it("uses model-specific output tokens from registry", () => {
-    // o1 has 100k output tokens
+    // o1 has 100k output tokens, so maxInputTokens = 200k - 100k = 100k
     const budget = computeTokenBudget({ modelId: "o1" });
     expect(budget.maxOutputTokens).toBe(100_000);
     expect(budget.contextWindow).toBe(200_000);
-    expect(budget.maxInputTokens).toBe(200_000);
+    expect(budget.maxInputTokens).toBe(100_000);
     expect(budget.source).toBe("registry");
   });
 
@@ -69,10 +69,11 @@ describe("computeTokenBudget", () => {
     );
   });
 
-  it("handles large context window model (claude-sonnet-4.6 = 1M)", () => {
+  it("handles claude-sonnet-4.6 (200K context, 32K output)", () => {
     const budget = computeTokenBudget({ modelId: "claude-sonnet-4.6" });
-    expect(budget.contextWindow).toBe(1_000_000);
-    expect(budget.maxInputTokens).toBe(1_000_000);
+    expect(budget.contextWindow).toBe(200_000);
+    expect(budget.maxInputTokens).toBe(200_000 - 32_000);
+    expect(budget.maxOutputTokens).toBe(32_000);
     expect(budget.source).toBe("registry");
   });
 

@@ -28,12 +28,12 @@ describe("getContextWindowSize", () => {
   }, 5_000);
 
   // ── Anthropic ──
-  test("claude-sonnet-4.6 → 1M", () => {
-    expect(getContextWindowSize("claude-sonnet-4.6")).toBe(1_000_000);
+  test("claude-sonnet-4.6 → 200K", () => {
+    expect(getContextWindowSize("claude-sonnet-4.6")).toBe(200_000);
   }, 5_000);
 
-  test("claude-opus-4.6 → 1M", () => {
-    expect(getContextWindowSize("claude-opus-4.6")).toBe(1_000_000);
+  test("claude-opus-4.6 → 200K", () => {
+    expect(getContextWindowSize("claude-opus-4.6")).toBe(200_000);
   }, 5_000);
 
   test("claude-opus-4 → 200k", () => {
@@ -54,8 +54,8 @@ describe("getContextWindowSize", () => {
     expect(getContextWindowSize("llama-4-maverick")).toBe(1_048_576);
   }, 5_000);
 
-  test("llama-4-scout → 327k", () => {
-    expect(getContextWindowSize("llama-4-scout")).toBe(327_680);
+  test("llama-4-scout → 10M", () => {
+    expect(getContextWindowSize("llama-4-scout")).toBe(10_000_000);
   }, 5_000);
 
   test("llama-3.3-70b-instruct → 131k", () => {
@@ -111,8 +111,8 @@ describe("getContextWindowSize", () => {
     expect(getContextWindowSize("qwen-long")).toBe(10_000_000);
   }, 5_000);
 
-  test("qwen-plus → 1M", () => {
-    expect(getContextWindowSize("qwen-plus")).toBe(1_000_000);
+  test("qwen-plus → 131k", () => {
+    expect(getContextWindowSize("qwen-plus")).toBe(131_072);
   }, 5_000);
 
   // ── MiniMax ──
@@ -145,8 +145,8 @@ describe("getContextWindowSize", () => {
   }, 5_000);
 
   // ── Date suffix stripping ──
-  test("claude-sonnet-4-20250514 → strips date → claude-sonnet-4 → 1M", () => {
-    expect(getContextWindowSize("claude-sonnet-4-20250514")).toBe(1_000_000);
+  test("claude-sonnet-4-20250514 → strips date → claude-sonnet-4 → 200K", () => {
+    expect(getContextWindowSize("claude-sonnet-4-20250514")).toBe(200_000);
   }, 5_000);
 
   test("gpt-4o-2024-08-06 → strips date → gpt-4o → 128k", () => {
