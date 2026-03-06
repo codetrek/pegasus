@@ -66,12 +66,36 @@ import type { AgentStorePaths } from "../storage/paths.ts";
 
 const logger = getLogger("main_agent");
 
+/**
+ * Injected subsystems — provided by PegasusApp when running in orchestrated mode.
+ * When present, MainAgent skips self-initialization of these subsystems in onStart().
+ * When absent (backward compat), MainAgent creates them itself as before.
+ */
+export interface InjectedSubsystems {
+  modelLimitsCache: ModelLimitsCache;
+  authManager: AuthManager;
+  mcpManager: MCPManager | null;
+  tokenRefreshMonitor: TokenRefreshMonitor | null;
+  skillRegistry: SkillRegistry;
+  skillDirs: Array<{ dir: string; source: "builtin" | "user" }>;
+  aiTaskTypeRegistry: AITaskTypeRegistry;
+  taskRunner: TaskRunner;
+  projectManager: ProjectManager;
+  projectAdapter: ProjectAdapter;
+  subAgentManager: SubAgentManager | null;
+  imageManager: ImageManager | null;
+  tickManager: TickManager;
+  reflectionOrchestrator: ReflectionOrchestrator;
+}
+
 export interface MainAgentDeps {
   models: ModelRegistry;
   persona: Persona;
   settings?: Settings;
   /** Optional ProjectAdapter for dependency injection (testing). */
   _projectAdapter?: ProjectAdapter;
+  /** Optional injected subsystems from PegasusApp. When provided, MainAgent skips self-init. */
+  injected?: InjectedSubsystems;
 }
 
 export class MainAgent extends ConversationAgent {
@@ -83,11 +107,11 @@ export class MainAgent extends ConversationAgent {
   private replyCallback: ((msg: OutboundMessage) => void) | null = null;
   private adapters: ChannelAdapter[] = [];
   private _mainOverflowRetryCount = 0;
-  private skillRegistry: SkillRegistry;
+  private skillRegistry!: SkillRegistry;
   private skillDirs: Array<{ dir: string; source: "builtin" | "user" }> = [];
-  private aiTaskTypeRegistry: AITaskTypeRegistry;
-  private projectManager: ProjectManager;
-  private projectAdapter: ProjectAdapter;
+  private aiTaskTypeRegistry!: AITaskTypeRegistry;
+  private projectManager!: ProjectManager;
+  private projectAdapter!: ProjectAdapter;
   private mainStorePaths: AgentStorePaths;
   private subAgentManager: SubAgentManager | null = null;
   private imageManager: ImageManager | null = null; // null when vision disabled
@@ -98,7 +122,13 @@ export class MainAgent extends ConversationAgent {
   private authManager!: AuthManager;
   private reflectionOrchestrator!: ReflectionOrchestrator;
   private _mcpAuthDir: string;
-  private tickManager: TickManager;
+  private tickManager!: TickManager;
+
+  /**
+   * When true, subsystems were injected by PegasusApp.
+   * onStart() skips infrastructure init; onStop() skips infrastructure shutdown.
+   */
+  private _injectedMode = false;
 
   // ── Custom tool executor for MainAgent's rich ToolContext ──
   private mainToolExecutor: ToolExecutor;
@@ -144,34 +174,56 @@ export class MainAgent extends ConversationAgent {
       (this.settings.tools?.timeout ?? 30) * 1000,
     );
 
-    // Skill system
-    this.skillRegistry = new SkillRegistry();
-    this.aiTaskTypeRegistry = new AITaskTypeRegistry();
+    // ── Injected mode: use subsystems from PegasusApp ──
+    if (deps.injected) {
+      this._injectedMode = true;
+      const inj = deps.injected;
+      this.modelLimitsCache = inj.modelLimitsCache;
+      this.authManager = inj.authManager;
+      this.mcpManager = inj.mcpManager;
+      this.tokenRefreshMonitor = inj.tokenRefreshMonitor;
+      this.skillRegistry = inj.skillRegistry;
+      this.skillDirs = inj.skillDirs;
+      this.aiTaskTypeRegistry = inj.aiTaskTypeRegistry;
+      this.taskRunner = inj.taskRunner;
+      this.projectManager = inj.projectManager;
+      this.projectAdapter = inj.projectAdapter;
+      this.subAgentManager = inj.subAgentManager;
+      this.imageManager = inj.imageManager;
+      this.tickManager = inj.tickManager;
+      this.reflectionOrchestrator = inj.reflectionOrchestrator;
+    } else {
+      // ── Self-init mode: MainAgent creates everything itself (backward compat) ──
 
-    // Projects
-    const projectsDir = path.join(this.settings.dataDir, "agents", "projects");
-    this.projectManager = new ProjectManager(projectsDir);
-    this.projectAdapter = deps._projectAdapter ?? new ProjectAdapter();
+      // Skill system
+      this.skillRegistry = new SkillRegistry();
+      this.aiTaskTypeRegistry = new AITaskTypeRegistry();
 
-    // Vision: create ImageManager if enabled
-    const visionConfig = this.settings.vision;
-    if (visionConfig?.enabled !== false) {
-      const mediaDir = path.join(this.settings.dataDir, "media");
-      this.imageManager = new ImageManager(mediaDir, {
-        maxDimensionPx: visionConfig?.maxDimensionPx,
-        maxBytes: visionConfig?.maxImageBytes,
+      // Projects
+      const projectsDir = path.join(this.settings.dataDir, "agents", "projects");
+      this.projectManager = new ProjectManager(projectsDir);
+      this.projectAdapter = deps._projectAdapter ?? new ProjectAdapter();
+
+      // Vision: create ImageManager if enabled
+      const visionConfig = this.settings.vision;
+      if (visionConfig?.enabled !== false) {
+        const mediaDir = path.join(this.settings.dataDir, "media");
+        this.imageManager = new ImageManager(mediaDir, {
+          maxDimensionPx: visionConfig?.maxDimensionPx,
+          maxBytes: visionConfig?.maxImageBytes,
+        });
+      }
+
+      // Tick manager — periodic status injection for long-running work
+      this.tickManager = new TickManager({
+        getActiveWorkCount: () => ({
+          tasks: this.taskRunner?.activeCount ?? 0,
+          subagents: this.subAgentManager?.activeCount ?? 0,
+        }),
+        hasPendingWork: () => this.hasQueuedWork(),
+        onTick: (activeTasks, activeSubAgents) => this._handleTick(activeTasks, activeSubAgents),
       });
     }
-
-    // Tick manager — periodic status injection for long-running work
-    this.tickManager = new TickManager({
-      getActiveWorkCount: () => ({
-        tasks: this.taskRunner?.activeCount ?? 0,
-        subagents: this.subAgentManager?.activeCount ?? 0,
-      }),
-      hasPendingWork: () => this.hasQueuedWork(),
-      onTick: (activeTasks, activeSubAgents) => this._handleTick(activeTasks, activeSubAgents),
-    });
   }
 
   // ═══════════════════════════════════════════════════
@@ -251,6 +303,40 @@ export class MainAgent extends ConversationAgent {
     if (this.sessionMessages.length === 0) {
       await this._injectMemoryIndex();
     }
+
+    // In injected mode, PegasusApp already initialized all infrastructure.
+    // We only need to build the system prompt.
+    if (this._injectedMode) {
+      // Register MCP tools in MainAgent's own tool registry (for conversation)
+      if (this.mcpManager) {
+        const mcpConfigs = (this.settings.tools?.mcpServers ?? []) as MCPServerConfig[];
+        for (const config of mcpConfigs.filter((c) => c.enabled)) {
+          try {
+            const mcpTools = await this.mcpManager.listTools(config.name);
+            const wrapped = wrapMCPTools(config.name, mcpTools, this.mcpManager);
+            for (const tool of wrapped) {
+              this.toolRegistry.register(tool);
+            }
+          } catch (err) {
+            logger.warn(
+              { server: config.name, error: errorToString(err) },
+              "main_agent_mcp_tools_register_failed",
+            );
+          }
+        }
+      }
+
+      // Build system prompt once (stable for LLM prefix caching)
+      this._systemPrompt = this._buildSystemPrompt();
+
+      logger.info(
+        { sessionMessages: this.sessionMessages.length, injectedMode: true },
+        "main_agent_started",
+      );
+      return;
+    }
+
+    // ── Self-init mode: MainAgent creates all infrastructure itself ──
 
     // Initialize model limits cache for provider-aware token budget resolution
     const modelLimitsCacheDir = path.join(os.homedir(), ".pegasus", "model-limits");
@@ -434,6 +520,15 @@ export class MainAgent extends ConversationAgent {
     // isRunning is already false (set by BaseAgent.stop()), so _drainQueue
     // will exit after the current item — no risk of hanging.
     await this.waitForQueueDrain();
+
+    // In injected mode, PegasusApp owns infrastructure shutdown.
+    // MainAgent only needs to stop tick + drain queue (done above).
+    if (this._injectedMode) {
+      logger.info({ injectedMode: true }, "main_agent_stopped");
+      return;
+    }
+
+    // ── Self-init mode: shut down all infrastructure ──
 
     // Stop active SubAgents first (they share the WorkerAdapter)
     if (this.subAgentManager) {
@@ -1569,5 +1664,38 @@ export class MainAgent extends ConversationAgent {
       const ref = await imgMgr.store(buffer, mimeType, source);
       return { id: ref.id, mimeType: ref.mimeType };
     };
+  }
+
+  // ═══════════════════════════════════════════════════
+  // Public API for PegasusApp orchestration
+  // ═══════════════════════════════════════════════════
+
+  /**
+   * Push a task notification into the queue (used by PegasusApp's TaskRunner callback).
+   * Equivalent to the self-init mode's onNotification callback.
+   */
+  pushTaskNotification(notification: TaskNotification): void {
+    this.pushQueue({ kind: "task_notify", notification } as QueueItem);
+  }
+
+  /**
+   * Handle a tick from PegasusApp's TickManager.
+   * Injects status summary and triggers a think cycle.
+   */
+  _handleTickFromApp(activeTasks: number, activeSubAgents: number): void {
+    this._handleTick(activeTasks, activeSubAgents);
+  }
+
+  /**
+   * Rebuild the cached system prompt after skill reload or other changes.
+   * Called by PegasusApp after skill registry changes.
+   */
+  _rebuildSystemPrompt(): void {
+    this._systemPrompt = this._buildSystemPrompt();
+  }
+
+  /** Whether this MainAgent is running in injected (PegasusApp) mode. */
+  get isInjectedMode(): boolean {
+    return this._injectedMode;
   }
 }
