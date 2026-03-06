@@ -6,7 +6,9 @@
  *   2. 3-state model (IDLE/BUSY/WAITING) via AgentStateManager
  *   3. Event-driven processStep engine (non-blocking tool dispatch)
  *   4. Concurrency control (event queue for BUSY state)
- *   5. Hooks for subclass customization
+ *   5. Session persistence (SessionStore + sessionMessages)
+ *   6. Context compaction (beforeLLMCall + onLLMError overflow recovery)
+ *   7. Hooks for subclass customization
  *
  * Subclass contract:
  *   - Override buildSystemPrompt()  — what identity/instructions the LLM sees
@@ -302,6 +304,7 @@ export abstract class BaseAgent {
 
       state.iteration++;
       await this.onLLMUsage(result);
+      this._overflowRetryCount = 0; // Reset on successful LLM call
 
       // No tool calls → task complete
       if (!result.toolCalls?.length) {
@@ -551,7 +554,7 @@ export abstract class BaseAgent {
  * Mechanical (non-LLM) summary: extract key stats from messages.
  * Used as fallback when LLM summarization fails.
  */
-function mechanicalSummary(messages: Message[]): string {
+export function mechanicalSummary(messages: Message[]): string {
   const userMessages = messages.filter((m) => m.role === "user");
   const assistantMessages = messages.filter((m) => m.role === "assistant");
   const toolMessages = messages.filter((m) => m.role === "tool");

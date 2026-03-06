@@ -5,13 +5,13 @@
  *
  *   "task" mode — inline, fire-and-forget:
  *     - Runs in caller's thread
- *     - No session persistence
- *     - Cannot be resumed after crash
+ *     - Session persistence via BaseAgent (compaction + crash recovery)
  *     - Used for simple, atomic work
  *
  *   "worker" mode — persistent, Worker thread:
  *     - Runs in dedicated Worker thread (via WorkerAdapter)
- *     - Has session persistence (recoverable)
+ *     - Session persistence via BaseAgent (compaction + crash recovery)
+ *     - Explicit session load/append for incremental persistence
  *     - Can be suspended/resumed
  *     - Used for longer-running work needing crash isolation
  *

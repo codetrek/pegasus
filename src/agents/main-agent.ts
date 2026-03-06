@@ -51,6 +51,7 @@ import { TickManager } from "./tick-manager.ts";
 import { AuthManager } from "./auth-manager.ts";
 import { ReflectionOrchestrator } from "./reflection-orchestrator.ts";
 import { ConversationAgent, type QueueItem } from "./base/conversation-agent.ts";
+import { mechanicalSummary } from "./base/base-agent.ts";
 import { EventBus } from "../events/bus.ts";
 
 // Main Agent's curated tool set
@@ -625,7 +626,7 @@ export class MainAgent extends ConversationAgent {
         { error: errorToString(err) },
         "session_summary_failed_using_mechanical",
       );
-      summary = this._mechanicalSummary(this.sessionMessages);
+      summary = mechanicalSummary(this.sessionMessages);
     }
 
     await this.sessionStore.compact(summary);
@@ -643,38 +644,6 @@ export class MainAgent extends ConversationAgent {
     }
   }
 
-  /**
-   * Mechanical (non-LLM) summary: extract key stats from messages.
-   * Used as fallback when LLM summarization fails.
-   */
-  private _mechanicalSummary(messages: Message[]): string {
-    const userMessages = messages.filter((m) => m.role === "user");
-    const assistantMessages = messages.filter((m) => m.role === "assistant");
-    const toolMessages = messages.filter((m) => m.role === "tool");
-    const recentUsers = userMessages.slice(-3).map(
-      (m, i) =>
-        `  ${i + 1}. ${
-          typeof m.content === "string"
-            ? m.content.slice(0, 200)
-            : String(m.content).slice(0, 200)
-        }`,
-    );
-    const toolNames = new Set<string>();
-    for (const m of assistantMessages) {
-      if (m.toolCalls) {
-        for (const tc of m.toolCalls) toolNames.add(tc.name);
-      }
-    }
-    return [
-      `[Session compacted — ${messages.length} messages archived]`,
-      "",
-      "Recent user messages:",
-      ...recentUsers,
-      "",
-      `Tools used: ${[...toolNames].join(", ") || "(none)"}`,
-      `Total exchanges: ${userMessages.length} user, ${assistantMessages.length} assistant, ${toolMessages.length} tool`,
-    ].join("\n");
-  }
 
   // ═══════════════════════════════════════════════════
   // Thinking override — uses direct LLM call (not processStep)
