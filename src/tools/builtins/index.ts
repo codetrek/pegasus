@@ -94,7 +94,7 @@ const reply = replyToolModule.reply;
 
 export { reply };
 
-// Skill tools (for Main Agent — signal tools)
+// Skill tools (for Main Agent)
 import * as skillToolModule from "./skill-tool.ts";
 const use_skill = skillToolModule.use_skill;
 import * as reloadSkillsModule from "./reload-skills-tool.ts";
