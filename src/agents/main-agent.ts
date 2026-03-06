@@ -504,9 +504,12 @@ export class MainAgent extends ConversationAgent {
           toolContext,
         );
 
-        // Format result
+        // Format result — preserve raw strings (e.g. inline skill body),
+        // only JSON.stringify objects/arrays
         const rawContent = toolResult.success
-          ? JSON.stringify(toolResult.result)
+          ? typeof toolResult.result === "string"
+            ? toolResult.result
+            : JSON.stringify(toolResult.result)
           : `Error: ${toolResult.error}`;
 
         // Truncate large results
