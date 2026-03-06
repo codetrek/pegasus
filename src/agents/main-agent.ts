@@ -343,6 +343,15 @@ export class MainAgent extends ConversationAgent {
   }
 
   /**
+   * Reset overflow retry counter on successful LLM call.
+   * BaseAgent resets its own counter, but MainAgent has a separate one
+   * for its custom compaction logic.
+   */
+  protected override async onLLMUsage(_result: import("../infra/llm-types.ts").GenerateTextResult): Promise<void> {
+    this._mainOverflowRetryCount = 0;
+  }
+
+  /**
    * Overflow error handler.
    *
    * Called by BaseAgent.processStep when generateText() fails with a context

@@ -1,7 +1,7 @@
 import type { InboundMessage } from "../channels/types.ts";
 import type { OwnerStore } from "./owner-store.ts";
 
-const INTERNAL_CHANNEL_TYPES = new Set(["cli", "project", "subagent"]);
+const INTERNAL_CHANNEL_TYPES = new Set(["cli", "project", "subagent", "system"]);
 
 export type MessageClassification =
   | { type: "owner" }

@@ -8,8 +8,8 @@
  *
  * Skill names may use hyphens (e.g., "code-review") which are invalid in
  * Telegram commands. We convert them to underscores ("code_review").
- * MainAgent._handleSkillCommand() does lookup by name — we need it to
- * find the skill whether the user types /code-review or /code_review.
+ * The LLM receives /command text as a normal message and can invoke
+ * the appropriate skill via the use_skill tool.
  */
 import type { SkillDefinition } from "../skills/types.ts";
 import type { TelegramCommand } from "./telegram.ts";

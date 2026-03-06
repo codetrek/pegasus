@@ -380,7 +380,13 @@ export abstract class BaseAgent {
       // Create collector, dispatch tools in parallel (fire-and-forget)
       const collector = new ToolCallCollector(
         result.toolCalls.length,
-        () => { this._onAllToolsDone(taskId); },
+        () => {
+          this._onAllToolsDone(taskId).catch((err) => {
+            logger.error({ err, taskId, agentId: this.agentId }, "all_tools_done_error");
+            this.stateManager.markIdle();
+            this.onTaskComplete(taskId, "", "error").catch(() => {});
+          });
+        },
       );
       state.activeCollector = collector;
 
