@@ -22,6 +22,7 @@ import { getSettings } from "./infra/config.ts";
 import { errorToString } from "./infra/errors.ts";
 import { getLogger } from "./infra/logger.ts";
 import type { ModelRegistry } from "./infra/model-registry.ts";
+import { sanitizeForPrompt } from "./infra/sanitize.ts";
 import { ModelLimitsCache } from "./context/index.ts";
 import { AuthManager } from "./agents/auth-manager.ts";
 import { MCPManager, wrapMCPTools } from "./mcp/index.ts";
@@ -45,7 +46,10 @@ import type { Tool, ToolContext } from "./tools/types.ts";
 import { MainAgent } from "./agents/main-agent.ts";
 import type { InjectedSubsystems } from "./agents/main-agent.ts";
 import { buildMainAgentPaths } from "./storage/paths.ts";
-import type { ChannelAdapter, OutboundMessage, StoreImageFn } from "./channels/types.ts";
+import type { ChannelAdapter, InboundMessage, OutboundMessage, StoreImageFn } from "./channels/types.ts";
+import { OwnerStore } from "./security/owner-store.ts";
+import { classifyMessage } from "./security/message-classifier.ts";
+import { formatChannelMeta } from "./agents/base/conversation-agent.ts";
 
 const logger = getLogger("pegasus_app");
 
@@ -81,6 +85,10 @@ export class PegasusApp {
   private _adapters: ChannelAdapter[] = [];
   private _replyCallback: ((msg: OutboundMessage) => void) | null = null;
   private _started = false;
+
+  // ── Security ──
+  private ownerStore!: OwnerStore;
+  private _channelNotifyTimes = new Map<string, number>();
 
   constructor(deps: PegasusAppDeps) {
     this.models = deps.models;
@@ -127,6 +135,62 @@ export class PegasusApp {
   registerAdapter(adapter: ChannelAdapter): void {
     this._adapters.push(adapter);
     this._ensureReplyRouting();
+  }
+
+  /**
+   * Route an inbound message with security classification.
+   *
+   * All inbound messages flow through this method. It classifies the sender
+   * (owner, untrusted, no-owner) and routes accordingly:
+   *   - owner: forward to MainAgent.send() (trusted)
+   *   - untrusted: route to per-channel Project for isolated processing
+   *   - no_owner_configured: discard message, notify MainAgent
+   *
+   * Also detects SubAgent completion from tagged notify messages.
+   */
+  routeMessage(message: InboundMessage): void {
+    if (!this._mainAgent) {
+      logger.warn("route_message_before_start");
+      return;
+    }
+
+    // SubAgent completion detection — do this before security check
+    // because subagent messages are always trusted (internal)
+    if (
+      message.channel.type === "subagent" &&
+      this.subAgentManager &&
+      message.metadata?.subagentDone
+    ) {
+      this.subAgentManager.markDone(
+        message.channel.channelId,
+        message.metadata.subagentDone as "completed" | "failed",
+      );
+    }
+
+    // Security classification
+    const classification = classifyMessage(message, this.ownerStore);
+
+    switch (classification.type) {
+      case "owner":
+        // Trusted — forward to MainAgent
+        this._mainAgent.send(message);
+        break;
+
+      case "no_owner_configured":
+        // No owner for this channel type — discard message, notify MainAgent
+        this._handleNoOwnerMessage(classification.channelType, message);
+        break;
+
+      case "untrusted":
+        // Non-owner — route to channel Project
+        this._handleUntrustedMessage(classification.channelType, message);
+        break;
+    }
+  }
+
+  /** Expose owner store for testing. */
+  get owner(): OwnerStore {
+    return this.ownerStore;
   }
 
   /**
@@ -186,6 +250,9 @@ export class PegasusApp {
     // 1. ModelLimitsCache
     const modelLimitsCacheDir = path.join(os.homedir(), ".pegasus", "model-limits");
     this.modelLimitsCache = new ModelLimitsCache(modelLimitsCacheDir);
+
+    // Security: create OwnerStore for message classification
+    this.ownerStore = new OwnerStore(this.settings.authDir);
 
     // Intentional separate ToolRegistry — ReflectionOrchestrator runs independently
     // (fire-and-forget after compaction) and needs its own tool execution pipeline.
@@ -344,6 +411,7 @@ export class PegasusApp {
       tickManager: this.tickManager,
       reflectionOrchestrator: this.reflectionOrchestrator,
       mcpTools: wrappedMcpTools,
+      ownerStore: this.ownerStore,
     };
 
     this._mainAgent = new MainAgent({
@@ -367,7 +435,7 @@ export class PegasusApp {
     // which would overwrite our reply callback)
     this._adapters.push(this.projectAdapter);
     this._ensureReplyRouting();
-    await this.projectAdapter.start({ send: (msg) => this._mainAgent!.send(msg) });
+    await this.projectAdapter.start({ send: (msg) => this.routeMessage(msg) });
 
     // Wire channel Project direct replies to channel adapters
     this.projectAdapter.setOnReply((msg: OutboundMessage) => {
@@ -487,5 +555,98 @@ export class PegasusApp {
       const ref = await mgr.store(buffer, mimeType, source);
       return { id: ref.id, mimeType: ref.mimeType };
     };
+  }
+
+  /**
+   * Handle message from a channel with no owner configured.
+   * Discards the message content. Sends a notification to MainAgent:
+   * - First time: immediate notification with channel identity info
+   * - After that: at most once per hour as a reminder
+   */
+  private _handleNoOwnerMessage(channelType: string, message: InboundMessage): void {
+    const now = Date.now();
+    const lastNotify = this._channelNotifyTimes.get(channelType) ?? 0;
+    const isFirstEver = !this.ownerStore.isNotified(channelType);
+    const hourElapsed = now - lastNotify > 60 * 60 * 1000;
+
+    if (isFirstEver || hourElapsed) {
+      this.ownerStore.markNotified(channelType);
+      this._channelNotifyTimes.set(channelType, now);
+
+      // Build notification with channel identity info (NO message content — security)
+      const userId = sanitizeForPrompt(message.channel.userId ?? "unknown").slice(0, 64);
+      const username = sanitizeForPrompt((message.metadata?.username as string) ?? "").slice(0, 64);
+      const userInfo = username ? `${userId} (username: ${username})` : userId;
+
+      const notifyText =
+        `[System: New ${channelType} channel activity detected. ` +
+        `Sender: ${userInfo}. ` +
+        `No trusted owner configured for ${channelType} channel. ` +
+        `All messages from this channel are being discarded. ` +
+        `If this is you, use trust(action="add", channel="${channelType}", userId="${userId}") to add yourself.]`;
+
+      // Send as internal system message to MainAgent (no security check — we ARE the router)
+      if (this._mainAgent) {
+        this._mainAgent.send({
+          text: notifyText,
+          channel: { type: "system", channelId: "security" },
+        });
+      }
+    }
+
+    logger.info(
+      { channelType, userId: message.channel.userId },
+      "message_discarded_no_owner",
+    );
+  }
+
+  /**
+   * Handle message from a non-owner on a configured channel.
+   * Routes to a per-channel-type Project for isolated processing.
+   * Auto-creates the channel Project if it doesn't exist.
+   */
+  private _handleUntrustedMessage(channelType: string, message: InboundMessage): void {
+    const projectName = `channel:${channelType}`;
+
+    // Auto-create channel Project if it doesn't exist
+    if (!this.projectManager.get(projectName)) {
+      try {
+        this.projectManager.create({
+          name: projectName,
+          goal:
+            `Handle messages from non-owner users on the ${channelType} channel. ` +
+            `Respond politely and helpfully. You are a public-facing assistant. ` +
+            `Do NOT reveal personal information about the owner. ` +
+            `Do NOT execute shell commands or access the filesystem. ` +
+            `When you receive a message, reply using the channel info provided in the metadata line.`,
+        });
+        const project = this.projectManager.get(projectName);
+        if (project) {
+          this.projectAdapter.startProject(projectName, project.projectDir);
+        }
+        logger.info({ projectName, channelType }, "channel_project_auto_created");
+      } catch (err) {
+        logger.error(
+          { projectName, error: errorToString(err) },
+          "channel_project_create_failed",
+        );
+        return; // Can't route — discard silently
+      }
+    }
+
+    // Prepend channel metadata so the Project Worker knows the source context.
+    const metaLine = formatChannelMeta(message.channel);
+    const enrichedMessage: InboundMessage = {
+      ...message,
+      text: `${metaLine}\n${message.text}`,
+    };
+
+    // Route to channel Project
+    this.projectAdapter.sendToProject(projectName, enrichedMessage);
+
+    logger.info(
+      { channelType, userId: message.channel.userId, project: projectName },
+      "message_routed_to_channel_project",
+    );
   }
 }

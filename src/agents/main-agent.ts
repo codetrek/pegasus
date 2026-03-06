@@ -47,11 +47,10 @@ import { ProjectManager } from "../projects/manager.ts";
 import { ProjectAdapter } from "../projects/project-adapter.ts";
 import { SubAgentManager } from "../subagent/manager.ts";
 import { OwnerStore } from "../security/owner-store.ts";
-import { classifyMessage } from "../security/message-classifier.ts";
 import { TickManager } from "./tick-manager.ts";
 import { AuthManager } from "./auth-manager.ts";
 import { ReflectionOrchestrator } from "./reflection-orchestrator.ts";
-import { ConversationAgent, formatChannelMeta, type QueueItem } from "./base/conversation-agent.ts";
+import { ConversationAgent, type QueueItem } from "./base/conversation-agent.ts";
 import { mechanicalSummary } from "./base/base-agent.ts";
 import { EventBus } from "../events/bus.ts";
 
@@ -86,6 +85,8 @@ export interface InjectedSubsystems {
   reflectionOrchestrator: ReflectionOrchestrator;
   /** Pre-wrapped MCP tools for MainAgent's tool registry (avoids double-wrapping). */
   mcpTools: Tool[];
+  /** Owner trust store — created by PegasusApp, used in ToolContext. */
+  ownerStore: OwnerStore;
 }
 
 export interface MainAgentDeps {
@@ -112,7 +113,6 @@ export class MainAgent extends ConversationAgent {
   private imageManager: ImageManager | null = null; // null when vision disabled
   private imageReadCache: Map<string, { data: string; mimeType: string }> = new Map();
   private ownerStore: OwnerStore;
-  private _channelNotifyTimes = new Map<string, number>();
   private _systemPrompt: string = "";
   private reflectionOrchestrator!: ReflectionOrchestrator;
   private tickManager!: TickManager;
@@ -152,9 +152,6 @@ export class MainAgent extends ConversationAgent {
     this.settings = settings;
     this.mainStorePaths = mainStorePaths;
 
-    // Owner trust store for channel security
-    this.ownerStore = new OwnerStore(this.settings.authDir);
-
     // Tool executor for Main Agent's simple tools (no EventBus needed)
     this.mainToolExecutor = new ToolExecutor(
       this.toolRegistry,
@@ -166,6 +163,7 @@ export class MainAgent extends ConversationAgent {
     this.injected = deps.injected;
     const inj = deps.injected;
     this.modelLimitsCache = inj.modelLimitsCache;
+    this.ownerStore = inj.ownerStore;
     this.skillRegistry = inj.skillRegistry;
     this.skillDirs = inj.skillDirs;
     this.aiTaskTypeRegistry = inj.aiTaskTypeRegistry;
@@ -177,36 +175,6 @@ export class MainAgent extends ConversationAgent {
     this.tickManager = inj.tickManager;
     this.reflectionOrchestrator = inj.reflectionOrchestrator;
   }
-
-  // ═══════════════════════════════════════════════════
-  // Public API overrides
-  // ═══════════════════════════════════════════════════
-
-  /**
-   * Send a message to Main Agent (fire-and-forget, queued).
-   * Adds security classification before queuing.
-   */
-  override send(message: InboundMessage): void {
-    const classification = classifyMessage(message, this.ownerStore);
-
-    switch (classification.type) {
-      case "owner":
-        // Trusted — delegate to parent (queues message + processes)
-        super.send(message);
-        break;
-
-      case "no_owner_configured":
-        // No owner for this channel type — discard message, notify MainAgent
-        this._handleNoOwnerMessage(classification.channelType, message);
-        break;
-
-      case "untrusted":
-        // Non-owner — route to channel Project
-        this._handleUntrustedMessage(classification.channelType, message);
-        break;
-    }
-  }
-
 
   // ═══════════════════════════════════════════════════
   // Lifecycle overrides
@@ -730,103 +698,6 @@ export class MainAgent extends ConversationAgent {
   }
 
   // ── Channel security ──
-
-  /**
-   * Handle message from a channel with no owner configured.
-   * Discards the message content. Injects a notification to MainAgent:
-   * - First time: immediate notification with channel identity info
-   * - After that: at most once per hour as a reminder
-   */
-  private _handleNoOwnerMessage(channelType: string, message: InboundMessage): void {
-    const now = Date.now();
-    const lastNotify = this._channelNotifyTimes.get(channelType) ?? 0;
-    const isFirstEver = !this.ownerStore.isNotified(channelType);
-    const hourElapsed = now - lastNotify > 60 * 60 * 1000;
-
-    if (isFirstEver || hourElapsed) {
-      this.ownerStore.markNotified(channelType);
-      this._channelNotifyTimes.set(channelType, now);
-
-      // Build notification with channel identity info (NO message content — security)
-      const userId = sanitizeForPrompt(message.channel.userId ?? "unknown").slice(0, 64);
-      const username = sanitizeForPrompt((message.metadata?.username as string) ?? "").slice(0, 64);
-      const userInfo = username ? `${userId} (username: ${username})` : userId;
-
-      const notifyText =
-        `[System: New ${channelType} channel activity detected. ` +
-        `Sender: ${userInfo}. ` +
-        `No trusted owner configured for ${channelType} channel. ` +
-        `All messages from this channel are being discarded. ` +
-        `If this is you, use trust(action="add", channel="${channelType}", userId="${userId}") to add yourself.]`;
-
-      const systemMsg: Message = { role: "user", content: notifyText };
-      this.sessionMessages.push(systemMsg);
-      this.sessionStore.append(systemMsg, { type: "channel_security" });
-
-      // Trigger think so the LLM can notify the owner
-      const lastChannel = this._getLastChannel();
-      if (lastChannel) {
-        this.pushQueue({ kind: "think", channel: lastChannel } as QueueItem);
-      }
-    }
-
-    logger.info(
-      { channelType, userId: message.channel.userId },
-      "message_discarded_no_owner",
-    );
-  }
-
-  /**
-   * Handle message from a non-owner on a configured channel.
-   * Routes to a per-channel-type Project for isolated processing.
-   * Auto-creates the channel Project if it doesn't exist.
-   */
-  private _handleUntrustedMessage(channelType: string, message: InboundMessage): void {
-    const projectName = `channel:${channelType}`;
-
-    // Auto-create channel Project if it doesn't exist
-    if (!this.projectManager.get(projectName)) {
-      try {
-        this.projectManager.create({
-          name: projectName,
-          goal:
-            `Handle messages from non-owner users on the ${channelType} channel. ` +
-            `Respond politely and helpfully. You are a public-facing assistant. ` +
-            `Do NOT reveal personal information about the owner. ` +
-            `Do NOT execute shell commands or access the filesystem. ` +
-            `When you receive a message, reply using the channel info provided in the metadata line.`,
-        });
-        const project = this.projectManager.get(projectName);
-        if (project) {
-          this.projectAdapter.startProject(projectName, project.projectDir);
-        }
-        logger.info({ projectName, channelType }, "channel_project_auto_created");
-      } catch (err) {
-        logger.error(
-          { projectName, error: errorToString(err) },
-          "channel_project_create_failed",
-        );
-        return; // Can't route — discard silently
-      }
-    }
-
-    // Prepend channel metadata so the Project Worker knows the source context.
-    // This mirrors how ConversationAgent formats messages in _handleMessage() — the LLM
-    // sees the channel info and can reference it in replies.
-    const metaLine = formatChannelMeta(message.channel);
-    const enrichedMessage: InboundMessage = {
-      ...message,
-      text: `${metaLine}\n${message.text}`,
-    };
-
-    // Route to channel Project
-    this.projectAdapter.sendToProject(projectName, enrichedMessage);
-
-    logger.info(
-      { channelType, userId: message.channel.userId, project: projectName },
-      "message_routed_to_channel_project",
-    );
-  }
 
   // ── Memory index injection ──
 
