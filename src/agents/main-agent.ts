@@ -24,7 +24,7 @@ import type { Settings } from "../infra/config.ts";
 import { getSettings } from "../infra/config.ts";
 import { getLogger } from "../infra/logger.ts";
 import { ToolRegistry } from "../tools/registry.ts";
-import type { OutboundMessage, StoreImageFn } from "../channels/types.ts";
+import type { OutboundMessage } from "../channels/types.ts";
 import { ImageManager } from "../media/image-manager.ts";
 import { TaskRunner } from "./task-runner.ts";
 import type { TaskNotification } from "./task-runner.ts";
@@ -210,6 +210,7 @@ export class MainAgent extends ConversationAgent {
    * Called by BaseAgent._executeToolAsync() via the buildToolContext() hook.
    */
   protected override buildToolContext(taskId: string): ToolContext {
+    const imgMgr = this.imageManager;
     return {
       taskId,
       memoryDir: this.mainStorePaths.memory!,
@@ -218,15 +219,21 @@ export class MainAgent extends ConversationAgent {
       taskRegistry: this.taskRunner,
       projectManager: this.projectManager,
       ownerStore: this.ownerStore,
-      mediaDir: this.imageManager
+      mediaDir: imgMgr
         ? path.join(this.settings.dataDir, "media")
         : undefined,
-      storeImage: this._getStoreImageCallback(),
-      // Self-executing tool dependencies:
+      storeImage: imgMgr
+        ? async (buffer: Buffer, mimeType: string, source: string) => {
+            const ref = await imgMgr.store(buffer, mimeType, source);
+            return { id: ref.id, mimeType: ref.mimeType };
+          }
+        : undefined,
       onReply: this._onReply
         ? (msg: unknown) => this._onReply!(msg as OutboundMessage)
         : undefined,
-      resolveImage: (idOrPath: string) => this._resolveImage(idOrPath),
+      resolveImage: imgMgr
+        ? (idOrPath: string) => imgMgr.resolve(idOrPath)
+        : undefined,
       subAgentManager: this.subAgentManager,
       skillRegistry: this.skillRegistry,
       tickManager: this.tickManager,
@@ -290,21 +297,6 @@ export class MainAgent extends ConversationAgent {
   }
 
   // ═══════════════════════════════════════════════════
-  // Vision support
-  // ═══════════════════════════════════════════════════
-
-  /**
-   * Resolve an image identifier via ImageManager.
-   * Delegates to ImageManager.resolve() for ID lookup, file path handling, and caching.
-   */
-  private async _resolveImage(
-    idOrPath: string,
-  ): Promise<{ id: string; data: string; mimeType: string } | null> {
-    if (!this.imageManager) return null;
-    return this.imageManager.resolve(idOrPath);
-  }
-
-  // ═══════════════════════════════════════════════════
   // Task notification tick management
   // ═══════════════════════════════════════════════════
 
@@ -334,9 +326,8 @@ export class MainAgent extends ConversationAgent {
     this.sessionMessages.push(statusMsg);
     this.sessionStore.append(statusMsg, { type: "tick" });
 
-    const lastChannel = this._getLastChannel();
-    if (lastChannel) {
-      this.pushQueue({ kind: "think", channel: lastChannel } as QueueItem);
+    if (this.lastChannel) {
+      this.pushQueue({ kind: "think", channel: this.lastChannel } as QueueItem);
     }
   }
 
@@ -497,10 +488,6 @@ export class MainAgent extends ConversationAgent {
     return lines.join("\n");
   }
 
-  private _getLastChannel() {
-    return this.lastChannel;
-  }
-
   /** Expose TaskRunner for testing. */
   get _taskRunner(): TaskRunner {
     return this.taskRunner;
@@ -559,32 +546,6 @@ export class MainAgent extends ConversationAgent {
       fire: () => this.tickManager.fire(),
       isRunning: () => this.tickManager.isRunning,
       sessionMessages: this.sessionMessages,
-    };
-  }
-
-  /**
-   * Get a storeImage callback for ToolContext injection (TaskRunner deps + direct tool execution).
-   * Returns undefined when vision is disabled (imageManager is null).
-   */
-  private _getStoreImageCallback(): ToolContext["storeImage"] {
-    if (!this.imageManager) return undefined;
-    const mgr = this.imageManager;
-    return async (buffer: Buffer, mimeType: string, source: string) => {
-      const ref = await mgr.store(buffer, mimeType, source);
-      return { id: ref.id, mimeType: ref.mimeType };
-    };
-  }
-
-  /**
-   * Get a StoreImageFn callback for channel adapters.
-   * Returns undefined when vision is disabled (imageManager is null).
-   */
-  getStoreImageFn(): StoreImageFn | undefined {
-    if (!this.imageManager) return undefined;
-    const imgMgr = this.imageManager;
-    return async (buffer: Buffer, mimeType: string, source: string) => {
-      const ref = await imgMgr.store(buffer, mimeType, source);
-      return { id: ref.id, mimeType: ref.mimeType };
     };
   }
 
