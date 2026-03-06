@@ -99,8 +99,6 @@ export interface ToolContext {
   onSkillsReloaded?: unknown;
   /** ProjectAdapter for starting/stopping project Workers (loosely typed). */
   projectAdapter?: unknown;
-  /** Default channel type for reply tool fallback when LLM omits channelType. */
-  defaultChannelType?: string;
 }
 
 // ── ToolStats ─────────────────────────────────

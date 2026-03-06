@@ -367,6 +367,7 @@ describe("MainAgent", () => {
                   name: "reply",
                   arguments: {
                     text: "The time has been checked!",
+                    channelType: "cli",
                     channelId: "test",
                   },
                 },
@@ -446,6 +447,7 @@ describe("MainAgent", () => {
                 name: "reply",
                 arguments: {
                   text: `Response ${mainCallCount}`,
+                  channelType: "cli",
                   channelId: "test",
                 },
               },

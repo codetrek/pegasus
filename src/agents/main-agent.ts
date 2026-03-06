@@ -495,7 +495,7 @@ export class MainAgent extends ConversationAgent {
 
       // Execute all tool calls
 
-      const toolContext = this._buildToolContext(channel);
+      const toolContext = this._buildToolContext();
 
       for (const tc of result.toolCalls) {
         const toolResult = await this.mainToolExecutor.execute(
@@ -612,7 +612,7 @@ export class MainAgent extends ConversationAgent {
    * Build a full ToolContext with all dependencies for self-executing tools.
    * All tools (signal + generic) use the same context — no special-casing.
    */
-  private _buildToolContext(channel?: ChannelInfo): ToolContext {
+  private _buildToolContext(): ToolContext {
     return {
       taskId: "main-agent",
       memoryDir: this.mainStorePaths.memory!,
@@ -639,7 +639,6 @@ export class MainAgent extends ConversationAgent {
         return this.skillRegistry.listAll().length;
       },
       projectAdapter: this.projectAdapter,
-      defaultChannelType: channel?.type,
     };
   }
 
