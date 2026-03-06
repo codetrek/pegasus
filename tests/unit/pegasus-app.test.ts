@@ -129,7 +129,6 @@ describe("PegasusApp", () => {
     // MainAgent should be accessible
     const mainAgent = app.mainAgent;
     expect(mainAgent).toBeDefined();
-    expect(mainAgent.isInjectedMode).toBe(true);
 
     await app.stop();
     expect(app.isStarted).toBe(false);
@@ -290,7 +289,6 @@ describe("PegasusApp", () => {
     await app.start();
 
     const mainAgent = app.mainAgent;
-    expect(mainAgent.isInjectedMode).toBe(true);
 
     const replies: OutboundMessage[] = [];
     mainAgent.onReply((msg) => replies.push(msg));

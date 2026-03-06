@@ -10,9 +10,8 @@
  *   stop()           → shut down MainAgent, then tear down subsystems in reverse order
  *   registerAdapter() → register channel adapter with reply routing
  *
- * Backward compatibility:
- *   MainAgent can still be used without PegasusApp (existing tests create it directly).
- *   When PegasusApp provides injected deps, MainAgent skips self-initialization.
+ * MainAgent requires injected subsystems — tests create them via
+ * createInjectedSubsystems() helper, production code via PegasusApp.
  */
 
 import path from "node:path";

@@ -1412,9 +1412,4 @@ export class MainAgent extends ConversationAgent {
   setSubAgentManager(mgr: SubAgentManager): void {
     this.subAgentManager = mgr;
   }
-
-  /** Whether this MainAgent is running in injected (PegasusApp) mode. Always true. */
-  get isInjectedMode(): boolean {
-    return true;
-  }
 }
