@@ -68,7 +68,7 @@ export type QueueItem =
 export abstract class ConversationAgent extends BaseAgent {
   protected persona: Persona;
 
-  private _onReply: ReplyCallback | null = null;
+  protected _onReply: ReplyCallback | null = null;
   private _onSpawnAgent: SpawnAgentCallback | null = null;
 
   private queue: QueueItem[] = [];

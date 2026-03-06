@@ -30,7 +30,7 @@ import { errorToString } from "../infra/errors.ts";
 import { getLogger } from "../infra/logger.ts";
 import { ToolRegistry } from "../tools/registry.ts";
 import { ToolExecutor } from "../tools/executor.ts";
-import type { InboundMessage, OutboundMessage, ChannelAdapter, ChannelInfo, StoreImageFn } from "../channels/types.ts";
+import type { InboundMessage, OutboundMessage, ChannelInfo, StoreImageFn } from "../channels/types.ts";
 import { ImageManager } from "../media/image-manager.ts";
 import { hydrateImages } from "../media/image-prune.ts";
 import { extToMime } from "../media/image-helpers.ts";
@@ -101,8 +101,6 @@ export class MainAgent extends ConversationAgent {
   private models: ModelRegistry;
   private settings: Settings;
   private taskRunner!: TaskRunner; // Task execution — initialized in start()
-  private replyCallback: ((msg: OutboundMessage) => void) | null = null;
-  private adapters: ChannelAdapter[] = [];
   private _mainOverflowRetryCount = 0;
   private skillRegistry!: SkillRegistry;
   private skillDirs: Array<{ dir: string; source: "builtin" | "user" }> = [];
@@ -183,32 +181,6 @@ export class MainAgent extends ConversationAgent {
   // ═══════════════════════════════════════════════════
   // Public API overrides
   // ═══════════════════════════════════════════════════
-
-  /** Register reply callback. Also sets ConversationAgent's _onReply for error handling. */
-  override onReply(callback: (msg: OutboundMessage) => void): void {
-    this.replyCallback = callback;
-    super.onReply(callback);
-  }
-
-  /** Register a channel adapter for multi-channel routing. */
-  registerAdapter(adapter: ChannelAdapter): void {
-    this.adapters.push(adapter);
-    // Set unified reply routing — routes outbound messages to the correct adapter
-    const routingCallback = (msg: OutboundMessage) => {
-      const target = this.adapters.find((a) => a.type === msg.channel.type);
-      if (target) {
-        target.deliver(msg).catch((err) =>
-          logger.error(
-            { channel: msg.channel.type, error: errorToString(err) },
-            "deliver_failed",
-          ),
-        );
-      } else {
-        logger.warn({ channel: msg.channel.type }, "no_adapter_for_channel");
-      }
-    };
-    this.onReply(routingCallback);
-  }
 
   /**
    * Send a message to Main Agent (fire-and-forget, queued).
@@ -564,7 +536,7 @@ export class MainAgent extends ConversationAgent {
           };
           this.sessionMessages.push(toolMsg);
           await this.sessionStore.append(toolMsg);
-          if (this.replyCallback) {
+          if (this._onReply) {
             // Build outbound message
             const outbound: OutboundMessage = {
               text,
@@ -576,7 +548,7 @@ export class MainAgent extends ConversationAgent {
               outbound.content = { text, images };
             }
 
-            this.replyCallback(outbound);
+            this._onReply(outbound);
           }
         } else if (tc.name === "spawn_task") {
           await this._handleSpawnTask(tc);

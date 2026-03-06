@@ -2786,86 +2786,6 @@ describe("MainAgent", () => {
     }, 10_000);
   });
 
-  // ── registerAdapter reply routing tests ──
-
-  describe("registerAdapter reply routing", () => {
-    it("should route reply to matching adapter", async () => {
-      const model = createReplyModel("routed reply");
-      const agent = createMainAgent({ models: createMockModelRegistry(model) });
-
-      const delivered: OutboundMessage[] = [];
-      const mockAdapter = {
-        type: "test-channel" as const,
-        deliver: mock(async (msg: OutboundMessage) => { delivered.push(msg); }),
-        start: mock(async () => {}),
-        stop: mock(async () => {}),
-      } as unknown as import("@pegasus/channels/types.ts").ChannelAdapter;
-
-      agent.registerAdapter(mockAdapter);
-
-      // Trigger the reply callback directly
-      const replyCallback = (agent as any).replyCallback;
-      expect(replyCallback).toBeDefined();
-
-      replyCallback({
-        text: "test message",
-        channel: { type: "test-channel", channelId: "ch1" },
-      });
-
-      await Bun.sleep(50);
-      expect(mockAdapter.deliver).toHaveBeenCalledTimes(1);
-    });
-
-    it("should log warning when no adapter matches channel type", async () => {
-      const model = createReplyModel("ok");
-      const agent = createMainAgent({ models: createMockModelRegistry(model) });
-
-      const mockAdapter = {
-        type: "slack" as const,
-        deliver: mock(async () => {}),
-        start: mock(async () => {}),
-        stop: mock(async () => {}),
-      } as unknown as import("@pegasus/channels/types.ts").ChannelAdapter;
-
-      agent.registerAdapter(mockAdapter);
-
-      // Send to a channel type that has no adapter
-      const replyCallback = (agent as any).replyCallback;
-      // This should not throw, just log warning
-      replyCallback({
-        text: "unroutable message",
-        channel: { type: "unknown-channel", channelId: "ch1" },
-      });
-
-      await Bun.sleep(50);
-      expect(mockAdapter.deliver).not.toHaveBeenCalled();
-    });
-
-    it("should handle adapter deliver failure gracefully", async () => {
-      const model = createReplyModel("ok");
-      const agent = createMainAgent({ models: createMockModelRegistry(model) });
-
-      const mockAdapter = {
-        type: "cli" as const,
-        deliver: mock(async () => { throw new Error("deliver failed"); }),
-        start: mock(async () => {}),
-        stop: mock(async () => {}),
-      } as unknown as import("@pegasus/channels/types.ts").ChannelAdapter;
-
-      agent.registerAdapter(mockAdapter);
-
-      const replyCallback = (agent as any).replyCallback;
-      // Should not throw even when deliver fails
-      replyCallback({
-        text: "will fail delivery",
-        channel: { type: "cli", channelId: "ch1" },
-      });
-
-      await Bun.sleep(50);
-      expect(mockAdapter.deliver).toHaveBeenCalledTimes(1);
-    });
-  });
-
   describe("tick mechanism", () => {
     async function createAndStartAgent(): Promise<MainAgent> {
       const model = createReplyModel("ok");
@@ -3392,11 +3312,11 @@ describe("MainAgent", () => {
       const replies: OutboundMessage[] = [];
       agent.onReply((msg) => replies.push(msg));
 
-      // Wire channel project replies to agent's replyCallback (PegasusApp normally does this)
+      // Wire channel project replies to agent's reply callback (PegasusApp normally does this)
       projectAdapter.setOnReply((msg: OutboundMessage) => {
-        // Forward to agent's reply callback
-        const replyCallback = (agent as any).replyCallback;
-        if (replyCallback) replyCallback(msg);
+        // Forward to agent's _onReply callback (set by onReply())
+        const onReplyFn = (agent as any)._onReply;
+        if (onReplyFn) onReplyFn(msg);
       });
 
       // The onReply callback should have been set on the WorkerAdapter
