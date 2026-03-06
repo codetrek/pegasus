@@ -18,19 +18,19 @@ function ModelSection() {
     <box flexDirection="column" paddingLeft={1} paddingRight={1} paddingBottom={1}>
       <SectionHeader icon="📊" title="Model & Tokens" />
       <box flexDirection="column" paddingTop={1}>
-        <text fg={THEME.text} style={{ bold: true }}>
-          {d.model.provider}/{d.model.model.split("-").slice(-1)[0]}
+        <text fg={THEME.text}>
+          <b>{d.model.provider}/{d.model.model.split("-").slice(-1)[0]}</b>
         </text>
         <text fg={THEME.textMuted}>context: {fmtTok(d.model.contextWindow)}</text>
 
-        <text fg={THEME.text} paddingTop={1} style={{ bold: true }}>Last LLM call:</text>
+        <text fg={THEME.text} paddingTop={1}><b>Last LLM call:</b></text>
         <text fg={THEME.text}> prompt   {d.lastCall.promptTokens.toLocaleString()} tok</text>
         <text fg={THEME.text}> cache rd {d.lastCall.cacheReadTokens.toLocaleString()} tok</text>
         <text fg={THEME.text}> cache wr {d.lastCall.cacheWriteTokens.toLocaleString()} tok</text>
         <text fg={THEME.text}> output   {d.lastCall.outputTokens.toLocaleString()} tok</text>
         <text fg={THEME.text}> latency  {d.lastCall.latencyMs.toLocaleString()} ms</text>
 
-        <text fg={THEME.text} paddingTop={1} style={{ bold: true }}>Session totals:</text>
+        <text fg={THEME.text} paddingTop={1}><b>Session totals:</b></text>
         <text fg={THEME.text}> prompt  {fmtTok(d.session.totalPromptTokens)} tok</text>
         <text fg={THEME.text}> output  {fmtTok(d.session.totalOutputTokens)} tok</text>
         <text fg={THEME.text}> LLM calls: {d.session.llmCalls}</text>
@@ -51,7 +51,7 @@ function BudgetSection() {
 
   return (
     <box flexDirection="column" paddingLeft={1} paddingRight={1} paddingBottom={1} border={["top"]} borderColor={THEME.border}>
-      <text fg={THEME.text} style={{ bold: true }}>Budget:</text>
+      <text fg={THEME.text}><b>Budget:</b></text>
       <text fg={THEME.text}> {fmtTok(d.budget.used)} / {fmtTok(d.budget.total)} ({pct}%)</text>
       <text fg={pct > d.budget.compactThreshold * 100 ? THEME.warning : THEME.accent}>
         {" "}{barWithMarker}
