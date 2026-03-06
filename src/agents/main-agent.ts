@@ -9,7 +9,6 @@
  * by PegasusApp — MainAgent never self-initializes them.
  *
  * Key overrides:
- *   - _handleMessage()       → sanitization, imageRef extraction
  *   - buildToolContext()      → rich ToolContext with all dependencies
  *   - compactIfNeeded()       → session compaction using ModelRegistry
  *   - onLLMError()            → overflow recovery with session reload
@@ -22,12 +21,11 @@ import type { Message } from "../infra/llm-types.ts";
 import type { Persona } from "../identity/persona.ts";
 import { buildSystemPrompt, formatSize } from "../prompts/index.ts";
 import type { Settings } from "../infra/config.ts";
-import { sanitizeForPrompt } from "../infra/sanitize.ts";
 import { getSettings } from "../infra/config.ts";
 import { errorToString } from "../infra/errors.ts";
 import { getLogger } from "../infra/logger.ts";
 import { ToolRegistry } from "../tools/registry.ts";
-import type { InboundMessage, OutboundMessage, StoreImageFn } from "../channels/types.ts";
+import type { OutboundMessage, StoreImageFn } from "../channels/types.ts";
 import { ImageManager } from "../media/image-manager.ts";
 import { hydrateImages } from "../media/image-prune.ts";
 import { extToMime } from "../media/image-helpers.ts";
@@ -213,27 +211,6 @@ export class MainAgent extends ConversationAgent {
     // PegasusApp owns infrastructure shutdown.
     // MainAgent only needs to stop tick + drain queue (done above).
     logger.info("main_agent_stopped");
-  }
-
-  // ═══════════════════════════════════════════════════
-  // Message handling override
-  // ═══════════════════════════════════════════════════
-
-  protected override async _handleMessage(message: InboundMessage): Promise<void> {
-    // Sanitize text
-    const text = sanitizeForPrompt(message.text.trim());
-
-    // Extract imageRefs from subagent notify metadata
-    if (message.metadata?.imageRefs) {
-      const refs = message.metadata.imageRefs as Array<{ id: string; mimeType: string }>;
-      if (refs.length > 0) {
-        const existing = message.images ?? [];
-        message.images = [...existing, ...refs.map(ref => ({ id: ref.id, mimeType: ref.mimeType }))];
-      }
-    }
-
-    // Delegate to ConversationAgent — handles channel metadata, session, and thinking
-    await super._handleMessage({ ...message, text });
   }
 
   // ═══════════════════════════════════════════════════

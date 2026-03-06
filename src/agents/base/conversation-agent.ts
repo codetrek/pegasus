@@ -28,6 +28,7 @@ import type {
   OutboundMessage,
 } from "../../channels/types.ts";
 import { formatTimestamp } from "../../infra/time.ts";
+import { sanitizeForPrompt } from "../../infra/sanitize.ts";
 import { getLogger } from "../../infra/logger.ts";
 
 const logger = getLogger("conversation_agent");
@@ -210,9 +211,21 @@ export abstract class ConversationAgent extends BaseAgent {
   protected async _handleMessage(message: InboundMessage): Promise<void> {
     this.lastChannel = message.channel;
 
+    // Sanitize input — strip control characters that could be used for prompt injection
+    const text = sanitizeForPrompt(message.text.trim());
+
+    // Extract imageRefs from metadata (e.g. subagent/worker notifications)
+    if (message.metadata?.imageRefs) {
+      const refs = message.metadata.imageRefs as Array<{ id: string; mimeType: string }>;
+      if (refs.length > 0) {
+        const existing = message.images ?? [];
+        message.images = [...existing, ...refs.map(ref => ({ id: ref.id, mimeType: ref.mimeType }))];
+      }
+    }
+
     // Channel metadata for LLM visibility
     const channelMeta = formatChannelMeta(message.channel);
-    const content = channelMeta ? `${channelMeta}\n${message.text}` : message.text;
+    const content = channelMeta ? `${channelMeta}\n${text}` : text;
 
     // Add user message to session
     const userMsg: Message = { role: "user", content };
