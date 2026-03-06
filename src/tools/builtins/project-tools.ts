@@ -2,8 +2,9 @@
  * Project management tools — allow MainAgent to create, list, and
  * manage project lifecycle (suspend/resume/complete/archive).
  *
- * Each tool signals intent; the MainAgent intercepts the result and
- * coordinates with ProjectManager + Worker spawning (Task 8).
+ * Tools directly manage Worker lifecycle via ctx.projectAdapter when available.
+ * If projectAdapter is not in the context (e.g. task agents), the tool still
+ * performs the ProjectManager operation but skips Worker management.
  */
 
 import { z } from "zod";
@@ -11,6 +12,12 @@ import { ToolCategory } from "../types.ts";
 import type { Tool, ToolResult, ToolContext } from "../types.ts";
 
 // ── Helpers ────────────────────────────────────────────────
+
+/** Duck-typed interface for ProjectAdapter (loose coupling). */
+interface ProjectAdapterLike {
+  startProject(name: string, projectDir: string): void;
+  stopProject(name: string): Promise<void>;
+}
 
 /** Type for ProjectManager methods used by these tools (loose coupling). */
 interface ProjectManagerLike {
@@ -23,6 +30,7 @@ interface ProjectManagerLike {
     workdir?: string;
   }): { name: string; status: string; prompt: string; projectDir: string };
   list(status?: string): Array<{ name: string; status: string; [k: string]: unknown }>;
+  get(name: string): { name: string; projectDir: string; [k: string]: unknown } | null;
   suspend(name: string): void;
   resume(name: string): void;
   complete(name: string): void;
@@ -35,6 +43,10 @@ function getProjectManager(context: ToolContext): ProjectManagerLike {
     throw new Error("projectManager not available in tool context");
   }
   return pm;
+}
+
+function getProjectAdapter(context: ToolContext): ProjectAdapterLike | null {
+  return (context.projectAdapter as ProjectAdapterLike | undefined) ?? null;
 }
 
 // ── create_project ────────────────────────────────────────
@@ -77,6 +89,13 @@ export const create_project: Tool = {
       };
       const pm = getProjectManager(context);
       const def = pm.create({ name, goal, background, constraints, model, workdir });
+
+      // Start the project Worker if projectAdapter is available
+      const adapter = getProjectAdapter(context);
+      if (adapter) {
+        adapter.startProject(def.name, def.projectDir);
+      }
+
       return {
         success: true,
         result: {
@@ -160,6 +179,13 @@ export const suspend_project: Tool = {
       const { name } = params as { name: string };
       const pm = getProjectManager(context);
       pm.suspend(name);
+
+      // Stop the project Worker if projectAdapter is available
+      const adapter = getProjectAdapter(context);
+      if (adapter) {
+        await adapter.stopProject(name);
+      }
+
       return {
         success: true,
         result: { action: "suspend_project", name, status: "suspended" },
@@ -195,6 +221,16 @@ export const resume_project: Tool = {
       const { name } = params as { name: string };
       const pm = getProjectManager(context);
       pm.resume(name);
+
+      // Start the project Worker if projectAdapter is available
+      const adapter = getProjectAdapter(context);
+      if (adapter) {
+        const project = pm.get(name);
+        if (project) {
+          adapter.startProject(name, project.projectDir);
+        }
+      }
+
       return {
         success: true,
         result: { action: "resume_project", name, status: "active" },
@@ -230,6 +266,13 @@ export const complete_project: Tool = {
       const { name } = params as { name: string };
       const pm = getProjectManager(context);
       pm.complete(name);
+
+      // Stop the project Worker if projectAdapter is available
+      const adapter = getProjectAdapter(context);
+      if (adapter) {
+        await adapter.stopProject(name);
+      }
+
       return {
         success: true,
         result: { action: "complete_project", name, status: "completed" },
