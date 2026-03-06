@@ -92,10 +92,11 @@ export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubs
   const workerAdapter = projectAdapter.getWorkerAdapter();
   const subAgentManager = new SubAgentManager(workerAdapter, settings.dataDir);
 
-  // Vision: create ImageManager if enabled (mirrors PegasusApp behavior)
+  // Vision: ImageManager disabled by default in tests to avoid SQLite DB cleanup issues.
+  // Tests that need vision should set settings.vision.enabled = true or inject imageManager.
   let imageManager: ImageManager | null = null;
   const visionConfig = settings.vision;
-  if (visionConfig?.enabled !== false) {
+  if (visionConfig?.enabled === true) {
     const mediaDir = path.join(settings.dataDir, "media");
     imageManager = new ImageManager(mediaDir, {
       maxDimensionPx: visionConfig?.maxDimensionPx,
