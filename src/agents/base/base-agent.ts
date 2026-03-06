@@ -36,8 +36,10 @@ import { createTaskState, type TaskExecutionState, type CreateTaskStateOptions }
 import { getLogger } from "../../infra/logger.ts";
 import { createTokenCounter, type TokenCounter } from "../../infra/token-counter.ts";
 import { SessionStore } from "../../session/store.ts";
+import { formatToolTimestamp } from "../../infra/time.ts";
 import {
   computeTokenBudget,
+  truncateToolResult,
   summarizeMessages,
   isContextOverflowError,
   TASK_COMPACT_THRESHOLD,
@@ -70,6 +72,12 @@ export interface BaseAgentDeps {
   contextWindow?: number;
   /** Model limits cache for token budget computation. */
   modelLimitsCache?: ModelLimitsCache;
+  /**
+   * Optional image hydrator — called in beforeLLMCall() to convert image refs
+   * to base64 data for LLM consumption. Allows MainAgent to inject vision
+   * support without overriding beforeLLMCall() for that purpose.
+   */
+  imageHydrator?: (messages: Message[]) => Promise<Message[]>;
 }
 
 // ── Helpers ──────────────────────────────────────────
@@ -133,6 +141,9 @@ export abstract class BaseAgent {
   /** Optional storeImage callback injected into ToolContext for all tool executions. */
   private _storeImage?: ToolContext["storeImage"];
 
+  /** Optional image hydrator for vision support in beforeLLMCall(). */
+  private _imageHydrator?: (messages: Message[]) => Promise<Message[]>;
+
   /** Per-task execution state for event-driven processStep engine. */
   protected taskStates = new Map<string, TaskExecutionState>();
 
@@ -150,6 +161,7 @@ export abstract class BaseAgent {
     this.stateManager = new AgentStateManager();
     this.maxIterations = deps.maxIterations ?? 25;
     this._storeImage = deps.storeImage;
+    this._imageHydrator = deps.imageHydrator;
     this.sessionStore = new SessionStore(deps.sessionDir);
     this.contextWindow = deps.contextWindow;
     this.modelLimitsCache = deps.modelLimitsCache;
@@ -277,6 +289,28 @@ export abstract class BaseAgent {
 
   /** Called during stop(). Subclasses can do async cleanup. */
   protected async onStop(): Promise<void> {}
+
+  /**
+   * Build a ToolContext for tool execution. Subclasses override to inject
+   * rich context (memory paths, callbacks, managers) for their tool set.
+   *
+   * Default: minimal context with taskId + storeImage.
+   */
+  protected buildToolContext(taskId: string): ToolContext {
+    const ctx: ToolContext = { taskId };
+    if (this._storeImage) ctx.storeImage = this._storeImage;
+    return ctx;
+  }
+
+  /**
+   * Get the maximum chars allowed for a tool result. Subclasses override
+   * to compute from their model's context window.
+   *
+   * Default: no truncation (returns Infinity).
+   */
+  protected getMaxToolResultChars(): number {
+    return Infinity;
+  }
 
   // ═══════════════════════════════════════════════════
   // Event-Driven processStep Engine
@@ -406,6 +440,7 @@ export abstract class BaseAgent {
 
   /**
    * Execute a single tool call asynchronously. Fire-and-forget.
+   * Includes result formatting: string coercion, timestamp prefix, and truncation.
    */
   private _executeToolAsync(
     taskId: string,
@@ -437,14 +472,24 @@ export abstract class BaseAgent {
           }
           break;
         case "execute": {
-          const ctx: ToolContext = { taskId };
-          if (this._storeImage) ctx.storeImage = this._storeImage;
+          const ctx = this.buildToolContext(taskId);
           const result = await this.toolExecutor.execute(
             tc.name,
             tc.arguments,
             ctx,
           );
           toolResult = formatToolResult(tc.id, tc.name, result);
+
+          // Apply result formatting: timestamp prefix + truncation
+          const maxChars = this.getMaxToolResultChars();
+          if (maxChars < Infinity && toolResult.content.length > maxChars) {
+            toolResult.content = truncateToolResult(toolResult.content, maxChars);
+          }
+          const tsPrefix = formatToolTimestamp(
+            result.completedAt ?? Date.now(),
+            result.durationMs,
+          );
+          toolResult.content = `${tsPrefix}\n${toolResult.content}`;
           break;
         }
       }
@@ -466,10 +511,17 @@ export abstract class BaseAgent {
     finishReason: "complete" | "max_iterations" | "interrupted" | "error",
   ): Promise<void>;
 
-  /** Hook called before each LLM call. Checks token budget and triggers compaction if needed. */
+  /** Hook called before each LLM call. Checks token budget, hydrates images, and triggers compaction if needed. */
   protected async beforeLLMCall(taskId: string): Promise<void> {
     const state = this.taskStates.get(taskId);
-    if (!state || state.messages.length < 8) return;
+    if (!state) return;
+
+    // Image hydration — if imageHydrator is set, hydrate images in messages
+    if (this._imageHydrator) {
+      state.messages = await this._imageHydrator(state.messages);
+    }
+
+    if (state.messages.length < 8) return;
 
     // Use actual token count from last API response when available;
     // fall back to token counter for the first call.
