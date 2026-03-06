@@ -2,41 +2,38 @@
  * MainAgent — persistent LLM conversation partner.
  *
  * Extends ConversationAgent to inherit queue processing, session management,
- * and reply routing. Adds multi-channel security, task/subagent delegation,
- * skills, MCP integration, memory, vision, and compaction.
+ * reply routing, and the processStep-based thinking engine. Adds task/subagent
+ * delegation, skills, MCP integration, memory, vision, and compaction.
  *
  * All infrastructure subsystems (auth, MCP, skills, tasks, etc.) are injected
  * by PegasusApp — MainAgent never self-initializes them.
  *
  * Key overrides:
- *   - send()            → security classification before queuing
- *   - _handleMessage()  → custom formatting, subagent completion, skill commands
- *   - _think()          → image hydration, direct LLM call (no processStep)
- *   - beforeLLMCall()   → session compaction using this.models (not placeholder)
- *   - onLLMError()      → overflow recovery with session reload + re-hydration
- *   - onStart()/onStop()→ session lifecycle (load, memory, prompt; tick + drain)
- *   - buildSystemPrompt()→ cached system prompt with skills/projects/etc.
+ *   - _handleMessage()   → sanitization, imageRef extraction
+ *   - buildToolContext()  → rich ToolContext with all dependencies
+ *   - beforeLLMCall()     → session compaction using this.models
+ *   - onLLMError()        → overflow recovery with session reload
+ *   - onStart()/onStop()  → session lifecycle (load, memory, prompt; tick + drain)
+ *   - buildSystemPrompt() → cached system prompt with skills/projects/etc.
+ *   - getMaxToolResultChars() → truncation budget from model context window
  */
 
 import type { Message } from "../infra/llm-types.ts";
-import { generateText } from "../infra/llm-utils.ts";
 import type { Persona } from "../identity/persona.ts";
 import { buildSystemPrompt, formatSize } from "../prompts/index.ts";
 import type { Settings } from "../infra/config.ts";
 import { sanitizeForPrompt } from "../infra/sanitize.ts";
-import { formatToolTimestamp } from "../infra/time.ts";
 import { getSettings } from "../infra/config.ts";
 import { errorToString } from "../infra/errors.ts";
 import { getLogger } from "../infra/logger.ts";
 import { ToolRegistry } from "../tools/registry.ts";
-import { ToolExecutor } from "../tools/executor.ts";
-import type { InboundMessage, OutboundMessage, ChannelInfo, StoreImageFn } from "../channels/types.ts";
+import type { InboundMessage, OutboundMessage, StoreImageFn } from "../channels/types.ts";
 import { ImageManager } from "../media/image-manager.ts";
 import { hydrateImages } from "../media/image-prune.ts";
 import { extToMime } from "../media/image-helpers.ts";
 import { TaskRunner } from "./task-runner.ts";
 import type { TaskNotification } from "./task-runner.ts";
-import { computeTokenBudget, summarizeMessages, calculateMaxToolResultChars, truncateToolResult, isContextOverflowError, MAX_OVERFLOW_COMPACT_RETRIES, ModelLimitsCache } from "../context/index.ts";
+import { computeTokenBudget, summarizeMessages, calculateMaxToolResultChars, isContextOverflowError, MAX_OVERFLOW_COMPACT_RETRIES, ModelLimitsCache } from "../context/index.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
@@ -100,9 +97,8 @@ export interface MainAgentDeps {
 export class MainAgent extends ConversationAgent {
   private models: ModelRegistry;
   private settings: Settings;
-  private taskRunner!: TaskRunner; // Task execution — initialized in start()
+  private taskRunner!: TaskRunner;
   private _mainOverflowRetryCount = 0;
-  private _lastPromptTokens = 0;
   private skillRegistry!: SkillRegistry;
   private skillDirs: Array<{ dir: string; source: "builtin" | "user" }> = [];
   private aiTaskTypeRegistry!: AITaskTypeRegistry;
@@ -120,44 +116,48 @@ export class MainAgent extends ConversationAgent {
   /** Injected subsystems from PegasusApp (stored for onStart MCP tool registration). */
   private injected: InjectedSubsystems;
 
-  // ── Custom tool executor for MainAgent's rich ToolContext ──
-  private mainToolExecutor: ToolExecutor;
-
   constructor(deps: MainAgentDeps) {
     const settings = deps.settings ?? getSettings();
     const mainStorePaths = buildMainAgentPaths(settings.dataDir);
     const toolRegistry = new ToolRegistry();
     toolRegistry.registerMany(mainAgentTools);
 
-    // Placeholder model for BaseAgent — MainAgent overrides _think() and uses
-    // this.models directly, so BaseAgent.model is never called. We can't call
-    // models.getDefault() here because OAuth hasn't been initialized yet.
-    const placeholderModel: import("../infra/llm-types.ts").LanguageModel = {
-      provider: "placeholder",
-      modelId: "placeholder",
-      generate: async () => { throw new Error("MainAgent should not use BaseAgent.model"); },
-    };
+    // Use real model — processStep uses BaseAgent.model.
+    // Auth is initialized before MainAgent creation (PegasusApp step 3 vs step 11).
+    const defaultModel = deps.models.getDefault();
+
+    // Image hydrator for vision support — injected into BaseAgent
+    const imageManager = deps.injected.imageManager;
+    const imageHydrator = imageManager
+      ? async (messages: Message[]) => {
+          return hydrateImages(
+            messages,
+            settings.vision?.keepLastNTurns ?? 5,
+            async (id: string) => {
+              const cached = this.imageReadCache.get(id);
+              if (cached) return cached;
+              const result = await imageManager.read(id);
+              if (result) this.imageReadCache.set(id, result);
+              return result;
+            },
+          );
+        }
+      : undefined;
 
     super({
       agentId: "main-agent",
-      model: placeholderModel,
+      model: defaultModel,
       toolRegistry,
       persona: deps.persona,
       sessionDir: mainStorePaths.session,
       eventBus: new EventBus({ keepHistory: true }),
       contextWindow: settings.llm.contextWindow,
+      imageHydrator,
     });
 
     this.models = deps.models;
     this.settings = settings;
     this.mainStorePaths = mainStorePaths;
-
-    // Tool executor for Main Agent's simple tools (no EventBus needed)
-    this.mainToolExecutor = new ToolExecutor(
-      this.toolRegistry,
-      { emit: () => {} }, // Main Agent doesn't use EventBus for its own tools
-      (this.settings.tools?.timeout ?? 30) * 1000,
-    );
 
     // ── Store injected subsystems from PegasusApp ──
     this.injected = deps.injected;
@@ -229,27 +229,7 @@ export class MainAgent extends ConversationAgent {
     // Sanitize text
     const text = sanitizeForPrompt(message.text.trim());
 
-    // Detect SubAgent completion/failure from tagged notify messages.
-    // agent-worker.ts tags the final notify with metadata.subagentDone
-    // before auto-shutting down. We call markDone() here so the
-    // onWorkerClose handler knows this is a normal exit (not a crash).
-    if (
-      message.channel.type === "subagent" &&
-      this.subAgentManager &&
-      message.metadata?.subagentDone
-    ) {
-      const channelId = message.channel.channelId;
-      const status = message.metadata.subagentDone as "completed" | "failed";
-      this.subAgentManager.markDone(channelId, status);
-    }
-
-    // Check for /skill command
-    if (text.startsWith("/")) {
-      const handled = await this._handleSkillCommand(text, message.channel);
-      if (handled) return;
-    }
-
-    // Extract imageRefs from subagent notify metadata (mirrors _handleTaskNotify pattern)
+    // Extract imageRefs from subagent notify metadata
     if (message.metadata?.imageRefs) {
       const refs = message.metadata.imageRefs as Array<{ id: string; mimeType: string }>;
       if (refs.length > 0) {
@@ -272,28 +252,97 @@ export class MainAgent extends ConversationAgent {
   }
 
   // ═══════════════════════════════════════════════════
-  // Compaction overrides — MainAgent uses this.models (not BaseAgent placeholder)
+  // Tool context — rich ToolContext for processStep
+  // ═══════════════════════════════════════════════════
+
+  /**
+   * Build a full ToolContext with all dependencies for tool execution.
+   * Called by BaseAgent._executeToolAsync() via the buildToolContext() hook.
+   */
+  protected override buildToolContext(taskId: string): ToolContext {
+    return {
+      taskId,
+      memoryDir: this.mainStorePaths.memory!,
+      sessionDir: this.mainStorePaths.session,
+      tasksDir: this.mainStorePaths.tasks,
+      taskRegistry: this.taskRunner,
+      projectManager: this.projectManager,
+      ownerStore: this.ownerStore,
+      mediaDir: this.imageManager
+        ? path.join(this.settings.dataDir, "media")
+        : undefined,
+      storeImage: this._getStoreImageCallback(),
+      // Self-executing tool dependencies:
+      onReply: this._onReply
+        ? (msg: unknown) => this._onReply!(msg as OutboundMessage)
+        : undefined,
+      resolveImage: (idOrPath: string) => this._resolveImage(idOrPath),
+      subAgentManager: this.subAgentManager,
+      skillRegistry: this.skillRegistry,
+      tickManager: this.tickManager,
+      getMemorySnapshot: () => this._getMemorySnapshot(),
+      onSkillsReloaded: () => {
+        this._reloadSkills();
+        return this.skillRegistry.listAll().length;
+      },
+      projectAdapter: this.projectAdapter,
+    };
+  }
+
+  /**
+   * Compute max tool result chars from the model's context window.
+   * Used by BaseAgent._executeToolAsync() for result truncation.
+   */
+  protected override getMaxToolResultChars(): number {
+    const budget = computeTokenBudget({
+      modelId: this.models.getDefaultModelId(),
+      provider: this.models.getDefaultProvider(),
+      configContextWindow: this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
+      modelLimitsCache: this.modelLimitsCache,
+    });
+    return calculateMaxToolResultChars(budget.contextWindow, this.settings.context?.maxToolResultShare);
+  }
+
+  // ═══════════════════════════════════════════════════
+  // Compaction overrides — MainAgent uses this.models
   // ═══════════════════════════════════════════════════
 
   /**
    * Pre-LLM compaction check.
    *
-   * MainAgent calls generateText() directly (not processStep), so BaseAgent's
-   * beforeLLMCall is never invoked automatically. We override it to use
-   * this.models and session-level settings instead of BaseAgent's placeholder model.
-   *
-   * Returns true if compaction occurred.
+   * Overrides BaseAgent's beforeLLMCall to use this.models and session-level
+   * settings instead of BaseAgent's model for budget computation.
+   * Image hydration is handled by BaseAgent via imageHydrator dep.
    */
-  protected override async beforeLLMCall(_taskId: string): Promise<void> {
-    if (this.sessionMessages.length < 8) return;
+  protected override async beforeLLMCall(taskId: string): Promise<void> {
+    const state = this.taskStates.get(taskId);
+    if (!state) return;
+
+    // Image hydration is handled by BaseAgent via imageHydrator — call super
+    // first so images are hydrated before token estimation.
+    // But we skip the compaction part of super — we do our own below.
+    // Actually, BaseAgent.beforeLLMCall does both hydration AND compaction.
+    // We want hydration from BaseAgent, but our own compaction logic.
+    // So let's NOT call super and handle hydration separately.
+
+    // Image hydration via the injected imageHydrator (set on BaseAgentDeps)
+    if (this.imageManager) {
+      state.messages = await hydrateImages(
+        state.messages,
+        this.settings.vision?.keepLastNTurns ?? 5,
+        this._cachedImageRead.bind(this),
+      );
+    }
+
+    if (state.messages.length < 8) return;
 
     // Use actual token count from last API response when available;
     // fall back to token counter for the first call.
     let estimatedTokens: number;
-    if (this._lastPromptTokens > 0) {
-      estimatedTokens = this._lastPromptTokens;
+    if (state.lastPromptTokens > 0) {
+      estimatedTokens = state.lastPromptTokens;
     } else {
-      const allText = this.sessionMessages.map((m) => {
+      const allText = state.messages.map((m) => {
         let text = typeof m.content === "string" ? m.content : String(m.content);
         if (m.toolCalls) text += JSON.stringify(m.toolCalls);
         return text;
@@ -320,7 +369,7 @@ export class MainAgent extends ConversationAgent {
   /**
    * Overflow error handler.
    *
-   * Called from _think()'s catch block when generateText() fails with a context
+   * Called by BaseAgent.processStep when generateText() fails with a context
    * overflow. Forces compaction and returns true if the caller should retry.
    */
   protected override async onLLMError(_taskId: string, error: unknown): Promise<boolean> {
@@ -376,239 +425,11 @@ export class MainAgent extends ConversationAgent {
     }
   }
 
-
   // ═══════════════════════════════════════════════════
-  // Thinking override — uses direct LLM call (not processStep)
-  // ═══════════════════════════════════════════════════
-
-  /**
-   * One step of thinking: single LLM call → execute tools → results back to queue.
-   *
-   * This is NOT a loop. Each call does exactly one LLM invocation.
-   * If the LLM returns tool calls, tool results are queued as a new event,
-   * which will trigger another _think when processed.
-   */
-  protected override async _think(channel: ChannelInfo): Promise<void> {
-    // Proactive compaction check before LLM call
-    await this.beforeLLMCall("session");
-
-    // Hydrate images for recent turns (vision support)
-    const messages = this.imageManager
-      ? await hydrateImages(
-          this.sessionMessages,
-          this.settings.vision?.keepLastNTurns ?? 5,
-          this._cachedImageRead.bind(this),
-        )
-      : this.sessionMessages;
-
-    const tools = this.toolRegistry.toLLMTools();
-
-    let result;
-    try {
-      result = await generateText({
-        model: this.models.getDefault(),
-        system: this._systemPrompt,
-        messages, // Use hydrated messages, NOT this.sessionMessages
-        tools: tools.length ? tools : undefined,
-        toolChoice: tools.length ? "auto" : undefined,
-      });
-      this._mainOverflowRetryCount = 0;
-      this._lastPromptTokens =
-        (result.usage.promptTokens ?? 0) + (result.usage.cacheReadTokens ?? 0);
-    } catch (err) {
-      const retried = await this.onLLMError("session", err);
-      if (retried) {
-        // Compaction happened — re-hydrate images and retry
-        const retryMessages = this.imageManager
-          ? await hydrateImages(
-              this.sessionMessages,
-              this.settings.vision?.keepLastNTurns ?? 5,
-              this._cachedImageRead.bind(this),
-            )
-          : this.sessionMessages;
-        result = await generateText({
-          model: this.models.getDefault(),
-          system: this._systemPrompt,
-          messages: retryMessages,
-          tools: tools.length ? tools : undefined,
-          toolChoice: tools.length ? "auto" : undefined,
-        });
-        this._mainOverflowRetryCount = 0;
-        this._lastPromptTokens =
-          (result.usage.promptTokens ?? 0) + (result.usage.cacheReadTokens ?? 0);
-      } else {
-        throw err;
-      }
-    }
-
-    // Handle tool calls
-    if (result.toolCalls?.length) {
-      // Push assistant message with tool calls
-      const assistantMsg: Message = {
-        role: "assistant",
-        content: result.text ?? "",
-        toolCalls: result.toolCalls,
-      };
-      this.sessionMessages.push(assistantMsg);
-      await this.sessionStore.append(assistantMsg);
-
-      // Execute all tool calls
-
-      const toolContext = this._buildToolContext();
-
-      // Pre-compute truncation budget once (same for all tools in this batch)
-      const toolBudget = computeTokenBudget({
-        modelId: this.models.getDefaultModelId(),
-        provider: this.models.getDefaultProvider(),
-        configContextWindow: this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
-        modelLimitsCache: this.modelLimitsCache,
-      });
-      const maxToolChars = calculateMaxToolResultChars(toolBudget.contextWindow, this.settings.context?.maxToolResultShare);
-
-      for (const tc of result.toolCalls) {
-        const toolResult = await this.mainToolExecutor.execute(
-          tc.name,
-          tc.arguments,
-          toolContext,
-        );
-
-        // Format result — preserve raw strings (e.g. inline skill body),
-        // only JSON.stringify objects/arrays
-        const rawContent = toolResult.success
-          ? typeof toolResult.result === "string"
-            ? toolResult.result
-            : JSON.stringify(toolResult.result)
-          : `Error: ${toolResult.error}`;
-
-        // Truncate large results
-        const safeContent = rawContent.length > maxToolChars
-          ? truncateToolResult(rawContent, maxToolChars)
-          : rawContent;
-
-        // Timestamp prefix
-        const tsPrefix = formatToolTimestamp(
-          toolResult.completedAt ?? Date.now(),
-          toolResult.durationMs,
-        );
-
-        // Build tool message
-        const toolMsg: Message = {
-          role: "tool",
-          content: `${tsPrefix}\n${safeContent}`,
-          toolCallId: tc.id,
-        };
-
-        // Propagate images from tool result
-        if (toolResult.images?.length) {
-          toolMsg.images = toolResult.images;
-        }
-
-        this.sessionMessages.push(toolMsg);
-        await this.sessionStore.append(toolMsg);
-      }
-
-      // Always queue next think after tool calls — LLM decides when to stop
-      // by returning no tool_calls (pure text / empty response).
-      this.pushQueue({ kind: "think", channel } as QueueItem);
-      return;
-    }
-
-    // No tool calls — inner monologue only (user doesn't see this)
-    // Always append to session (even if empty) so LLM sees its own response
-    const assistantMsg: Message = { role: "assistant", content: result.text };
-    this.sessionMessages.push(assistantMsg);
-    await this.sessionStore.append(assistantMsg);
-    // Done thinking for now. Next event will trigger new thinking.
-  }
-
-  // ═══════════════════════════════════════════════════
-  // Skill handling
+  // Vision support
   // ═══════════════════════════════════════════════════
 
-  /**
-   * Handle /skill-name args command.
-   * Returns true if handled, false if not a skill (treat as normal message).
-   */
-  private async _handleSkillCommand(
-    text: string,
-    channel: { type: string; channelId: string; replyTo?: string },
-  ): Promise<boolean> {
-    const spaceIdx = text.indexOf(" ");
-    const name = spaceIdx === -1 ? text.slice(1) : text.slice(1, spaceIdx);
-    const args = spaceIdx === -1 ? undefined : text.slice(spaceIdx + 1).trim() || undefined;
-
-    const skill = this.skillRegistry.get(name)
-      ?? this.skillRegistry.get(name.replace(/_/g, "-")); // Telegram converts - to _ in commands
-    if (!skill) return false;
-    if (!skill.userInvocable) return false;
-
-    const body = this.skillRegistry.loadBody(skill.name, args);
-    if (!body) return false;
-
-    if (skill.context === "fork") {
-      // Spawn task with skill content
-      const taskType = skill.agent || "general";
-      const taskId = this.taskRunner.submit(body, "skill:" + name, taskType, `Skill: ${name}`);
-      const systemMsg: Message = {
-        role: "user",
-        content: `[Skill "${name}" spawned as task ${taskId}]`,
-      };
-      this.sessionMessages.push(systemMsg);
-      await this.sessionStore.append(systemMsg);
-      logger.info({ skill: name, taskId }, "skill_fork_spawned");
-    } else {
-      // Inline: inject skill content as user message, then think
-      const skillMsg: Message = {
-        role: "user",
-        content: `[Skill: ${name} invoked]\n\n${body}`,
-      };
-      this.sessionMessages.push(skillMsg);
-      await this.sessionStore.append(skillMsg);
-      await this._think(channel);
-    }
-
-    return true;
-  }
-
-  // ── Tool context ──
-
-  /**
-   * Build a full ToolContext with all dependencies for self-executing tools.
-   * All tools use the same context — no special-casing.
-   */
-  private _buildToolContext(): ToolContext {
-    return {
-      taskId: "main-agent",
-      memoryDir: this.mainStorePaths.memory!,
-      sessionDir: this.mainStorePaths.session,
-      tasksDir: this.mainStorePaths.tasks,
-      taskRegistry: this.taskRunner,
-      projectManager: this.projectManager,
-      ownerStore: this.ownerStore,
-      mediaDir: this.imageManager
-        ? path.join(this.settings.dataDir, "media")
-        : undefined,
-      storeImage: this._getStoreImageCallback(),
-      // Self-executing tool dependencies:
-      onReply: this._onReply
-        ? (msg: unknown) => this._onReply!(msg as OutboundMessage)
-        : undefined,
-      resolveImage: (idOrPath: string) => this._resolveImage(idOrPath),
-      subAgentManager: this.subAgentManager,
-      skillRegistry: this.skillRegistry,
-      tickManager: this.tickManager,
-      getMemorySnapshot: () => this._getMemorySnapshot(),
-      onSkillsReloaded: () => {
-        this._reloadSkills();
-        return this.skillRegistry.listAll().length;
-      },
-      projectAdapter: this.projectAdapter,
-    };
-  }
-
-  // ── Vision support ──
-
-  /** Cached image reader — avoids re-reading files on every _think() call. */
+  /** Cached image reader — avoids re-reading files on every think cycle. */
   private async _cachedImageRead(id: string): Promise<{ data: string; mimeType: string } | null> {
     const cached = this.imageReadCache.get(id);
     if (cached) return cached;
@@ -663,9 +484,9 @@ export class MainAgent extends ConversationAgent {
     return null;
   }
 
-  // ── Task notification handling ──
-
-  // ── Task notification tick management ──
+  // ═══════════════════════════════════════════════════
+  // Task notification tick management
+  // ═══════════════════════════════════════════════════
 
   protected override async onTaskNotificationHandled(notification: import("./base/conversation-agent.ts").TaskNotificationPayload): Promise<void> {
     // Stop tick if no more active work (completed/failed, not progress updates)
@@ -674,7 +495,9 @@ export class MainAgent extends ConversationAgent {
     }
   }
 
-  // ── Active work tick (callback for TickManager) ──
+  // ═══════════════════════════════════════════════════
+  // Active work tick (callback for TickManager)
+  // ═══════════════════════════════════════════════════
 
   /**
    * Tick callback — inject status summary and trigger a think cycle.
@@ -697,9 +520,9 @@ export class MainAgent extends ConversationAgent {
     }
   }
 
-  // ── Channel security ──
-
-  // ── Memory index injection ──
+  // ═══════════════════════════════════════════════════
+  // Memory index injection
+  // ═══════════════════════════════════════════════════
 
   /**
    * Build a text snapshot of the memory index (facts + episode summaries)
@@ -709,7 +532,7 @@ export class MainAgent extends ConversationAgent {
   private async _getMemorySnapshot(): Promise<string | undefined> {
     try {
       const memoryDir = this.mainStorePaths.memory!;
-      const listResult = await this.mainToolExecutor.execute(
+      const listResult = await this.toolExecutor.execute(
         "memory_list",
         {},
         { taskId: "main-agent", memoryDir },
@@ -724,7 +547,7 @@ export class MainAgent extends ConversationAgent {
       // Facts: load full content
       for (const e of entries.filter(e => e.path.startsWith("facts/"))) {
         try {
-          const readResult = await this.mainToolExecutor.execute(
+          const readResult = await this.toolExecutor.execute(
             "memory_read",
             { path: e.path },
             { taskId: "main-agent", memoryDir },
@@ -761,7 +584,7 @@ export class MainAgent extends ConversationAgent {
   private async _injectMemoryIndex(): Promise<void> {
     try {
       const memoryDir = this.mainStorePaths.memory!;
-      const listResult = await this.mainToolExecutor.execute(
+      const listResult = await this.toolExecutor.execute(
         "memory_list",
         {},
         { taskId: "main-agent", memoryDir },
@@ -774,7 +597,7 @@ export class MainAgent extends ConversationAgent {
       // Facts: load full content
       for (const e of entries.filter(e => e.path.startsWith("facts/"))) {
         try {
-          const readResult = await this.mainToolExecutor.execute(
+          const readResult = await this.toolExecutor.execute(
             "memory_read",
             { path: e.path },
             { taskId: "main-agent", memoryDir },
@@ -806,7 +629,9 @@ export class MainAgent extends ConversationAgent {
     }
   }
 
-  // ── System prompt ──
+  // ═══════════════════════════════════════════════════
+  // System prompt
+  // ═══════════════════════════════════════════════════
 
   private _buildSystemPrompt(): string {
     // Get AI task type metadata for prompt
@@ -868,7 +693,7 @@ export class MainAgent extends ConversationAgent {
   //   This is intentional: a stable system prompt enables LLM provider-side
   //   prompt caching, which significantly reduces latency and token cost.
   //   The prompt is ONLY rebuilt when skills explicitly change (via reload_skills
-  //   tool). Do NOT rebuild the prompt on every _think() cycle.
+  //   tool). Do NOT rebuild the prompt on every think cycle.
   //
 
   /**
