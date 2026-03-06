@@ -901,7 +901,6 @@ describe("initSubAgent", () => {
   afterEach(async () => {
     try { _testState.getProxyModel()?.cancelAll("test cleanup"); } catch { /* ignore */ }
     try { await _testState.getOrchestratorAgent()?.stop(); } catch { /* ignore */ }
-    try { await _testState.getAgent()?.stop(); } catch { /* ignore */ }
     _testState.setAgent(null);
     _testState.setOrchestratorAgent(null);
     _testState.setProxyModel(null);

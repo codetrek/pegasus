@@ -1,8 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import type { TaskNotification } from "@pegasus/agents/task-runner.ts";
 import type { Message } from "@pegasus/infra/llm-types.ts";
-import { TaskFSM } from "@pegasus/task/fsm.ts";
-import { createTaskContext } from "@pegasus/task/context.ts";
 
 // ═══════════════════════════════════════════════════
 // Part C: TaskNotification type carries imageRefs

@@ -5,15 +5,13 @@
  * plus ToolExecutor integration and edge cases.
  */
 
-import { describe, it, expect, mock, afterAll } from "bun:test";
+import { describe, it, expect, mock } from "bun:test";
 import { ToolRegistry } from "../../../src/tools/registry.ts";
 import { ToolExecutor } from "../../../src/tools/executor.ts";
 import { ToolCategory } from "../../../src/tools/types.ts";
 import { wrapMCPTools } from "../../../src/mcp/wrap.ts";
 import type { MCPManager, MCPServerConfig } from "../../../src/mcp/manager.ts";
 import type { Tool as McpTool, CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { SettingsSchema } from "../../../src/infra/config-schema.ts";
-import { rm } from "node:fs/promises";
 import { z } from "zod";
 
 // Mock MCPManager for integration tests
