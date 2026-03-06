@@ -198,6 +198,8 @@ export function fromPiAiResult(msg: AssistantMessage): GenerateTextResult {
     usage: {
       promptTokens: msg.usage.input,
       completionTokens: msg.usage.output,
+      cacheReadTokens: msg.usage.cacheRead ?? 0,
+      cacheWriteTokens: msg.usage.cacheWrite ?? 0,
     },
   };
 }
@@ -268,6 +270,7 @@ export function createPiAiLanguageModel(config: PiAiAdapterConfig): LanguageMode
       );
 
       const startTime = Date.now();
+
       logger.info(
         {
           provider: config.provider,
@@ -312,6 +315,8 @@ export function createPiAiLanguageModel(config: PiAiAdapterConfig): LanguageMode
           finishReason: converted.finishReason,
           promptTokens: converted.usage.promptTokens,
           completionTokens: converted.usage.completionTokens,
+          cacheReadTokens: converted.usage.cacheReadTokens,
+          cacheWriteTokens: converted.usage.cacheWriteTokens,
           toolCallCount: converted.toolCalls?.length ?? 0,
         },
         "llm_request_done",

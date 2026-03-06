@@ -43,6 +43,8 @@ export interface GenerateTextResult {
   usage: {
     promptTokens: number;
     completionTokens: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
   };
 }
 
