@@ -10,7 +10,6 @@
 
 import { ExecutionAgent } from "./base/execution-agent.ts";
 import type { ExecutionResult } from "./base/execution-agent.ts";
-import type { TaskNotification } from "./agent.ts";
 import type { LanguageModel } from "../infra/llm-types.ts";
 import { ToolRegistry } from "../tools/registry.ts";
 import type { Tool, ToolContext } from "../tools/types.ts";
@@ -25,6 +24,11 @@ import { SessionStore } from "../session/store.ts";
 const logger = getLogger("task_runner");
 
 // ── Types ────────────────────────────────────────────
+
+export type TaskNotification =
+  | { type: "completed"; taskId: string; result: unknown; imageRefs?: Array<{ id: string; mimeType: string }> }
+  | { type: "failed"; taskId: string; error: string }
+  | { type: "notify"; taskId: string; message: string; imageRefs?: Array<{ id: string; mimeType: string }> };
 
 export interface TaskInfo {
   taskId: string;

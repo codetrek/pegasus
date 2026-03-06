@@ -29,9 +29,8 @@ import type { InboundMessage, OutboundMessage, ChannelAdapter, ChannelInfo, Stor
 import { ImageManager } from "../media/image-manager.ts";
 import { hydrateImages } from "../media/image-prune.ts";
 import { extToMime } from "../media/image-helpers.ts";
-import { Agent } from "./agent.ts";
-import type { TaskNotification } from "./agent.ts";
 import { TaskRunner } from "./task-runner.ts";
+import type { TaskNotification } from "./task-runner.ts";
 import type { ToolCall } from "../models/tool.ts";
 import { computeTokenBudget, calculateMaxToolResultChars, truncateToolResult, isContextOverflowError, MAX_OVERFLOW_COMPACT_RETRIES, ModelLimitsCache } from "../context/index.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
@@ -76,8 +75,7 @@ export interface MainAgentDeps {
 export class MainAgent extends ConversationAgent {
   private models: ModelRegistry;
   private settings: Settings;
-  private agent!: Agent; // Task execution engine — initialized in start()
-  private taskRunner!: TaskRunner; // New task execution — initialized in start()
+  private taskRunner!: TaskRunner; // Task execution — initialized in start()
   private mcpManager: MCPManager | null = null;
   private tokenRefreshMonitor: TokenRefreshMonitor | null = null;
   private replyCallback: ((msg: OutboundMessage) => void) | null = null;
@@ -285,42 +283,13 @@ export class MainAgent extends ConversationAgent {
     });
     await this.authManager.initialize();
 
-    // Task execution engine — created AFTER codex auth so models can resolve codex models
-    try {
-      this.agent = new Agent({
-        model: this.models.getForTier("balanced"),
-        modelRegistry: this.models,
-        persona: this.persona,
-        settings: this.settings,
-        storePaths: this.mainStorePaths,
-        modelLimitsCache: this.modelLimitsCache,
-        storeImage: this._getStoreImageCallback(),
-      });
-    } catch (err) {
-      // If codex auth failed and default model is codex, this will throw.
-      // Re-throw with a clearer message.
-      throw new Error(
-        `Failed to create Agent: ${err instanceof Error ? err.message : String(err)}. ` +
-        `If using a Codex model, ensure codex.enabled is true and run the device code login to completion.`,
-      );
-    }
+    // Task execution — created AFTER codex auth so models can resolve codex models
 
-    // Register notification callback BEFORE agent.start()
-    this.agent.onNotify((notification) => {
-      this.pushQueue({ kind: "task_notify", notification } as QueueItem);
-    });
-
-    // Start task execution engine
-    await this.agent.start();
-
-    // Connect to MCP servers and register tools in both Agent and MainAgent
+    // Connect to MCP servers and register tools in MainAgent
     const mcpConfigs = (this.settings.tools?.mcpServers ?? []) as MCPServerConfig[];
     if (mcpConfigs.length > 0) {
       this.mcpManager = new MCPManager(this._mcpAuthDir);
       await this.mcpManager.connectAll(mcpConfigs);
-
-      // Register in Agent's tool registry (for task execution)
-      await this.agent.loadMCPTools(this.mcpManager, mcpConfigs);
 
       // Register in MainAgent's own tool registry (for conversation)
       for (const config of mcpConfigs.filter((c) => c.enabled)) {
@@ -379,7 +348,6 @@ export class MainAgent extends ConversationAgent {
     const builtinAITaskTypeDir = path.join(process.cwd(), "aitask-types");
     const userAITaskTypeDir = path.join(this.settings.dataDir, "aitask-types");
     this.aiTaskTypeRegistry.registerMany(loadAITaskTypeDefinitions(builtinAITaskTypeDir, userAITaskTypeDir));
-    this.agent.setAITaskTypeRegistry(this.aiTaskTypeRegistry);
     logger.info({ aiTaskTypeCount: this.aiTaskTypeRegistry.listAll().length }, "aitask_types_loaded");
 
     // Initialize TaskRunner — uses AITaskTypeRegistry for per-type tool resolution
@@ -466,8 +434,13 @@ export class MainAgent extends ConversationAgent {
 
   /** Stop the Main Agent. */
   protected override async onStop(): Promise<void> {
-    // Stop tick timer
+    // Stop tick timer (prevents new ticks from being queued)
     this.tickManager.stop();
+
+    // Wait for queue to finish processing the current item.
+    // isRunning is already false (set by BaseAgent.stop()), so _drainQueue
+    // will exit after the current item — no risk of hanging.
+    await this.waitForQueueDrain();
 
     // Stop active SubAgents first (they share the WorkerAdapter)
     if (this.subAgentManager) {
@@ -494,13 +467,11 @@ export class MainAgent extends ConversationAgent {
       this.tokenRefreshMonitor = null;
     }
 
-    // Disconnect MCP servers first (before agent stops)
+    // Disconnect MCP servers
     if (this.mcpManager) {
       await this.mcpManager.disconnectAll();
       this.mcpManager = null;
     }
-
-    await this.agent.stop();
 
     // Close ImageManager
     if (this.imageManager) {
@@ -1015,7 +986,7 @@ export class MainAgent extends ConversationAgent {
     this.sessionMessages.push(toolMsg);
     await this.sessionStore.append(toolMsg);
 
-    // No per-task callback — Agent calls onNotify automatically
+    // No per-task callback — TaskRunner calls onNotification automatically
     logger.info({ taskId, input, taskType }, "task_spawned");
     this.tickManager.start();
   }
@@ -1030,7 +1001,7 @@ export class MainAgent extends ConversationAgent {
     const { task_id, input } = tc.arguments as { task_id: string; input: string };
 
     try {
-      await this.agent.resume(task_id, input);
+      await this.taskRunner.resume(task_id, input);
 
       const toolMsg: Message = {
         role: "tool",
@@ -1462,11 +1433,6 @@ export class MainAgent extends ConversationAgent {
     return this.lastChannel;
   }
 
-  /** Expose agent for testing. */
-  get taskAgent(): Agent {
-    return this.agent;
-  }
-
   /** Expose TaskRunner for testing. */
   get _taskRunner(): TaskRunner {
     return this.taskRunner;
@@ -1529,7 +1495,7 @@ export class MainAgent extends ConversationAgent {
   }
 
   /**
-   * Get a storeImage callback for ToolContext injection (Agent deps + direct tool execution).
+   * Get a storeImage callback for ToolContext injection (TaskRunner deps + direct tool execution).
    * Returns undefined when vision is disabled (imageManager is null).
    */
   private _getStoreImageCallback(): ToolContext["storeImage"] {

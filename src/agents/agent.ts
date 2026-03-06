@@ -46,10 +46,10 @@ import path from "node:path";
 
 const logger = getLogger("agent");
 
-export type TaskNotification =
-  | { type: "completed"; taskId: string; result: unknown; imageRefs?: Array<{ id: string; mimeType: string }> }
-  | { type: "failed"; taskId: string; error: string }
-  | { type: "notify"; taskId: string; message: string; imageRefs?: Array<{ id: string; mimeType: string }> };
+// Re-export TaskNotification from its canonical home (task-runner.ts)
+// so that existing consumers (agent-worker.ts, tests) continue to work.
+import type { TaskNotification } from "./task-runner.ts";
+export type { TaskNotification } from "./task-runner.ts";
 
 /** Push a tool result message into context.messages. */
 export function context_pushToolResult(
@@ -430,10 +430,18 @@ export class Agent {
       newState = task.transition(event);
     } catch (err) {
       if (err instanceof InvalidStateTransition) {
-        logger.warn({ error: (err as Error).message, taskId: task.taskId }, "invalid_transition");
-        return;
+        // Transition may have been done eagerly (e.g. resume() pre-transitions
+        // to avoid race conditions). If task is already in a valid non-terminal
+        // state, dispatch the cognitive stage for it instead of dropping the event.
+        if (event.type === EventType.TASK_RESUMED && !task.isDone && !task.isTerminal) {
+          newState = task.state;
+        } else {
+          logger.warn({ error: (err as Error).message, taskId: task.taskId }, "invalid_transition");
+          return;
+        }
+      } else {
+        throw err;
       }
-      throw err;
     }
 
     await this._dispatchCognitiveStage(task, newState, event);
@@ -1190,28 +1198,67 @@ export class Agent {
     // 5. Prepare context for resume
     prepareContextForResume(task.context, newInput);
 
-    // 6. Emit TASK_RESUMED → triggers FSM transition COMPLETED → REASONING
-    await this.eventBus.emit(
-      createEvent(EventType.TASK_RESUMED, {
-        source: "agent",
-        taskId: task.taskId,
-        payload: { newInput },
-      }),
-    );
+    // 6. Transition FSM synchronously BEFORE emitting event.
+    //    This ensures task.isDone is false immediately after resume() returns,
+    //    preventing waitForTask() from seeing stale COMPLETED state.
+    const resumeEvent = createEvent(EventType.TASK_RESUMED, {
+      source: "agent",
+      taskId: task.taskId,
+      payload: { newInput },
+    });
+    task.transition(resumeEvent);
+
+    // 7. Emit event to trigger cognitive loop (handler skips transition since already done)
+    await this.eventBus.emit(resumeEvent);
 
     return taskId;
   }
 
-  /** Wait for a task to complete (for testing and simple scenarios). */
+  /**
+   * Wait for a task to reach terminal state (COMPLETED or FAILED).
+   * Uses EventBus subscription — no polling, no race conditions with resume().
+   */
   async waitForTask(taskId: string, timeout?: number): Promise<TaskFSM> {
     const effectiveTimeout = timeout ?? this.settings.agent.taskTimeout * 1000;
-    const deadline = Date.now() + effectiveTimeout;
-    while (Date.now() < deadline) {
+
+    return new Promise<TaskFSM>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout> | null = null;
+
+      const cleanup = () => {
+        if (timer) clearTimeout(timer);
+        this.eventBus.unsubscribe(EventType.TASK_COMPLETED, onDone);
+        this.eventBus.unsubscribe(EventType.TASK_FAILED, onDone);
+      };
+
+      const onDone = async (event: Event) => {
+        if (event.taskId !== taskId) return;
+        cleanup();
+        const task = this.taskRegistry.getOrNull(taskId);
+        if (task) {
+          resolve(task);
+        } else {
+          reject(new Error(`Task ${taskId} not found after completion event`));
+        }
+      };
+
+      this.eventBus.subscribe(EventType.TASK_COMPLETED, onDone);
+      this.eventBus.subscribe(EventType.TASK_FAILED, onDone);
+
+      timer = setTimeout(() => {
+        cleanup();
+        reject(new Error(`Task ${taskId} did not complete within ${effectiveTimeout}ms`));
+      }, effectiveTimeout);
+
+      // Check if already done AFTER subscribing (race: task may complete
+      // between subscribe and this check). Safe because resume() does
+      // synchronous FSM transition — if resume() was called before this,
+      // isDone will be false and the subscription handles completion.
       const task = this.taskRegistry.getOrNull(taskId);
-      if (task?.isDone) return task;
-      await Bun.sleep(50);
-    }
-    throw new Error(`Task ${taskId} did not complete within ${effectiveTimeout}ms`);
+      if (task?.isDone) {
+        cleanup();
+        resolve(task);
+      }
+    });
   }
 
   /**

@@ -297,6 +297,8 @@ describe("Task Resume — Agent.resume()", () => {
       const resumedId = await agent.resume(taskId, "Now do something else");
       expect(resumedId).toBe(taskId);
 
+
+
       // Wait for it to complete again
       const resumed = await agent.waitForTask(taskId, 5000);
       expect(resumed.state).toBe(TaskState.COMPLETED);
@@ -573,6 +575,8 @@ describe("Task Resume — E2E", () => {
       // Resume with new instruction
       await agent.resume(taskId, "now write the report");
 
+
+
       // Wait for resumed task to complete again
       const resumed = await agent.waitForTask(taskId, 10_000);
       expect(resumed.state).toBe(TaskState.COMPLETED);
@@ -686,6 +690,7 @@ describe("Task Resume — E2E", () => {
 
       // Resume
       await agent.resume(taskId, "add timestamps");
+
       const resumed = await agent.waitForTask(taskId, 10_000);
       expect(resumed.state).toBe(TaskState.COMPLETED);
 
@@ -789,6 +794,8 @@ describe("Task Resume — E2E", () => {
       const hydratedTask = agent.taskRegistry.getOrNull(taskId);
       expect(hydratedTask).not.toBeNull();
 
+
+
       // Wait for resumed task to complete
       const resumed = await agent.waitForTask(taskId, 10_000);
       expect(resumed.state).toBe(TaskState.COMPLETED);
@@ -855,6 +862,7 @@ describe("Task Resume — E2E", () => {
 
       // Resume
       await agent.resume(taskId, "second");
+
       await agent.waitForTask(taskId, 10_000);
 
       // Should now have 2 completed notifications for same taskId
@@ -916,10 +924,12 @@ describe("Task Resume — E2E", () => {
 
       // Resume 1
       await agent.resume(taskId, "step two");
+
       await agent.waitForTask(taskId, 10_000);
 
       // Resume 2
       await agent.resume(taskId, "step three");
+
       const final = await agent.waitForTask(taskId, 10_000);
       expect(final.state).toBe(TaskState.COMPLETED);
 
@@ -980,6 +990,7 @@ describe("Task Resume — E2E", () => {
       await agent.waitForTask(taskId, 10_000);
 
       await agent.resume(taskId, "follow up");
+
       await agent.waitForTask(taskId, 10_000);
 
       // Wait for JSONL flush

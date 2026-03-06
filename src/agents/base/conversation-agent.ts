@@ -78,6 +78,7 @@ export abstract class ConversationAgent extends BaseAgent {
 
   private queue: QueueItem[] = [];
   private processing = false;
+  private _drainPromise: Promise<void> | null = null;
   protected lastChannel: ChannelInfo = { type: "cli", channelId: "main" };
 
   constructor(deps: ConversationAgentDeps) {
@@ -138,13 +139,26 @@ export abstract class ConversationAgent extends BaseAgent {
   private _processQueue(): void {
     if (this.processing) return;
     this.processing = true;
-    this._drainQueue().finally(() => {
+    this._drainPromise = this._drainQueue().finally(() => {
       this.processing = false;
+      this._drainPromise = null;
     });
   }
 
+  /**
+   * Wait for the current queue drain cycle to finish.
+   * Called by onStop() to ensure no dangling async work after shutdown.
+   * Safe because _drainQueue checks isRunning — once stop() sets _running=false,
+   * the drain loop exits after the current item, so this never hangs.
+   */
+  protected async waitForQueueDrain(): Promise<void> {
+    if (this._drainPromise) {
+      await this._drainPromise;
+    }
+  }
+
   private async _drainQueue(): Promise<void> {
-    while (this.queue.length > 0) {
+    while (this.queue.length > 0 && this.isRunning) {
       const item = this.queue.shift()!;
       try {
         switch (item.kind) {
