@@ -550,7 +550,6 @@ export abstract class BaseAgent {
 /**
  * Mechanical (non-LLM) summary: extract key stats from messages.
  * Used as fallback when LLM summarization fails.
- * Copied from CompactionManager._mechanicalSummary for use in BaseAgent.
  */
 function mechanicalSummary(messages: Message[]): string {
   const userMessages = messages.filter((m) => m.role === "user");
