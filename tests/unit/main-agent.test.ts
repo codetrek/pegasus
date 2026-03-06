@@ -3318,56 +3318,6 @@ describe("MainAgent", () => {
     }, 10_000);
   });
 
-  // ── _cachedImageRead ──
-
-  describe("_cachedImageRead", () => {
-    it("should return null when imageManager is null", async () => {
-      const model = createReplyModel("ok");
-      const settings = testSettings();
-      (settings as any).vision = { enabled: false };
-
-      const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
-
-      // imageManager is null when vision disabled
-      const result = await (agent as any)._cachedImageRead("img-123");
-      expect(result).toBeNull();
-    }, 10_000);
-
-    it("should return cached result on second call", async () => {
-      const model = createReplyModel("ok");
-      const agent = createMainAgent({ models: createMockModelRegistry(model) });
-
-      const mockRead = mock(() =>
-        Promise.resolve({ data: "base64data", mimeType: "image/png" }),
-      );
-      (agent as any).imageManager = { read: mockRead, store: mock(), close: mock() };
-
-      // First call — reads from imageManager
-      const first = await (agent as any)._cachedImageRead("img-abc");
-      expect(first).toEqual({ data: "base64data", mimeType: "image/png" });
-      expect(mockRead).toHaveBeenCalledTimes(1);
-
-      // Second call — returns from cache
-      const second = await (agent as any)._cachedImageRead("img-abc");
-      expect(second).toEqual({ data: "base64data", mimeType: "image/png" });
-      expect(mockRead).toHaveBeenCalledTimes(1); // not called again
-    }, 10_000);
-
-    it("should return null and not cache when imageManager.read returns null", async () => {
-      const model = createReplyModel("ok");
-      const agent = createMainAgent({ models: createMockModelRegistry(model) });
-
-      const mockRead = mock(() => Promise.resolve(null));
-      (agent as any).imageManager = { read: mockRead, store: mock(), close: mock() };
-
-      const result = await (agent as any)._cachedImageRead("img-missing");
-      expect(result).toBeNull();
-
-      // Cache should not have the entry
-      expect((agent as any).imageReadCache.has("img-missing")).toBe(false);
-    }, 10_000);
-  });
-
   // ── buildSystemPrompt override ──
 
   describe("buildSystemPrompt", () => {

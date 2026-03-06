@@ -26,15 +26,11 @@ import { getLogger } from "../infra/logger.ts";
 import { ToolRegistry } from "../tools/registry.ts";
 import type { OutboundMessage, StoreImageFn } from "../channels/types.ts";
 import { ImageManager } from "../media/image-manager.ts";
-import { hydrateImages } from "../media/image-prune.ts";
-import { extToMime } from "../media/image-helpers.ts";
 import { TaskRunner } from "./task-runner.ts";
 import type { TaskNotification } from "./task-runner.ts";
 import { computeTokenBudget, calculateMaxToolResultChars, ModelLimitsCache } from "../context/index.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import path from "node:path";
-import { readFile } from "node:fs/promises";
-import { createHash } from "node:crypto";
 import { SkillRegistry } from "../skills/index.ts";
 import { AITaskTypeRegistry } from "../aitask-types/index.ts";
 import { ProjectManager } from "../projects/manager.ts";
@@ -101,8 +97,6 @@ export class MainAgent extends ConversationAgent {
   private projectAdapter!: ProjectAdapter;
   private mainStorePaths: AgentStorePaths;
   private subAgentManager: SubAgentManager | null = null;
-  private imageManager: ImageManager | null = null; // null when vision disabled
-  private imageReadCache: Map<string, { data: string; mimeType: string }> = new Map();
   private ownerStore: OwnerStore;
   private _systemPrompt: string = "";
   private reflectionOrchestrator!: ReflectionOrchestrator;
@@ -121,18 +115,6 @@ export class MainAgent extends ConversationAgent {
     // Auth is initialized before MainAgent creation (PegasusApp step 3 vs step 11).
     const defaultModel = deps.models.getDefault();
 
-    // Image hydrator for vision support — injected into BaseAgent
-    const imageManager = deps.injected.imageManager;
-    const imageHydrator = imageManager
-      ? async (messages: Message[]) => {
-          return hydrateImages(
-            messages,
-            settings.vision?.keepLastNTurns ?? 5,
-            this._cachedImageRead.bind(this),
-          );
-        }
-      : undefined;
-
     super({
       agentId: "main-agent",
       model: defaultModel,
@@ -141,7 +123,8 @@ export class MainAgent extends ConversationAgent {
       sessionDir: mainStorePaths.session,
       eventBus: new EventBus({ keepHistory: true }),
       contextWindow: settings.llm.contextWindow,
-      imageHydrator,
+      imageManager: deps.injected.imageManager,
+      visionKeepLastNTurns: settings.vision?.keepLastNTurns,
     });
 
     this.models = deps.models;
@@ -160,7 +143,6 @@ export class MainAgent extends ConversationAgent {
     this.projectManager = inj.projectManager;
     this.projectAdapter = inj.projectAdapter;
     this.subAgentManager = inj.subAgentManager;
-    this.imageManager = inj.imageManager;
     this.tickManager = inj.tickManager;
     this.reflectionOrchestrator = inj.reflectionOrchestrator;
   }
@@ -293,12 +275,11 @@ export class MainAgent extends ConversationAgent {
   }
 
   /**
-   * Post-compact hook: re-inject memory index, clear image cache,
-   * and fire-and-forget reflection on archived session.
+   * Post-compact hook: re-inject memory index and fire-and-forget reflection.
+   * Image cache clearing is handled by BaseAgent._compactState().
    */
   protected override async onCompacted(preCompactMessages: Message[]): Promise<void> {
     await this._injectMemoryIndex();
-    this.imageReadCache.clear();
 
     // Fire-and-forget reflection on the archived session
     if (this.reflectionOrchestrator.shouldReflect(preCompactMessages)) {
@@ -312,59 +293,15 @@ export class MainAgent extends ConversationAgent {
   // Vision support
   // ═══════════════════════════════════════════════════
 
-  /** Cached image reader — avoids re-reading files on every think cycle. */
-  private async _cachedImageRead(id: string): Promise<{ data: string; mimeType: string } | null> {
-    const cached = this.imageReadCache.get(id);
-    if (cached) return cached;
-
-    if (!this.imageManager) return null;
-    const result = await this.imageManager.read(id);
-    if (result) {
-      this.imageReadCache.set(id, result);
-    }
-    return result;
-  }
-
   /**
-   * Resolve an image identifier — accepts either a 12-char hash ID (looked up
-   * via cache + ImageManager) or a file path (read from disk, stored for
-   * persistence). Returns null when the identifier cannot be resolved.
+   * Resolve an image identifier via ImageManager.
+   * Delegates to ImageManager.resolve() for ID lookup, file path handling, and caching.
    */
   private async _resolveImage(
     idOrPath: string,
   ): Promise<{ id: string; data: string; mimeType: string } | null> {
-    // 1. Try as hash ID first (fast path — cache + ImageManager)
-    if (this.imageManager) {
-      const cached = this.imageReadCache.get(idOrPath);
-      if (cached) return { id: idOrPath, ...cached };
-
-      const img = await this.imageManager.read(idOrPath);
-      if (img) {
-        this.imageReadCache.set(idOrPath, img);
-        return { id: idOrPath, data: img.data, mimeType: img.mimeType };
-      }
-    }
-
-    // 2. Try as file path
-    if (idOrPath.includes("/") || idOrPath.includes(".")) {
-      try {
-        const buffer = await readFile(idOrPath);
-        const ext = path.extname(idOrPath).slice(1).toLowerCase();
-        const mimeType = extToMime(ext);
-
-        if (this.imageManager) {
-          const ref = await this.imageManager.store(buffer, mimeType, "reply");
-          return { id: ref.id, data: buffer.toString("base64"), mimeType: ref.mimeType };
-        }
-
-        const id = createHash("sha256").update(buffer).digest("hex").slice(0, 12);
-        return { id, data: buffer.toString("base64"), mimeType };
-      } catch {
-        return null;
-      }
-    }
-
-    return null;
+    if (!this.imageManager) return null;
+    return this.imageManager.resolve(idOrPath);
   }
 
   // ═══════════════════════════════════════════════════

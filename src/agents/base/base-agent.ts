@@ -26,6 +26,8 @@ import { ToolRegistry } from "../../tools/registry.ts";
 import { ToolExecutor } from "../../tools/executor.ts";
 import type { ToolCall, ToolDefinition } from "../../models/tool.ts";
 import type { ToolResult, ToolContext } from "../../tools/types.ts";
+import type { ImageManager } from "../../media/image-manager.ts";
+import { hydrateImages } from "../../media/image-prune.ts";
 import {
   AgentStateManager,
   type PendingWork,
@@ -72,12 +74,10 @@ export interface BaseAgentDeps {
   contextWindow?: number;
   /** Model limits cache for token budget computation. */
   modelLimitsCache?: ModelLimitsCache;
-  /**
-   * Optional image hydrator — called in beforeLLMCall() to convert image refs
-   * to base64 data for LLM consumption. Allows MainAgent to inject vision
-   * support without overriding beforeLLMCall() for that purpose.
-   */
-  imageHydrator?: (messages: Message[]) => Promise<Message[]>;
+  /** Optional ImageManager for vision support — enables image hydration in beforeLLMCall(). */
+  imageManager?: ImageManager | null;
+  /** How many recent turns to hydrate images for. Default: 5. */
+  visionKeepLastNTurns?: number;
 }
 
 // ── Helpers ──────────────────────────────────────────
@@ -141,8 +141,11 @@ export abstract class BaseAgent {
   /** Optional storeImage callback injected into ToolContext for all tool executions. */
   private _storeImage?: ToolContext["storeImage"];
 
-  /** Optional image hydrator for vision support in beforeLLMCall(). */
-  private _imageHydrator?: (messages: Message[]) => Promise<Message[]>;
+  /** Optional ImageManager for vision support. */
+  protected imageManager?: ImageManager | null;
+
+  /** How many recent turns to hydrate images for. */
+  private _visionKeepLastNTurns: number;
 
   /** Per-task execution state for event-driven processStep engine. */
   protected taskStates = new Map<string, TaskExecutionState>();
@@ -161,7 +164,8 @@ export abstract class BaseAgent {
     this.stateManager = new AgentStateManager();
     this.maxIterations = deps.maxIterations ?? 25;
     this._storeImage = deps.storeImage;
-    this._imageHydrator = deps.imageHydrator;
+    this.imageManager = deps.imageManager;
+    this._visionKeepLastNTurns = deps.visionKeepLastNTurns ?? 5;
     this.sessionStore = new SessionStore(deps.sessionDir);
     this.contextWindow = deps.contextWindow;
     this.modelLimitsCache = deps.modelLimitsCache;
@@ -530,17 +534,22 @@ export abstract class BaseAgent {
 
   /**
    * Hydrate image references in task messages for LLM consumption.
-   * Uses the imageHydrator injected via BaseAgentDeps.
-   * Subclasses can override for custom hydration logic.
+   * Uses the ImageManager (with built-in caching) injected via BaseAgentDeps.
    */
   protected async hydrateImagesForLLM(taskId: string): Promise<void> {
-    if (!this._imageHydrator) return;
+    if (!this.imageManager) return;
     const state = this.taskStates.get(taskId);
     if (!state) return;
 
+    const imgMgr = this.imageManager;
+
     // IMPORTANT: mutate in-place to preserve array reference
     // (state.messages may be the same array as sessionMessages via _think).
-    const hydrated = await this._imageHydrator(state.messages);
+    const hydrated = await hydrateImages(
+      state.messages,
+      this._visionKeepLastNTurns,
+      (id: string) => imgMgr.read(id),
+    );
     state.messages.length = 0;
     state.messages.push(...hydrated);
   }
@@ -658,6 +667,7 @@ export abstract class BaseAgent {
     const reloaded = await this.sessionStore.load();
     state.messages.length = 0;
     state.messages.push(...reloaded);
+    this.imageManager?.clearCache();
 
     logger.info(
       { taskId, agentId: this.agentId },
