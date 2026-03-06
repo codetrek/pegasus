@@ -124,6 +124,7 @@ export class MainAgent extends ConversationAgent {
       persona: deps.persona,
       sessionDir: mainStorePaths.session,
       eventBus: new EventBus({ keepHistory: true }),
+      contextWindow: settings.llm.contextWindow,
     });
 
     this.models = deps.models;
@@ -346,6 +347,7 @@ export class MainAgent extends ConversationAgent {
       taskTypeRegistry: this.aiTaskTypeRegistry,
       tasksDir: this.mainStorePaths.tasks,
       storeImage: this._getStoreImageCallback(),
+      contextWindow: this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
       onNotification: (notification) => {
         this.pushQueue({ kind: "task_notify", notification } as QueueItem);
       },
