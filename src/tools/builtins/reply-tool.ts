@@ -29,6 +29,7 @@ export const reply: Tool = {
     text: z.string().describe("What to say to the user"),
     channelType: z
       .string()
+      .optional()
       .describe("Channel type to reply to — use the value from the user message metadata (e.g. 'cli', 'telegram', 'slack')"),
     channelId: z
       .string()
@@ -50,11 +51,14 @@ export const reply: Tool = {
     const startedAt = Date.now();
     const { text, channelType, channelId, replyTo, imageIds } = params as {
       text: string;
-      channelType: string;
+      channelType?: string;
       channelId: string;
       replyTo?: string;
       imageIds?: string[];
     };
+
+    // Fallback to defaultChannelType from context when LLM omits channelType
+    const effectiveChannelType = channelType ?? context.defaultChannelType ?? "cli";
 
     const onReply = context.onReply as OnReplyFn | undefined;
     if (!onReply) {
@@ -102,7 +106,7 @@ export const reply: Tool = {
         content?: { text: string; images: Array<{ id: string; data: string; mimeType: string }> };
       } = {
         text,
-        channel: { type: channelType, channelId, replyTo },
+        channel: { type: effectiveChannelType, channelId, replyTo },
       };
 
       // Attach resolved images as structured content
