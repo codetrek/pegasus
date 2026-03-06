@@ -8,6 +8,9 @@
 import { z } from "zod";
 import { ToolCategory } from "../types.ts";
 import type { Tool, ToolResult, ToolContext } from "../types.ts";
+import { getLogger } from "../../infra/logger.ts";
+
+const logger = getLogger("spawn_subagent");
 
 /** Loose interface for SubAgentManager methods used by this tool. */
 interface SubAgentManagerLike {
@@ -63,6 +66,8 @@ export const spawn_subagent: Tool = {
       // Start tick manager to poll for subagent completion
       const tick = context.tickManager as TickManagerLike | undefined;
       if (tick) tick.start();
+
+      logger.info({ subagentId, description }, "subagent_spawned");
 
       return {
         success: true,

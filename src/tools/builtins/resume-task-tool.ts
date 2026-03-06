@@ -8,6 +8,9 @@
 import { z } from "zod";
 import { ToolCategory } from "../types.ts";
 import type { Tool, ToolResult, ToolContext } from "../types.ts";
+import { getLogger } from "../../infra/logger.ts";
+
+const logger = getLogger("resume_task");
 
 /** Loose interface for TaskRunner methods used by this tool. */
 interface TaskRegistryLike {
@@ -54,6 +57,8 @@ export const resume_task: Tool = {
       const tick = context.tickManager as TickManagerLike | undefined;
       if (tick) tick.start();
 
+      logger.info({ taskId: task_id, input }, "task_resumed");
+
       return {
         success: true,
         result: { taskId: task_id, status: "resumed" },
@@ -61,10 +66,11 @@ export const resume_task: Tool = {
         completedAt: Date.now(),
         durationMs: Date.now() - startedAt,
       };
-    } catch (error) {
+    } catch (err) {
+      logger.warn({ taskId: task_id, error: (err as Error).message }, "task_resume_failed");
       return {
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: err instanceof Error ? err.message : String(err),
         startedAt,
         completedAt: Date.now(),
         durationMs: Date.now() - startedAt,

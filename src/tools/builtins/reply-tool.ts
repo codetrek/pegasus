@@ -9,6 +9,9 @@
 import { z } from "zod";
 import { ToolCategory } from "../types.ts";
 import type { Tool, ToolResult, ToolContext } from "../types.ts";
+import { getLogger } from "../../infra/logger.ts";
+
+const logger = getLogger("reply");
 
 /** Loose type for the onReply callback. */
 type OnReplyFn = (msg: {
@@ -93,6 +96,7 @@ export const reply: Tool = {
       const delivered: Record<string, unknown> = { delivered: true };
       if (failures.length > 0) {
         delivered.imageFailures = failures.map(f => `Failed to load image: ${f}`);
+        logger.warn({ failures }, "reply_image_resolve_failed");
       }
 
       // Build outbound message

@@ -54,7 +54,7 @@ function getProjectAdapter(context: ToolContext): ProjectAdapterLike | null {
 export const create_project: Tool = {
   name: "create_project",
   description:
-    "Create a new long-running project. This sets up the project directory, PROJECT.md, and registers it with the system. The project worker will be spawned separately.",
+    "Create a new long-running project. This sets up the project directory, PROJECT.md, registers it with the system, and starts the project worker.",
   category: ToolCategory.SYSTEM,
   parameters: z.object({
     name: z.string().describe("Unique project name (used as directory name)"),

@@ -8,6 +8,9 @@
 import { z } from "zod";
 import { ToolCategory } from "../types.ts";
 import type { Tool, ToolResult, ToolContext } from "../types.ts";
+import { getLogger } from "../../infra/logger.ts";
+
+const logger = getLogger("spawn_task");
 
 /** Loose interface for TaskRunner methods used by this tool. */
 interface TaskRegistryLike {
@@ -64,6 +67,8 @@ export const spawn_task: Tool = {
       // Start tick manager to poll for task completion
       const tick = context.tickManager as TickManagerLike | undefined;
       if (tick) tick.start();
+
+      logger.info({ taskId, input, taskType: type }, "task_spawned");
 
       return {
         success: true,
