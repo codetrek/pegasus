@@ -81,7 +81,7 @@ export class MainAgent extends ConversationAgent {
   private replyCallback: ((msg: OutboundMessage) => void) | null = null;
   private adapters: ChannelAdapter[] = [];
   private lastPromptTokens = 0;
-  private _overflowRetryCount = 0;
+  private _mainOverflowRetryCount = 0;
   private skillRegistry: SkillRegistry;
   private skillDirs: Array<{ dir: string; source: "builtin" | "user" }> = [];
   private aiTaskTypeRegistry: AITaskTypeRegistry;
@@ -94,7 +94,6 @@ export class MainAgent extends ConversationAgent {
   private ownerStore: OwnerStore;
   private _channelNotifyTimes = new Map<string, number>();
   private _systemPrompt: string = "";
-  private modelLimitsCache!: ModelLimitsCache;
   private authManager!: AuthManager;
   private compactionManager!: CompactionManager;
   private reflectionOrchestrator!: ReflectionOrchestrator;
@@ -606,12 +605,12 @@ export class MainAgent extends ConversationAgent {
         tools: tools.length ? tools : undefined,
         toolChoice: tools.length ? "auto" : undefined,
       });
-      this._overflowRetryCount = 0;
+      this._mainOverflowRetryCount = 0;
     } catch (err) {
-      if (isContextOverflowError(err) && this._overflowRetryCount < MAX_OVERFLOW_COMPACT_RETRIES) {
-        this._overflowRetryCount++;
+      if (isContextOverflowError(err) && this._mainOverflowRetryCount < MAX_OVERFLOW_COMPACT_RETRIES) {
+        this._mainOverflowRetryCount++;
         logger.warn(
-          { error: errorToString(err), attempt: this._overflowRetryCount },
+          { error: errorToString(err), attempt: this._mainOverflowRetryCount },
           "context_overflow_detected_forcing_compact",
         );
         const compacted = await this.compactionManager.checkAndCompact(
@@ -645,7 +644,7 @@ export class MainAgent extends ConversationAgent {
           tools: tools.length ? tools : undefined,
           toolChoice: tools.length ? "auto" : undefined,
         });
-        this._overflowRetryCount = 0;
+        this._mainOverflowRetryCount = 0;
       } else {
         throw err;
       }

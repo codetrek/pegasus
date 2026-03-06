@@ -32,7 +32,6 @@ import type { Message } from "../../infra/llm-types.ts";
 import type { Event } from "../../events/types.ts";
 import { EventType, createEvent } from "../../events/types.ts";
 import type { ToolCall } from "../../models/tool.ts";
-import { SessionStore } from "../../session/store.ts";
 
 // ── Types ────────────────────────────────────────────
 
@@ -50,8 +49,6 @@ export interface ExecutionAgentDeps extends BaseAgentDeps {
   description: string;
   /** Execution mode. */
   mode: ExecutionMode;
-  /** Session directory (only used in "worker" mode). */
-  sessionDir?: string;
   /** Memory directory for memory tools. */
   memoryDir?: string;
   /** Tasks directory for task persistence. */
@@ -85,7 +82,6 @@ export class ExecutionAgent extends BaseAgent {
   get mode(): ExecutionMode {
     return this._mode;
   }
-  private sessionStore: SessionStore | null;
   private contextPrompt: string;
   private onNotifyParent: ((message: string) => void) | null;
 
@@ -102,11 +98,6 @@ export class ExecutionAgent extends BaseAgent {
     this._mode = deps.mode;
     this.contextPrompt = deps.contextPrompt ?? "";
     this.onNotifyParent = deps.onNotify ?? null;
-
-    // Session persistence only in worker mode
-    this.sessionStore = deps.sessionDir
-      ? new SessionStore(deps.sessionDir)
-      : null;
   }
 
   // ═══════════════════════════════════════════════════
@@ -122,12 +113,12 @@ export class ExecutionAgent extends BaseAgent {
   async run(): Promise<ExecutionResult> {
     // Load session for worker mode
     let messages: Message[] = [];
-    if (this.sessionStore) {
+    if (this._mode === "worker") {
       messages = await this.sessionStore.load();
     }
     if (messages.length === 0) {
       messages.push({ role: "user", content: this.input });
-      if (this.sessionStore) {
+      if (this._mode === "worker") {
         await this.sessionStore.append({ role: "user", content: this.input });
       }
     }
@@ -165,12 +156,12 @@ export class ExecutionAgent extends BaseAgent {
    */
   private async _startExecution(): Promise<void> {
     let messages: Message[] = [];
-    if (this.sessionStore) {
+    if (this._mode === "worker") {
       messages = await this.sessionStore.load();
     }
     if (messages.length === 0) {
       messages.push({ role: "user", content: this.input });
-      if (this.sessionStore) {
+      if (this._mode === "worker") {
         await this.sessionStore.append({ role: "user", content: this.input });
       }
     }
@@ -289,7 +280,7 @@ export class ExecutionAgent extends BaseAgent {
     const state = this.taskStates.get(taskId);
 
     // Persist in worker mode
-    if (this.sessionStore && state) {
+    if (this._mode === "worker" && state) {
       for (const msg of state.messages) {
         await this.sessionStore.append(msg);
       }

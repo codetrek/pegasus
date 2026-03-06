@@ -19,6 +19,12 @@ import type { TaskExecutionState, CreateTaskStateOptions } from "../../../../src
 import { ToolRegistry } from "../../../../src/tools/registry.ts";
 import { EventBus } from "../../../../src/events/bus.ts";
 import { z } from "zod";
+import { mkdtemp } from "node:fs/promises";
+import path from "node:path";
+import os from "node:os";
+import {
+  MAX_OVERFLOW_COMPACT_RETRIES,
+} from "../../../../src/context/index.ts";
 
 // ── Helpers ──────────────────────────────────────────
 
@@ -102,6 +108,21 @@ class TestAgent extends BaseAgent {
   getTaskStates(): Map<string, TaskExecutionState> {
     return this.taskStates;
   }
+
+  /** Expose sessionStore for assertions. */
+  getSessionStore() {
+    return this.sessionStore;
+  }
+
+  /** Expose beforeLLMCall for testing. */
+  testBeforeLLMCall(taskId: string): Promise<void> {
+    return this.beforeLLMCall(taskId);
+  }
+
+  /** Expose onLLMError for testing. */
+  testOnLLMError(taskId: string, error: unknown): Promise<boolean> {
+    return this.onLLMError(taskId, error);
+  }
 }
 
 function createTestAgent(overrides?: Partial<BaseAgentDeps>): TestAgent {
@@ -109,6 +130,7 @@ function createTestAgent(overrides?: Partial<BaseAgentDeps>): TestAgent {
     agentId: "test-agent-1",
     model: createMockModel(),
     toolRegistry: createMockRegistry(),
+    sessionDir: `/tmp/pegasus-test-base-agent-${Date.now()}`,
     ...overrides,
   });
 }
@@ -128,6 +150,7 @@ describe("BaseAgent", () => {
         agentId: "my-agent",
         model,
         toolRegistry: registry,
+        sessionDir: `/tmp/pegasus-test-base-agent-${Date.now()}`,
       });
 
       expect(agent.agentId).toBe("my-agent");
@@ -348,6 +371,7 @@ describe("BaseAgent", () => {
         agentId: "error-agent",
         model: createMockModel(),
         toolRegistry: createMockRegistry(),
+        sessionDir: `/tmp/pegasus-test-base-agent-${Date.now()}`,
       });
 
       // Should not throw — error is caught and logged
@@ -387,6 +411,7 @@ describe("BaseAgent", () => {
         agentId: "partial-error-agent",
         model: createMockModel(),
         toolRegistry: createMockRegistry(),
+        sessionDir: `/tmp/pegasus-test-base-agent-${Date.now()}`,
       });
 
       // Queue two events while BUSY
@@ -602,6 +627,7 @@ describe("BaseAgent", () => {
         model,
         toolRegistry: createMockRegistry(),
         eventBus: bus,
+        sessionDir: `/tmp/pegasus-test-base-agent-${Date.now()}`,
       });
       agent.testCreateTaskState("task-1", [{ role: "user", content: "hi" }]);
 
@@ -714,6 +740,7 @@ describe("BaseAgent", () => {
         agentId: "test-agent-1",
         model,
         toolRegistry: createMockRegistry(),
+        sessionDir: `/tmp/pegasus-test-base-agent-${Date.now()}`,
       });
       agent.testCreateTaskState("task-1", [
         { role: "user", content: "run two tools" },
@@ -771,6 +798,7 @@ describe("BaseAgent", () => {
         agentId: "test-agent-1",
         model,
         toolRegistry: createMockRegistry(),
+        sessionDir: `/tmp/pegasus-test-base-agent-${Date.now()}`,
       });
       agent.testCreateTaskState("task-1", [
         { role: "user", content: "start" },
@@ -842,6 +870,7 @@ describe("BaseAgent", () => {
         agentId: "retry-agent",
         model,
         toolRegistry: createMockRegistry(),
+        sessionDir: `/tmp/pegasus-test-base-agent-${Date.now()}`,
       });
       agent.testCreateTaskState("task-1", [
         { role: "user", content: "hi" },
@@ -882,6 +911,7 @@ describe("BaseAgent", () => {
         agentId: "hook-agent",
         model,
         toolRegistry: createMockRegistry(),
+        sessionDir: `/tmp/pegasus-test-base-agent-${Date.now()}`,
       });
       agent.testCreateTaskState("task-1", [
         { role: "user", content: "hi" },
@@ -939,6 +969,7 @@ describe("BaseAgent", () => {
         agentId: "hook-tool-agent",
         model,
         toolRegistry: createMockRegistry(),
+        sessionDir: `/tmp/pegasus-test-base-agent-${Date.now()}`,
       });
       agent.testCreateTaskState("task-1", [
         { role: "user", content: "do something" },
@@ -1050,6 +1081,7 @@ describe("BaseAgent", () => {
         agentId: "test-agent-1",
         model,
         toolRegistry: createMockRegistry(),
+        sessionDir: `/tmp/pegasus-test-base-agent-${Date.now()}`,
       });
       agent.testCreateTaskState("task-1", [
         { role: "user", content: "do a 3-step task" },
@@ -1153,5 +1185,256 @@ describe("BaseAgent", () => {
         "complete",
       );
     }, 5000);
+  });
+});
+
+// ═══════════════════════════════════════════════════
+// Compaction Tests
+// ═══════════════════════════════════════════════════
+
+describe("BaseAgent — compaction", () => {
+  async function createTempDir(): Promise<string> {
+    return mkdtemp(path.join(os.tmpdir(), "pegasus-test-compaction-"));
+  }
+
+  /**
+   * Build messages that exceed the default compactTrigger.
+   * Default model "test-model" uses DEFAULT_MODEL_LIMITS → 128k context.
+   * compactTrigger ≈ 128000 * (1/1.2) * 0.7 ≈ 74666 tokens.
+   * Need chars ≈ 74666 * 3.5 ≈ 261333. Generate plenty.
+   */
+  function buildLargeMessages(count: number, charsPerMsg: number): Message[] {
+    const msgs: Message[] = [];
+    for (let i = 0; i < count; i++) {
+      msgs.push({
+        role: i % 2 === 0 ? "user" : "assistant",
+        content: `msg-${i}: ${"x".repeat(charsPerMsg)}`,
+      });
+    }
+    return msgs;
+  }
+
+  describe("beforeLLMCall triggers compaction when estimated tokens exceed budget", () => {
+    test("compacts state when messages exceed token budget", async () => {
+      const sessionDir = await createTempDir();
+      const generateMock = mock(async () => ({
+        text: "summary of conversation",
+        finishReason: "stop" as const,
+        usage: { promptTokens: 10, completionTokens: 5 },
+      }));
+      const model = createMockModel({ generate: generateMock });
+      const agent = createTestAgent({ model, sessionDir });
+
+      // Build messages that exceed default compactTrigger
+      const messages = buildLargeMessages(20, 20000);
+      agent.testCreateTaskState("task-1", messages);
+
+      await agent.testBeforeLLMCall("task-1");
+
+      // After compaction, messages should be replaced (loaded from session store)
+      const state = agent.getTaskStates().get("task-1")!;
+      // The session store would have 1 compact entry (summary) loaded back
+      expect(state.messages.length).toBeLessThan(messages.length);
+    }, 10000);
+  });
+
+  describe("beforeLLMCall does NOT compact when under threshold", () => {
+    test("does not compact when estimated tokens are below budget", async () => {
+      const sessionDir = await createTempDir();
+      const model = createMockModel();
+      const agent = createTestAgent({ model, sessionDir });
+
+      // Small messages — well under any threshold
+      const messages: Message[] = [
+        { role: "user", content: "hello" },
+        { role: "assistant", content: "hi" },
+        { role: "user", content: "how are you" },
+        { role: "assistant", content: "fine" },
+        { role: "user", content: "great" },
+        { role: "assistant", content: "yes" },
+        { role: "user", content: "ok" },
+        { role: "assistant", content: "ok" },
+      ];
+      agent.testCreateTaskState("task-1", messages);
+
+      await agent.testBeforeLLMCall("task-1");
+
+      // Messages should be unchanged — no compaction
+      const state = agent.getTaskStates().get("task-1")!;
+      expect(state.messages.length).toBe(8);
+      expect(state.messages[0]!.content).toBe("hello");
+    }, 5000);
+  });
+
+  describe("beforeLLMCall does NOT compact when < 8 messages", () => {
+    test("skips compaction when fewer than 8 messages", async () => {
+      const sessionDir = await createTempDir();
+      const model = createMockModel();
+      const agent = createTestAgent({ model, sessionDir });
+
+      // Only 5 messages — even if they were huge, should skip
+      const messages: Message[] = [
+        { role: "user", content: "x".repeat(100000) },
+        { role: "assistant", content: "x".repeat(100000) },
+        { role: "user", content: "x".repeat(100000) },
+        { role: "assistant", content: "x".repeat(100000) },
+        { role: "user", content: "x".repeat(100000) },
+      ];
+      agent.testCreateTaskState("task-1", messages);
+
+      await agent.testBeforeLLMCall("task-1");
+
+      // Messages should be unchanged
+      const state = agent.getTaskStates().get("task-1")!;
+      expect(state.messages.length).toBe(5);
+    }, 5000);
+  });
+
+  describe("onLLMError returns true and compacts on context overflow", () => {
+    test("returns true and triggers compaction on context overflow error", async () => {
+      const sessionDir = await createTempDir();
+      const generateMock = mock(async () => ({
+        text: "summary",
+        finishReason: "stop" as const,
+        usage: { promptTokens: 10, completionTokens: 5 },
+      }));
+      const model = createMockModel({ generate: generateMock });
+      const agent = createTestAgent({ model, sessionDir });
+
+      const messages: Message[] = [
+        { role: "user", content: "test message" },
+        { role: "assistant", content: "response" },
+      ];
+      agent.testCreateTaskState("task-1", messages);
+
+      const overflowError = new Error("context window length exceeded maximum");
+      const shouldRetry = await agent.testOnLLMError("task-1", overflowError);
+
+      expect(shouldRetry).toBe(true);
+    }, 10000);
+  });
+
+  describe("onLLMError returns false for non-overflow errors", () => {
+    test("returns false for generic errors", async () => {
+      const sessionDir = await createTempDir();
+      const agent = createTestAgent({ sessionDir });
+
+      agent.testCreateTaskState("task-1", [
+        { role: "user", content: "test" },
+      ]);
+
+      const genericError = new Error("network timeout");
+      const shouldRetry = await agent.testOnLLMError("task-1", genericError);
+
+      expect(shouldRetry).toBe(false);
+    }, 5000);
+
+    test("returns false for rate limit errors", async () => {
+      const sessionDir = await createTempDir();
+      const agent = createTestAgent({ sessionDir });
+
+      agent.testCreateTaskState("task-1", [
+        { role: "user", content: "test" },
+      ]);
+
+      const rateLimitError = new Error("rate limit exceeded");
+      const shouldRetry = await agent.testOnLLMError("task-1", rateLimitError);
+
+      expect(shouldRetry).toBe(false);
+    }, 5000);
+  });
+
+  describe("onLLMError returns false after MAX_OVERFLOW_COMPACT_RETRIES", () => {
+    test("stops retrying after max retries reached", async () => {
+      const sessionDir = await createTempDir();
+      const generateMock = mock(async () => ({
+        text: "summary",
+        finishReason: "stop" as const,
+        usage: { promptTokens: 10, completionTokens: 5 },
+      }));
+      const model = createMockModel({ generate: generateMock });
+      const agent = createTestAgent({ model, sessionDir });
+
+      agent.testCreateTaskState("task-1", [
+        { role: "user", content: "test" },
+        { role: "assistant", content: "response" },
+      ]);
+
+      const overflowError = new Error("context window length exceeded maximum");
+
+      // First MAX_OVERFLOW_COMPACT_RETRIES calls should return true
+      for (let i = 0; i < MAX_OVERFLOW_COMPACT_RETRIES; i++) {
+        const shouldRetry = await agent.testOnLLMError("task-1", overflowError);
+        expect(shouldRetry).toBe(true);
+      }
+
+      // Next call should return false (exceeded limit)
+      const shouldRetry = await agent.testOnLLMError("task-1", overflowError);
+      expect(shouldRetry).toBe(false);
+    }, 10000);
+  });
+
+  describe("_compactState uses mechanicalSummary when LLM summarize fails", () => {
+    test("falls back to mechanical summary when LLM call throws", async () => {
+      const sessionDir = await createTempDir();
+      const generateMock = mock(async () => {
+        throw new Error("LLM unavailable for summarization");
+      });
+      const model = createMockModel({ generate: generateMock });
+      const agent = createTestAgent({ model, sessionDir });
+
+      // Build enough messages to trigger compaction
+      const messages = buildLargeMessages(20, 20000);
+      agent.testCreateTaskState("task-1", messages);
+
+      // Trigger compaction via beforeLLMCall (messages exceed budget)
+      await agent.testBeforeLLMCall("task-1");
+
+      // After compaction with fallback, state should have compact summary
+      const state = agent.getTaskStates().get("task-1")!;
+      // Mechanical summary is stored as system message via sessionStore.compact()
+      expect(state.messages.length).toBeLessThan(messages.length);
+      // The first message should be the compact system message
+      expect(state.messages[0]!.content).toContain("[Session compacted");
+    }, 10000);
+  });
+
+  describe("mechanicalSummary produces correct output", () => {
+    test("generates correct summary structure via _compactState fallback", async () => {
+      const sessionDir = await createTempDir();
+      const generateMock = mock(async () => {
+        throw new Error("LLM unavailable");
+      });
+      const model = createMockModel({ generate: generateMock });
+      const agent = createTestAgent({ model, sessionDir });
+
+      // Create messages with specific content to verify mechanical summary
+      const messages: Message[] = [
+        { role: "user", content: "first user message" },
+        { role: "assistant", content: "first response", toolCalls: [{ id: "tc1", name: "read_file", arguments: {} }] },
+        { role: "tool", content: "file contents", toolCallId: "tc1" },
+        { role: "user", content: "second user message" },
+        { role: "assistant", content: "second response", toolCalls: [{ id: "tc2", name: "write_file", arguments: {} }] },
+        { role: "tool", content: "done", toolCallId: "tc2" },
+        { role: "user", content: "third user message" },
+        { role: "assistant", content: "third response" },
+        // Add more to reach >= 8 messages and exceed token budget
+        ...buildLargeMessages(16, 20000),
+      ];
+      agent.testCreateTaskState("task-1", messages);
+
+      await agent.testBeforeLLMCall("task-1");
+
+      const state = agent.getTaskStates().get("task-1")!;
+      const summary = state.messages[0]!.content;
+
+      expect(summary).toContain("[Session compacted");
+      expect(summary).toContain("messages archived");
+      expect(summary).toContain("Recent user messages:");
+      expect(summary).toContain("Tools used:");
+      expect(summary).toContain("read_file");
+      expect(summary).toContain("write_file");
+      expect(summary).toContain("Total exchanges:");
+    }, 10000);
   });
 });
