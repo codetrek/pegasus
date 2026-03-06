@@ -7,6 +7,7 @@
   "private": true,
   "scripts": {
     "dev": "bun run src/cli.ts",
+    "tui": "bun --preload @opentui/solid/preload src/tui/main.tsx",
     "test": "PEGASUS_LOG_LEVEL=silent bun test tests/",
     "test:watch": "PEGASUS_LOG_LEVEL=silent bun test --watch tests/",
     "coverage": "PEGASUS_LOG_LEVEL=silent bun test --coverage tests/",
@@ -25,6 +26,8 @@
   "dependencies": {
     "@mariozechner/pi-ai": "^0.55.3",
     "@modelcontextprotocol/sdk": "^1.27.1",
+    "@opentui/core": "^0.1.86",
+    "@opentui/solid": "^0.1.86",
     "grammy": "^1.40.1",
     "ignore": "^7.0.5",
     "js-yaml": "^4.1.1",
@@ -33,6 +36,7 @@
     "pino-roll": "^4.0.0",
     "playwright-core": "^1.58.2",
     "sharp": "^0.34.5",
+    "solid-js": "^1.9.11",
     "tiktoken": "^1.0.22",
     "turndown": "^7.2.2",
     "zod": "^3.24",

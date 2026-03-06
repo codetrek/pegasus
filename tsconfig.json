@@ -11,6 +11,9 @@
     "verbatimModuleSyntax": true,
     "noEmit": true,
 
+    "jsx": "preserve",
+    "jsxImportSource": "@opentui/solid",
+
     "strict": true,
     "skipLibCheck": true,
     "noFallthroughCasesInSwitch": true,
@@ -24,5 +27,5 @@
       "@pegasus/*": ["src/*"]
     }
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts"]
 }
