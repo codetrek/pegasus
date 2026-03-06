@@ -7,9 +7,10 @@ import type {
 import type { Persona } from "@pegasus/identity/persona.ts";
 import { SettingsSchema } from "@pegasus/infra/config.ts";
 import type { OutboundMessage, ChannelAdapter } from "@pegasus/channels/types.ts";
-import { rm } from "node:fs/promises";
+import { rm, mkdir } from "node:fs/promises";
 import { ModelRegistry } from "@pegasus/infra/model-registry.ts";
 import type { LLMConfig } from "@pegasus/infra/config-schema.ts";
+import { OwnerStore } from "@pegasus/security/owner-store.ts";
 
 let testSeq = 0;
 let testDataDir = "/tmp/pegasus-test-app";
@@ -368,4 +369,178 @@ describe("PegasusApp", () => {
 
     await app.stop();
   }, 15_000);
+
+  // ═══════════════════════════════════════════════════
+  // Security classification via routeMessage()
+  // ═══════════════════════════════════════════════════
+
+  describe("routeMessage — security classification", () => {
+    it("should discard messages from no-owner-configured channels and inject notification", async () => {
+      const model = createMonologueModel("thinking...");
+      const settings = testSettings();
+      const app = new PegasusApp({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings,
+      });
+
+      await app.start();
+
+      // Send message from telegram channel (no owner configured for "telegram")
+      app.routeMessage({
+        text: "hello from stranger",
+        channel: { type: "telegram", channelId: "chat456", userId: "stranger" },
+      });
+
+      await Bun.sleep(200);
+
+      // The message text should NOT appear in session (discarded for security)
+      const sessionFile = Bun.file(
+        `${testDataDir}/agents/main/session/current.jsonl`,
+      );
+      if (await sessionFile.exists()) {
+        const content = await sessionFile.text();
+        expect(content).not.toContain("hello from stranger");
+        // But a security notification SHOULD be injected
+        expect(content).toContain("No trusted owner configured for telegram channel");
+      }
+
+      await app.stop();
+    }, 15_000);
+
+    it("should rate-limit no-owner notifications to once per hour", async () => {
+      const model = createMonologueModel("thinking...");
+      const settings = testSettings();
+      const app = new PegasusApp({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings,
+      });
+
+      await app.start();
+
+      // Send multiple messages — only first should produce notification
+      app.routeMessage({
+        text: "msg1",
+        channel: { type: "telegram", channelId: "chat1", userId: "user1" },
+      });
+      await Bun.sleep(50);
+      app.routeMessage({
+        text: "msg2",
+        channel: { type: "telegram", channelId: "chat1", userId: "user1" },
+      });
+      await Bun.sleep(200);
+
+      const sessionFile = Bun.file(
+        `${testDataDir}/agents/main/session/current.jsonl`,
+      );
+      const content = await sessionFile.text();
+
+      // Count notification occurrences
+      const matches = content.match(/No trusted owner configured for telegram channel/g);
+      expect(matches).toHaveLength(1); // Only the first one
+
+      await app.stop();
+    }, 15_000);
+
+    it("should route untrusted messages to channel project (not reach MainAgent session)", async () => {
+      const model = createMonologueModel("thinking...");
+      const settings = testSettings();
+      const app = new PegasusApp({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings,
+      });
+
+      // Pre-register a telegram owner so channel is "configured"
+      await mkdir(settings.authDir, { recursive: true });
+      const store = new OwnerStore(settings.authDir);
+      store.add("telegram", "trusted-owner");
+
+      await app.start();
+
+      // Send from untrusted user (different userId)
+      app.routeMessage({
+        text: "hello from untrusted",
+        channel: { type: "telegram", channelId: "chat789", userId: "stranger" },
+      });
+
+      await Bun.sleep(200);
+
+      // Message should NOT appear in MainAgent's session
+      const sessionFile = Bun.file(
+        `${testDataDir}/agents/main/session/current.jsonl`,
+      );
+      if (await sessionFile.exists()) {
+        const content = await sessionFile.text();
+        expect(content).not.toContain("hello from untrusted");
+      }
+
+      // Channel project should have been auto-created
+      const project = app.mainAgent.projects.get("channel:telegram");
+      expect(project).toBeDefined();
+
+      await app.stop();
+    }, 15_000);
+
+    it("should allow owner messages through to MainAgent", async () => {
+      const model = createMonologueModel("thinking...");
+      const settings = testSettings();
+      const app = new PegasusApp({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings,
+      });
+
+      // Pre-register telegram owner
+      await mkdir(settings.authDir, { recursive: true });
+      const store = new OwnerStore(settings.authDir);
+      store.add("telegram", "owner-user");
+
+      await app.start();
+
+      app.routeMessage({
+        text: "hello from owner",
+        channel: { type: "telegram", channelId: "chat123", userId: "owner-user" },
+      });
+
+      await Bun.sleep(200);
+
+      // Owner message SHOULD appear in session
+      const sessionFile = Bun.file(
+        `${testDataDir}/agents/main/session/current.jsonl`,
+      );
+      const content = await sessionFile.text();
+      expect(content).toContain("hello from owner");
+
+      await app.stop();
+    }, 15_000);
+
+    it("should always allow CLI messages (internal channel)", async () => {
+      const model = createMonologueModel("thinking...");
+      const app = new PegasusApp({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+      });
+
+      await app.start();
+
+      // CLI is an internal channel — always trusted, no owner needed
+      app.routeMessage({
+        text: "hello from cli",
+        channel: { type: "cli", channelId: "main" },
+      });
+
+      await Bun.sleep(200);
+
+      const sessionFile = Bun.file(
+        `${testDataDir}/agents/main/session/current.jsonl`,
+      );
+      const content = await sessionFile.text();
+      expect(content).toContain("hello from cli");
+
+      await app.stop();
+    }, 15_000);
+  });
 });

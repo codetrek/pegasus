@@ -140,8 +140,8 @@ describe("Multi-channel routing", () => {
 
     await app.start();
 
-    // Send from telegram channel
-    app.mainAgent.send({
+    // Send from telegram channel via routeMessage (security + routing)
+    app.routeMessage({
       text: "hello",
       channel: { type: "telegram", channelId: "tg-123", userId: "any" },
     });
@@ -188,8 +188,8 @@ describe("Multi-channel routing", () => {
 
     await app.start();
 
-    // Send from "sms" which has no adapter registered
-    app.mainAgent.send({
+    // Send from "sms" which has no adapter registered (via routeMessage)
+    app.routeMessage({
       text: "hello",
       channel: { type: "sms", channelId: "unknown-123", userId: "any" },
     });
@@ -258,15 +258,15 @@ describe("Multi-channel routing", () => {
 
     await app.start();
 
-    // Send from CLI
-    app.mainAgent.send({
+    // Send from CLI via routeMessage
+    app.routeMessage({
       text: "hello from cli",
       channel: { type: "cli", channelId: "main" },
     });
     await Bun.sleep(100);
 
-    // Send from Telegram
-    app.mainAgent.send({
+    // Send from Telegram via routeMessage
+    app.routeMessage({
       text: "hello from telegram",
       channel: { type: "telegram", channelId: "tg-456", userId: "any" },
     });
@@ -321,8 +321,8 @@ describe("Multi-channel routing", () => {
 
     await app.start();
 
-    // Should not crash
-    app.mainAgent.send({
+    // Should not crash (via routeMessage)
+    app.routeMessage({
       text: "hello",
       channel: { type: "broken", channelId: "broken-123", userId: "any" },
     });
