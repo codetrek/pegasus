@@ -37,7 +37,7 @@ import {
   _setOrchestratorFactoryForTest,
 } from "@pegasus/workers/agent-worker.ts";
 import { SUBAGENT_SYSTEM_PROMPT } from "@pegasus/prompts/index.ts";
-import type { TaskNotification } from "@pegasus/agents/agent.ts";
+import type { TaskNotification } from "@pegasus/agents/task-runner.ts";
 import type { OrchestratorAgentDeps } from "@pegasus/agents/base/orchestrator-agent.ts";
 import { setSettings, resetSettings } from "@pegasus/infra/config.ts";
 import type { Settings } from "@pegasus/infra/config.ts";
@@ -94,16 +94,14 @@ function makeTestSettings(dataDir: string): Settings {
   };
 }
 
-/** Track the last onNotify callback registered by the mock Agent. */
+/** Track the last onNotification callback registered by the mock TaskRunner. */
 let _notifyCallback: ((n: unknown) => void) | null = null;
 
-/** Create a mock Agent-like object for factory injection. */
+/** Create a mock TaskRunner-like object for factory injection. */
 function createMockAgent() {
   return {
-    start: mock(async () => {}),
-    stop: mock(async () => {}),
     submit: mock((_text: string, _source: string) => "mock_task_id"),
-    onNotify: mock((cb: (n: unknown) => void) => { _notifyCallback = cb; }),
+    onNotification: null as ((n: unknown) => void) | null,
   };
 }
 
@@ -408,7 +406,6 @@ describe("handleShutdown", () => {
 
   it("should cancel pending requests and stop agent", async () => {
     let cancelCalled = false;
-    let stopCalled = false;
 
     const fakeModel = {
       cancelAll: (reason: string) => {
@@ -416,8 +413,9 @@ describe("handleShutdown", () => {
         expect(reason).toContain("shutting down");
       },
     };
+    // TaskRunner has no stop() — handleShutdown only cancels proxyModel
     const fakeAgent = {
-      stop: async () => { stopCalled = true; },
+      submit: mock(() => "t1"),
     };
 
     _testState.setProxyModel(fakeModel as any);
@@ -426,7 +424,6 @@ describe("handleShutdown", () => {
     await handleShutdown();
 
     expect(cancelCalled).toBe(true);
-    expect(stopCalled).toBe(true);
     expect(messages).toContainEqual({ type: "shutdown-complete" });
     expect(exitCalls).toEqual([0]);
   }, 5_000);
@@ -455,15 +452,15 @@ describe("handleShutdown", () => {
   }, 5_000);
 
   it("should handle case with only agent (no proxyModel)", async () => {
+    // TaskRunner has no stop() — with no proxyModel, handleShutdown just posts shutdown-complete
     const fakeAgent = {
-      stop: mock(async () => {}),
+      submit: mock(() => "t1"),
     };
     _testState.setAgent(fakeAgent as any);
     _testState.setProxyModel(null);
 
     await handleShutdown();
 
-    expect(fakeAgent.stop).toHaveBeenCalled();
     expect(messages).toContainEqual({ type: "shutdown-complete" });
   }, 5_000);
 
@@ -483,7 +480,8 @@ describe("handleShutdown", () => {
   }, 5_000);
 
   it("should stop both projectAgent and orchestratorAgent when both are active", async () => {
-    const fakeAgent = { stop: mock(async () => {}) };
+    // TaskRunner has no stop(), only orchestratorAgent has stop()
+    const fakeAgent = { submit: mock(() => "t1") };
     const fakeOrchestrator = { stop: mock(async () => {}) };
     const fakeModel = { cancelAll: mock(() => {}) };
 
@@ -494,7 +492,6 @@ describe("handleShutdown", () => {
     await handleShutdown();
 
     expect(fakeModel.cancelAll).toHaveBeenCalled();
-    expect(fakeAgent.stop).toHaveBeenCalled();
     expect(fakeOrchestrator.stop).toHaveBeenCalled();
     expect(messages).toContainEqual({ type: "shutdown-complete" });
   }, 5_000);
@@ -733,15 +730,20 @@ describe("initProject", () => {
     // Reset mocks for each test
     lastMockAgent = createMockAgent();
     lastMockProxy = createMockProxyModel();
-    cleanupAgent = _setAgentFactoryForTest(() => lastMockAgent as any);
+    _notifyCallback = null;
+    cleanupAgent = _setAgentFactoryForTest((deps: any) => {
+      // Capture onNotification from TaskRunnerDeps
+      if (deps.onNotification) _notifyCallback = deps.onNotification;
+      return lastMockAgent as any;
+    });
     cleanupProxy = _setProxyModelFactoryForTest(() => lastMockProxy as any);
   });
 
   afterEach(async () => {
     try { _testState.getProxyModel()?.cancelAll("test cleanup"); } catch { /* ignore */ }
-    try { await _testState.getAgent()?.stop(); } catch { /* ignore */ }
     _testState.setAgent(null);
     _testState.setProxyModel(null);
+    _notifyCallback = null;
     cleanup();
     cleanupExit();
     cleanupAgent();

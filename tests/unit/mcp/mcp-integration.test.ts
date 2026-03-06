@@ -12,13 +12,9 @@ import { ToolCategory } from "../../../src/tools/types.ts";
 import { wrapMCPTools } from "../../../src/mcp/wrap.ts";
 import type { MCPManager, MCPServerConfig } from "../../../src/mcp/manager.ts";
 import type { Tool as McpTool, CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { Agent } from "../../../src/agents/agent.ts";
 import { SettingsSchema } from "../../../src/infra/config-schema.ts";
-import type { LanguageModel } from "../../../src/infra/llm-types.ts";
-import type { Persona } from "../../../src/identity/persona.ts";
 import { rm } from "node:fs/promises";
 import { z } from "zod";
-import { buildMainAgentPaths } from "@pegasus/storage/paths.ts";
 
 // Mock MCPManager for integration tests
 function createMockManager(
@@ -531,124 +527,4 @@ describe("MCP Integration", () => {
     });
   });
 
-  // ═══════════════════════════════════════════════════
-  // Real Agent.loadMCPTools (actual Agent instance)
-  // ═══════════════════════════════════════════════════
-
-  describe("Agent.loadMCPTools (real Agent instance)", () => {
-    const testDataDir = "/tmp/pegasus-test-mcp-agent";
-
-    function createMockModel(): LanguageModel {
-      return {
-        provider: "test",
-        modelId: "test-model",
-        async generate() {
-          return {
-            text: "ok",
-            finishReason: "stop" as const,
-            usage: { promptTokens: 10, completionTokens: 10 },
-          };
-        },
-      };
-    }
-
-    const testPersona: Persona = {
-      name: "TestBot",
-      role: "test assistant",
-      personality: ["helpful"],
-      style: "concise",
-      values: ["accuracy"],
-    };
-
-    afterAll(async () => {
-      await rm(testDataDir, { recursive: true, force: true }).catch(() => {});
-    });
-
-    it("should register MCP tools into Agent's tool registry", async () => {
-      const agent = new Agent({
-        model: createMockModel(),
-        persona: testPersona,
-        settings: SettingsSchema.parse({
-          dataDir: testDataDir,
-          logLevel: "silent",
-          authDir: "/tmp/pegasus-test-auth",
-        }),
-        storePaths: buildMainAgentPaths(testDataDir),
-      });
-
-      const mockManager = {
-        listTools: mock(async () => sampleMcpTools),
-        callTool: mock(async () => ({
-          content: [{ type: "text" as const, text: "result" }],
-        })),
-      } as unknown as MCPManager;
-
-      const configs: MCPServerConfig[] = [
-        { name: "test-srv", transport: "stdio", command: "echo", enabled: true },
-      ];
-
-      await agent.loadMCPTools(mockManager, configs);
-
-      // Verify MCP tools are registered via the public eventBus/taskRegistry
-      // The toolRegistry is private, but we can verify indirectly via loadMCPTools not throwing
-      expect(mockManager.listTools).toHaveBeenCalledWith("test-srv");
-    });
-
-    it("should skip disabled configs in loadMCPTools", async () => {
-      const agent = new Agent({
-        model: createMockModel(),
-        persona: testPersona,
-        settings: SettingsSchema.parse({
-          dataDir: testDataDir,
-          logLevel: "silent",
-          authDir: "/tmp/pegasus-test-auth",
-        }),
-        storePaths: buildMainAgentPaths(testDataDir),
-      });
-
-      const mockManager = {
-        listTools: mock(async () => sampleMcpTools),
-      } as unknown as MCPManager;
-
-      const configs: MCPServerConfig[] = [
-        { name: "disabled", transport: "stdio", command: "echo", enabled: false },
-      ];
-
-      await agent.loadMCPTools(mockManager, configs);
-      // listTools should never be called for disabled configs
-      expect(mockManager.listTools).not.toHaveBeenCalled();
-    });
-
-    it("should continue after listTools failure (graceful degradation)", async () => {
-      const agent = new Agent({
-        model: createMockModel(),
-        persona: testPersona,
-        settings: SettingsSchema.parse({
-          dataDir: testDataDir,
-          logLevel: "silent",
-          authDir: "/tmp/pegasus-test-auth",
-        }),
-        storePaths: buildMainAgentPaths(testDataDir),
-      });
-
-      const mockManager = {
-        listTools: mock(async (name: string) => {
-          if (name === "bad-srv") throw new Error("connection refused");
-          return sampleMcpTools;
-        }),
-        callTool: mock(async () => ({
-          content: [{ type: "text" as const, text: "ok" }],
-        })),
-      } as unknown as MCPManager;
-
-      const configs: MCPServerConfig[] = [
-        { name: "bad-srv", transport: "stdio", command: "echo", enabled: true },
-        { name: "good-srv", transport: "stdio", command: "echo", enabled: true },
-      ];
-
-      // Should not throw — graceful degradation
-      await agent.loadMCPTools(mockManager, configs);
-      expect(mockManager.listTools).toHaveBeenCalledTimes(2);
-    });
-  });
 });

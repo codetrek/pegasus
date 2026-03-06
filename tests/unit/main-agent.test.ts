@@ -279,7 +279,7 @@ describe("MainAgent", () => {
     await agent.stop();
   }, 10_000);
 
-  it("should expose taskAgent getter", async () => {
+  it("should expose _taskRunner getter after start", async () => {
     const model = createReplyModel("ok");
     const agent = new MainAgent({
       models: createMockModelRegistry(model),
@@ -289,8 +289,7 @@ describe("MainAgent", () => {
 
     await agent.start();
 
-    expect(agent.taskAgent).toBeDefined();
-    expect(agent.taskAgent.isRunning).toBe(true);
+    expect(agent._taskRunner).toBeDefined();
 
     await agent.stop();
   }, 10_000);
