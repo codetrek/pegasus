@@ -36,7 +36,6 @@ import { hydrateImages } from "../media/image-prune.ts";
 import { extToMime } from "../media/image-helpers.ts";
 import { TaskRunner } from "./task-runner.ts";
 import type { TaskNotification } from "./task-runner.ts";
-import type { ToolCall } from "../models/tool.ts";
 import { computeTokenBudget, estimateTokensFromChars, summarizeMessages, calculateMaxToolResultChars, truncateToolResult, isContextOverflowError, MAX_OVERFLOW_COMPACT_RETRIES, ModelLimitsCache } from "../context/index.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import path from "node:path";
@@ -496,188 +495,57 @@ export class MainAgent extends ConversationAgent {
 
       // Execute all tool calls
 
+      const toolContext = this._buildToolContext();
+
+      // Pre-compute truncation budget once (same for all tools in this batch)
+      const toolBudget = computeTokenBudget({
+        modelId: this.models.getDefaultModelId(),
+        provider: this.models.getDefaultProvider(),
+        configContextWindow: this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
+        modelLimitsCache: this.modelLimitsCache,
+      });
+      const maxToolChars = calculateMaxToolResultChars(toolBudget.contextWindow, this.settings.context?.maxToolResultShare);
+
       for (const tc of result.toolCalls) {
-        if (tc.name === "reply") {
-          const { text, channelType, channelId, replyTo, imageIds } = tc.arguments as {
-            text: string;
-            channelType?: string;
-            channelId: string;
-            replyTo?: string;
-            imageIds?: string[];
-          };
+        const toolResult = await this.mainToolExecutor.execute(
+          tc.name,
+          tc.arguments,
+          toolContext,
+        );
 
-          // Resolve images first so failures can be reported in the tool result
-          const images: Array<{ id: string; data: string; mimeType: string }> = [];
-          const failures: string[] = [];
+        // Format result — preserve raw strings (e.g. inline skill body),
+        // only JSON.stringify objects/arrays
+        const rawContent = toolResult.success
+          ? typeof toolResult.result === "string"
+            ? toolResult.result
+            : JSON.stringify(toolResult.result)
+          : `Error: ${toolResult.error}`;
 
-          if (imageIds?.length) {
-            for (const idOrPath of imageIds) {
-              const img = await this._resolveImage(idOrPath);
-              if (img) {
-                images.push(img);
-              } else {
-                failures.push(idOrPath);
-              }
-            }
+        // Truncate large results
+        const safeContent = rawContent.length > maxToolChars
+          ? truncateToolResult(rawContent, maxToolChars)
+          : rawContent;
 
-            if (failures.length > 0) {
-              logger.warn({ failures }, "reply_image_resolve_failed");
-            }
-          }
+        // Timestamp prefix
+        const tsPrefix = formatToolTimestamp(
+          toolResult.completedAt ?? Date.now(),
+          toolResult.durationMs,
+        );
 
-          const delivered = { delivered: true } as Record<string, unknown>;
-          if (failures.length > 0) {
-            delivered.imageFailures = failures.map(f => `Failed to load image: ${f}`);
-          }
-          const toolMsg: Message = {
-            role: "tool",
-            content: JSON.stringify(delivered),
-            toolCallId: tc.id,
-          };
-          this.sessionMessages.push(toolMsg);
-          await this.sessionStore.append(toolMsg);
-          if (this._onReply) {
-            // Build outbound message
-            const outbound: OutboundMessage = {
-              text,
-              channel: { type: channelType ?? channel.type, channelId, replyTo },
-            };
+        // Build tool message
+        const toolMsg: Message = {
+          role: "tool",
+          content: `${tsPrefix}\n${safeContent}`,
+          toolCallId: tc.id,
+        };
 
-            // Attach resolved images as structured content
-            if (images.length > 0) {
-              outbound.content = { text, images };
-            }
-
-            this._onReply(outbound);
-          }
-        } else if (tc.name === "spawn_task") {
-          await this._handleSpawnTask(tc);
-        } else if (tc.name === "resume_task") {
-          await this._handleResumeTask(tc);
-        } else if (tc.name === "spawn_subagent") {
-          await this._handleSpawnSubagent(tc);
-        } else if (tc.name === "resume_subagent") {
-          await this._handleResumeSubagent(tc);
-        } else if (tc.name === "use_skill") {
-          // Handle use_skill tool call
-          const { skill: skillName, args: skillArgs } = tc.arguments as { skill: string; args?: string };
-          const skill = this.skillRegistry.get(skillName);
-
-          if (!skill) {
-            const toolMsg: Message = {
-              role: "tool",
-              content: JSON.stringify({ error: `Skill "${skillName}" not found` }),
-              toolCallId: tc.id,
-            };
-            this.sessionMessages.push(toolMsg);
-            await this.sessionStore.append(toolMsg);
-          } else if (skill.context === "fork") {
-            const body = this.skillRegistry.loadBody(skillName, skillArgs);
-            const taskType = skill.agent || "general";
-            const taskId = this.taskRunner.submit(body ?? "", "skill:" + skillName, taskType, `Skill: ${skillName}`);
-            const toolMsg: Message = {
-              role: "tool",
-              content: JSON.stringify({ taskId, status: "spawned", skill: skillName }),
-              toolCallId: tc.id,
-            };
-            this.sessionMessages.push(toolMsg);
-            await this.sessionStore.append(toolMsg);
-            // fork does NOT trigger follow-up think
-          } else {
-            // Inline: return skill content as tool result
-            const body = this.skillRegistry.loadBody(skillName, skillArgs);
-            const toolMsg: Message = {
-              role: "tool",
-              content: body ?? `Skill "${skillName}" body could not be loaded`,
-              toolCallId: tc.id,
-            };
-            this.sessionMessages.push(toolMsg);
-            await this.sessionStore.append(toolMsg);
-          }
-        } else if (tc.name === "reload_skills") {
-          // Reload skill registry, rebuild system prompt, notify project Workers.
-          // Called explicitly by skills (e.g. clawhub) after modifying skill files.
-          this._reloadSkills();
-          const toolMsg: Message = {
-            role: "tool",
-            content: JSON.stringify({
-              reloaded: true,
-              skillCount: this.skillRegistry.listAll().length,
-            }),
-            toolCallId: tc.id,
-          };
-          this.sessionMessages.push(toolMsg);
-          await this.sessionStore.append(toolMsg);
-        } else {
-          // Execute simple tool directly
-          const toolResult = await this.mainToolExecutor.execute(
-            tc.name,
-            tc.arguments,
-            {
-              taskId: "main-agent",
-              memoryDir: this.mainStorePaths.memory!,
-              sessionDir: this.mainStorePaths.session,
-              tasksDir: this.mainStorePaths.tasks,
-              taskRegistry: this.taskRunner,
-              projectManager: this.projectManager,
-              ownerStore: this.ownerStore,
-              mediaDir: this.imageManager
-                ? path.join(this.settings.dataDir, "media")
-                : undefined,
-              storeImage: this._getStoreImageCallback(),
-            },
-          );
-          const rawContent = toolResult.success
-            ? JSON.stringify(toolResult.result)
-            : `Error: ${toolResult.error}`;
-          const toolBudget = computeTokenBudget({
-            modelId: this.models.getDefaultModelId(),
-            provider: this.models.getDefaultProvider(),
-            configContextWindow: this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
-            modelLimitsCache: this.modelLimitsCache,
-          });
-          const maxToolChars = calculateMaxToolResultChars(toolBudget.contextWindow, this.settings.context?.maxToolResultShare);
-          const safeContent = rawContent.length > maxToolChars
-            ? truncateToolResult(rawContent, maxToolChars)
-            : rawContent;
-          const tsPrefix = formatToolTimestamp(
-            toolResult.completedAt ?? Date.now(),
-            toolResult.durationMs,
-          );
-          const toolMsg: Message = {
-            role: "tool",
-            content: `${tsPrefix}\n${safeContent}`,
-            toolCallId: tc.id,
-          };
-          // Propagate images from tool result (e.g., image_read returns images)
-          if (toolResult.images?.length) {
-            toolMsg.images = toolResult.images;
-          }
-          this.sessionMessages.push(toolMsg);
-          await this.sessionStore.append(toolMsg);
-
-          // Handle project lifecycle actions — start/stop Workers as needed
-          if (toolResult.success && toolResult.result) {
-            const action = (toolResult.result as Record<string, unknown>).action;
-            if (action === "create_project") {
-              const projectName = tc.arguments.name as string;
-              const project = this.projectManager.get(projectName);
-              if (project) {
-                this.projectAdapter.startProject(projectName, project.projectDir);
-              }
-            } else if (action === "suspend_project") {
-              await this.projectAdapter.stopProject(tc.arguments.name as string);
-            } else if (action === "resume_project") {
-              const project = this.projectManager.get(tc.arguments.name as string);
-              if (project) {
-                this.projectAdapter.startProject(tc.arguments.name as string, project.projectDir);
-              }
-            } else if (action === "complete_project") {
-              await this.projectAdapter.stopProject(tc.arguments.name as string);
-            }
-            // archive_project: no Worker to stop — already stopped when completed
-          }
+        // Propagate images from tool result
+        if (toolResult.images?.length) {
+          toolMsg.images = toolResult.images;
         }
+
+        this.sessionMessages.push(toolMsg);
+        await this.sessionStore.append(toolMsg);
       }
 
       // Always queue next think after tool calls — LLM decides when to stop
@@ -743,6 +611,42 @@ export class MainAgent extends ConversationAgent {
     return true;
   }
 
+  // ── Tool context ──
+
+  /**
+   * Build a full ToolContext with all dependencies for self-executing tools.
+   * All tools use the same context — no special-casing.
+   */
+  private _buildToolContext(): ToolContext {
+    return {
+      taskId: "main-agent",
+      memoryDir: this.mainStorePaths.memory!,
+      sessionDir: this.mainStorePaths.session,
+      tasksDir: this.mainStorePaths.tasks,
+      taskRegistry: this.taskRunner,
+      projectManager: this.projectManager,
+      ownerStore: this.ownerStore,
+      mediaDir: this.imageManager
+        ? path.join(this.settings.dataDir, "media")
+        : undefined,
+      storeImage: this._getStoreImageCallback(),
+      // Self-executing tool dependencies:
+      onReply: this._onReply
+        ? (msg: unknown) => this._onReply!(msg as OutboundMessage)
+        : undefined,
+      resolveImage: (idOrPath: string) => this._resolveImage(idOrPath),
+      subAgentManager: this.subAgentManager,
+      skillRegistry: this.skillRegistry,
+      tickManager: this.tickManager,
+      getMemorySnapshot: () => this._getMemorySnapshot(),
+      onSkillsReloaded: () => {
+        this._reloadSkills();
+        return this.skillRegistry.listAll().length;
+      },
+      projectAdapter: this.projectAdapter,
+    };
+  }
+
   // ── Vision support ──
 
   /** Cached image reader — avoids re-reading files on every _think() call. */
@@ -798,149 +702,6 @@ export class MainAgent extends ConversationAgent {
     }
 
     return null;
-  }
-
-  // ── Task spawning ──
-
-  private async _handleSpawnTask(tc: ToolCall): Promise<void> {
-    const { description, input, type } = tc.arguments as { description: string; input: string; type?: string };
-    const taskType = type ?? "general";
-    const taskId = this.taskRunner.submit(input, "main-agent", taskType, description);
-
-    const toolMsg: Message = {
-      role: "tool",
-      content: JSON.stringify({ taskId, status: "spawned", type: taskType, description }),
-      toolCallId: tc.id,
-    };
-    this.sessionMessages.push(toolMsg);
-    await this.sessionStore.append(toolMsg);
-
-    // No per-task callback — TaskRunner calls onNotification automatically
-    logger.info({ taskId, input, taskType }, "task_spawned");
-    this.tickManager.start();
-  }
-
-  // ── Task resuming ──
-
-  /**
-   * Handle resume_task tool call.
-   * Returns true if the LLM needs a follow-up think (e.g., on error).
-   */
-  private async _handleResumeTask(tc: ToolCall): Promise<boolean> {
-    const { task_id, input } = tc.arguments as { task_id: string; input: string };
-
-    try {
-      await this.taskRunner.resume(task_id, input);
-
-      const toolMsg: Message = {
-        role: "tool",
-        content: JSON.stringify({ taskId: task_id, status: "resumed" }),
-        toolCallId: tc.id,
-      };
-      this.sessionMessages.push(toolMsg);
-      await this.sessionStore.append(toolMsg);
-
-      logger.info({ taskId: task_id, input }, "task_resumed");
-      this.tickManager.start();
-      return false; // No follow-up needed — notification arrives via onNotify
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      const toolMsg: Message = {
-        role: "tool",
-        content: JSON.stringify({ error: errorMsg }),
-        toolCallId: tc.id,
-      };
-      this.sessionMessages.push(toolMsg);
-      await this.sessionStore.append(toolMsg);
-
-      logger.warn({ taskId: task_id, error: errorMsg }, "task_resume_failed");
-      return true; // LLM needs to see the error and react
-    }
-  }
-
-  // ── SubAgent spawning ──
-
-  /**
-   * Handle spawn_subagent tool call — spawn a SubAgent Worker.
-   * This is a terminal action (no follow-up think needed).
-   */
-  private async _handleSpawnSubagent(tc: ToolCall): Promise<void> {
-    const { description, input } = tc.arguments as { description: string; input: string };
-
-    if (!this.subAgentManager) {
-      const toolMsg: Message = {
-        role: "tool",
-        content: JSON.stringify({ error: "SubAgentManager not initialized" }),
-        toolCallId: tc.id,
-      };
-      this.sessionMessages.push(toolMsg);
-      await this.sessionStore.append(toolMsg);
-      return;
-    }
-
-    // Collect memory snapshot for the SubAgent
-    const memorySnapshot = await this._getMemorySnapshot();
-    const subagentId = this.subAgentManager.spawn(description, input, memorySnapshot);
-
-    const toolMsg: Message = {
-      role: "tool",
-      content: JSON.stringify({ subagentId, status: "spawned", description }),
-      toolCallId: tc.id,
-    };
-    this.sessionMessages.push(toolMsg);
-    await this.sessionStore.append(toolMsg);
-
-    logger.info({ subagentId, description }, "subagent_spawned");
-    this.tickManager.start();
-  }
-
-  // ── SubAgent resuming ──
-
-  /**
-   * Handle resume_subagent tool call — resume a completed/failed SubAgent.
-   * Returns true if LLM needs follow-up (error case).
-   */
-  private async _handleResumeSubagent(tc: ToolCall): Promise<boolean> {
-    const { subagent_id, input } = tc.arguments as { subagent_id: string; input: string };
-
-    if (!this.subAgentManager) {
-      const toolMsg: Message = {
-        role: "tool",
-        content: JSON.stringify({ error: "SubAgentManager not initialized" }),
-        toolCallId: tc.id,
-      };
-      this.sessionMessages.push(toolMsg);
-      await this.sessionStore.append(toolMsg);
-      return true; // LLM needs to see the error
-    }
-
-    try {
-      this.subAgentManager.resume(subagent_id, input);
-
-      const toolMsg: Message = {
-        role: "tool",
-        content: JSON.stringify({ subagentId: subagent_id, status: "resumed" }),
-        toolCallId: tc.id,
-      };
-      this.sessionMessages.push(toolMsg);
-      await this.sessionStore.append(toolMsg);
-
-      logger.info({ subagentId: subagent_id }, "subagent_resumed");
-      this.tickManager.start();
-      return false; // No follow-up needed — SubAgent notifications arrive via send()
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      const toolMsg: Message = {
-        role: "tool",
-        content: JSON.stringify({ error: errorMsg }),
-        toolCallId: tc.id,
-      };
-      this.sessionMessages.push(toolMsg);
-      await this.sessionStore.append(toolMsg);
-
-      logger.warn({ subagentId: subagent_id, error: errorMsg }, "subagent_resume_failed");
-      return true; // LLM needs to see the error and react
-    }
   }
 
   // ── Task notification handling ──

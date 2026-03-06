@@ -1,13 +1,26 @@
 /**
- * resume_subagent tool — signals intent to resume a completed SubAgent.
+ * resume_subagent tool — resume a completed SubAgent with new input.
  *
- * The MainAgent intercepts the result and resumes the SubAgent
- * with its full session history via SubAgentManager.
+ * Self-executing: calls subAgentManager.resume() and tickManager.start()
+ * directly, eliminating the need for MainAgent signal interception.
  */
 
 import { z } from "zod";
 import { ToolCategory } from "../types.ts";
 import type { Tool, ToolResult, ToolContext } from "../types.ts";
+import { getLogger } from "../../infra/logger.ts";
+
+const logger = getLogger("resume_subagent");
+
+/** Loose interface for SubAgentManager methods used by this tool. */
+interface SubAgentManagerLike {
+  resume(subagentId: string, input: string): void;
+}
+
+/** Loose interface for TickManager methods used by this tool. */
+interface TickManagerLike {
+  start(): void;
+}
 
 export const resume_subagent: Tool = {
   name: "resume_subagent",
@@ -19,25 +32,49 @@ export const resume_subagent: Tool = {
     subagent_id: z.string().describe("The SubAgent ID to resume"),
     input: z.string().describe("New instructions"),
   }),
-  async execute(params: unknown, _context: ToolContext): Promise<ToolResult> {
+  async execute(params: unknown, context: ToolContext): Promise<ToolResult> {
     const startedAt = Date.now();
     const { subagent_id, input } = params as {
       subagent_id: string;
       input: string;
     };
 
-    // resume_subagent doesn't execute the resume — it signals intent.
-    // The MainAgent intercepts this tool result and calls SubAgentManager.resume().
-    return {
-      success: true,
-      result: {
-        action: "resume_subagent",
-        subagent_id,
-        input,
-      },
-      startedAt,
-      completedAt: Date.now(),
-      durationMs: Date.now() - startedAt,
-    };
+    const manager = context.subAgentManager as SubAgentManagerLike | undefined;
+    if (!manager) {
+      return {
+        success: false,
+        error: "SubAgentManager not available in this context",
+        startedAt,
+        completedAt: Date.now(),
+        durationMs: Date.now() - startedAt,
+      };
+    }
+
+    try {
+      manager.resume(subagent_id, input);
+
+      // Start tick manager to poll for subagent completion
+      const tick = context.tickManager as TickManagerLike | undefined;
+      if (tick) tick.start();
+
+      logger.info({ subagentId: subagent_id }, "subagent_resumed");
+
+      return {
+        success: true,
+        result: { subagentId: subagent_id, status: "resumed" },
+        startedAt,
+        completedAt: Date.now(),
+        durationMs: Date.now() - startedAt,
+      };
+    } catch (err) {
+      logger.warn({ subagentId: subagent_id, error: (err as Error).message }, "subagent_resume_failed");
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+        startedAt,
+        completedAt: Date.now(),
+        durationMs: Date.now() - startedAt,
+      };
+    }
   },
 };

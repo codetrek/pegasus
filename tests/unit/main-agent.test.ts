@@ -367,6 +367,7 @@ describe("MainAgent", () => {
                   name: "reply",
                   arguments: {
                     text: "The time has been checked!",
+                    channelType: "cli",
                     channelId: "test",
                   },
                 },
@@ -446,6 +447,7 @@ describe("MainAgent", () => {
                 name: "reply",
                 arguments: {
                   text: `Response ${mainCallCount}`,
+                  channelType: "cli",
                   channelId: "test",
                 },
               },
@@ -693,7 +695,10 @@ describe("MainAgent", () => {
             );
             if (toolMsgs.length > 0) {
               try {
-                const parsed = JSON.parse(toolMsgs[0]!.content);
+                // Tool results have timestamp prefix — extract JSON from content
+                const content = toolMsgs[0]!.content;
+                const jsonLine = content.split("\n").find((l: string) => l.startsWith("{")) ?? content;
+                const parsed = JSON.parse(jsonLine);
                 spawnedTaskId = parsed.taskId;
               } catch { /* ignore */ }
             }
@@ -3058,7 +3063,10 @@ describe("MainAgent", () => {
       const reloadResult = toolResults.find((m) => m.content?.includes("reloaded"));
       expect(reloadResult).toBeDefined();
       // skillCount includes builtin skills (commit, review, clawhub) even with empty data dir
-      const parsed = JSON.parse(reloadResult!.content);
+      // Tool results now have timestamp prefix — extract JSON from second line
+      const jsonLine = reloadResult!.content.split("\n").find((l: string) => l.startsWith("{"));
+      expect(jsonLine).toBeDefined();
+      const parsed = JSON.parse(jsonLine!);
       expect(parsed.reloaded).toBe(true);
       expect(parsed.skillCount).toBeGreaterThanOrEqual(0);
 

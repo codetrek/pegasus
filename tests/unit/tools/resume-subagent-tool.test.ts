@@ -1,35 +1,128 @@
 import { describe, it, expect } from "bun:test";
 import { resume_subagent } from "../../../src/tools/builtins/resume-subagent-tool.ts";
 import { ToolCategory } from "../../../src/tools/types.ts";
+import type { ToolContext } from "../../../src/tools/types.ts";
 
 describe("resume_subagent tool", () => {
-  it("should return resume intent with subagent_id and input", async () => {
+  function makeContext(overrides?: Partial<ToolContext>): ToolContext {
+    return {
+      taskId: "main-agent",
+      subAgentManager: {
+        resume: (_id: string, _input: string) => {},
+      },
+      tickManager: { start: () => {} },
+      ...overrides,
+    };
+  }
+
+  it("should resume a subagent and return status", async () => {
+    let capturedArgs: unknown[] = [];
+    const ctx = makeContext({
+      subAgentManager: {
+        resume: (id: string, input: string) => {
+          capturedArgs = [id, input];
+        },
+      },
+    });
+
     const result = await resume_subagent.execute(
       { subagent_id: "sa-001", input: "continue with phase 2" },
-      { taskId: "test" },
+      ctx,
     );
+
     expect(result.success).toBe(true);
-    const data = result.result as {
-      action: string;
-      subagent_id: string;
-      input: string;
-    };
-    expect(data.action).toBe("resume_subagent");
-    expect(data.subagent_id).toBe("sa-001");
-    expect(data.input).toBe("continue with phase 2");
+    const data = result.result as { subagentId: string; status: string };
+    expect(data.subagentId).toBe("sa-001");
+    expect(data.status).toBe("resumed");
+
+    // Verify resume was called with correct args
+    expect(capturedArgs).toEqual(["sa-001", "continue with phase 2"]);
   });
 
-  it("should have correct tool metadata", () => {
-    expect(resume_subagent.name).toBe("resume_subagent");
-    expect(resume_subagent.description).toContain("Resume");
-    expect(resume_subagent.description).toContain("SubAgent");
+  it("should start tickManager after resuming", async () => {
+    let tickStarted = false;
+    const ctx = makeContext({
+      tickManager: { start: () => { tickStarted = true; } },
+    });
+
+    await resume_subagent.execute(
+      { subagent_id: "sa-1", input: "go" },
+      ctx,
+    );
+
+    expect(tickStarted).toBe(true);
+  });
+
+  it("should return error when subAgentManager is not available", async () => {
+    const result = await resume_subagent.execute(
+      { subagent_id: "sa-1", input: "go" },
+      { taskId: "test" },
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("SubAgentManager not available");
+  });
+
+  it("should handle subagent not found error", async () => {
+    const ctx = makeContext({
+      subAgentManager: {
+        resume: () => { throw new Error("SubAgent sa-999 not found"); },
+      },
+    });
+
+    const result = await resume_subagent.execute(
+      { subagent_id: "sa-999", input: "resume" },
+      ctx,
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("sa-999 not found");
+  });
+
+  it("should handle subagent still running error", async () => {
+    const ctx = makeContext({
+      subAgentManager: {
+        resume: () => { throw new Error("SubAgent is still running"); },
+      },
+    });
+
+    const result = await resume_subagent.execute(
+      { subagent_id: "sa-1", input: "resume" },
+      ctx,
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("still running");
+  });
+
+  it("should work without tickManager", async () => {
+    const ctx = makeContext({ tickManager: undefined });
+
+    const result = await resume_subagent.execute(
+      { subagent_id: "sa-1", input: "go" },
+      ctx,
+    );
+    expect(result.success).toBe(true);
+  });
+
+  it("should not start tickManager on error", async () => {
+    let tickStarted = false;
+    const ctx = makeContext({
+      subAgentManager: {
+        resume: () => { throw new Error("fail"); },
+      },
+      tickManager: { start: () => { tickStarted = true; } },
+    });
+
+    await resume_subagent.execute(
+      { subagent_id: "sa-1", input: "go" },
+      ctx,
+    );
+    expect(tickStarted).toBe(false);
   });
 
   it("should include timing information", async () => {
     const before = Date.now();
     const result = await resume_subagent.execute(
-      { subagent_id: "sa-002", input: "resume test" },
-      { taskId: "test" },
+      { subagent_id: "sa-1", input: "test" },
+      makeContext(),
     );
     const after = Date.now();
 
@@ -38,29 +131,18 @@ describe("resume_subagent tool", () => {
     expect(result.durationMs).toBeGreaterThanOrEqual(0);
   });
 
-  it("should use SYSTEM category", () => {
+  it("should have correct tool metadata", () => {
+    expect(resume_subagent.name).toBe("resume_subagent");
+    expect(resume_subagent.description).toContain("Resume");
+    expect(resume_subagent.description).toContain("SubAgent");
     expect(resume_subagent.category).toBe(ToolCategory.SYSTEM);
   });
 
-  it("should have subagent_id and input in parameters schema", () => {
-    const schema = resume_subagent.parameters;
-    const parsed = schema.safeParse({ subagent_id: "sa-123", input: "new instructions" });
-    expect(parsed.success).toBe(true);
-  });
-
-  it("should reject missing required parameters", () => {
+  it("should validate required parameters", () => {
     const schema = resume_subagent.parameters;
     expect(schema.safeParse({}).success).toBe(false);
     expect(schema.safeParse({ subagent_id: "sa-123" }).success).toBe(false);
     expect(schema.safeParse({ input: "only input" }).success).toBe(false);
-  });
-
-  it("should not include taskId in result (unlike spawn)", async () => {
-    const result = await resume_subagent.execute(
-      { subagent_id: "sa-003", input: "test" },
-      { taskId: "ctx-789" },
-    );
-    const data = result.result as Record<string, unknown>;
-    expect(data).not.toHaveProperty("taskId");
+    expect(schema.safeParse({ subagent_id: "sa-123", input: "new instructions" }).success).toBe(true);
   });
 });

@@ -122,7 +122,7 @@ describe("Multi-channel routing", () => {
             {
               id: "tc-reply",
               name: "reply",
-              arguments: { text: "Hello!", channelId: "tg-123" },
+              arguments: { text: "Hello!", channelType: "telegram", channelId: "tg-123" },
             },
           ],
           usage: { promptTokens: 10, completionTokens: 10 },
@@ -173,7 +173,7 @@ describe("Multi-channel routing", () => {
             {
               id: "tc-reply",
               name: "reply",
-              arguments: { text: "Hello!", channelId: "unknown-123" },
+              arguments: { text: "Hello!", channelType: "sms", channelId: "unknown-123" },
             },
           ],
           usage: { promptTokens: 10, completionTokens: 10 },
@@ -218,7 +218,7 @@ describe("Multi-channel routing", () => {
               {
                 id: "tc-reply-cli",
                 name: "reply",
-                arguments: { text: "CLI reply", channelId: "main" },
+                arguments: { text: "CLI reply", channelType: "cli", channelId: "main" },
               },
             ],
             usage: { promptTokens: 10, completionTokens: 10 },
@@ -237,7 +237,7 @@ describe("Multi-channel routing", () => {
               {
                 id: "tc-reply-tg",
                 name: "reply",
-                arguments: { text: "TG reply", channelId: "tg-456" },
+                arguments: { text: "TG reply", channelType: "telegram", channelId: "tg-456" },
               },
             ],
             usage: { promptTokens: 10, completionTokens: 10 },
@@ -297,7 +297,7 @@ describe("Multi-channel routing", () => {
             {
               id: "tc-reply",
               name: "reply",
-              arguments: { text: "Will fail delivery", channelId: "broken-123" },
+              arguments: { text: "Will fail delivery", channelType: "broken", channelId: "broken-123" },
             },
           ],
           usage: { promptTokens: 10, completionTokens: 10 },
@@ -347,7 +347,7 @@ describe("Multi-channel routing", () => {
             {
               id: "tc-reply",
               name: "reply",
-              arguments: { text: "Direct callback", channelId: "test" },
+              arguments: { text: "Direct callback", channelType: "cli", channelId: "test" },
             },
           ],
           usage: { promptTokens: 10, completionTokens: 10 },
