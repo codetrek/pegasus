@@ -134,7 +134,7 @@ describe("ConversationAgent", () => {
       const msgs = agent.getSessionMessages();
       expect(msgs.length).toBeGreaterThanOrEqual(1);
       expect(msgs[0]!.role).toBe("user");
-      expect(msgs[0]!.content).toBe("hi there");
+      expect(msgs[0]!.content).toContain("hi there");
 
       // LLM should have been called
       expect(generateMock).toHaveBeenCalled();
@@ -436,7 +436,7 @@ describe("ConversationAgent", () => {
       // Should have: user message + assistant response
       expect(msgs.length).toBeGreaterThanOrEqual(2);
       expect(msgs[0]!.role).toBe("user");
-      expect(msgs[0]!.content).toBe("trigger thinking");
+      expect(msgs[0]!.content).toContain("trigger thinking");
       // The assistant message is appended by processStep
       const assistantMsg = msgs.find((m) => m.role === "assistant");
       expect(assistantMsg).toBeDefined();
@@ -713,7 +713,7 @@ describe("ConversationAgent", () => {
 
       // Session should have both user and assistant messages
       const msgs = agent.getSessionMessages();
-      expect(msgs.some((m) => m.role === "user" && m.content === "complete me")).toBe(true);
+      expect(msgs.some((m) => m.role === "user" && m.content.includes("complete me"))).toBe(true);
       expect(msgs.some((m) => m.role === "assistant" && m.content === "final answer")).toBe(true);
 
       await agent.stop();

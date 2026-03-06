@@ -27,6 +27,7 @@ import type {
   InboundMessage,
   OutboundMessage,
 } from "../../channels/types.ts";
+import { formatTimestamp } from "../../infra/time.ts";
 import { getLogger } from "../../infra/logger.ts";
 
 const logger = getLogger("conversation_agent");
@@ -56,11 +57,21 @@ export interface CustomQueueItem {
   [key: string]: unknown;
 }
 
+/**
+ * Task notification payload — mirrors TaskRunner's TaskNotification type
+ * without coupling ConversationAgent to the task-runner module.
+ */
+export type TaskNotificationPayload =
+  | { type: "completed"; taskId: string; result: unknown; imageRefs?: Array<{ id: string; mimeType: string }> }
+  | { type: "failed"; taskId: string; error: string }
+  | { type: "notify"; taskId: string; message: string; imageRefs?: Array<{ id: string; mimeType: string }> };
+
 /** Queue item — what arrives from the outside world. Subclasses extend via onCustomQueueItem. */
 export type QueueItem =
   | { kind: "message"; message: InboundMessage }
   | { kind: "child_complete"; childId: string; result: PendingWorkResult }
   | { kind: "think"; channel: ChannelInfo }
+  | { kind: "task_notify"; notification: TaskNotificationPayload }
   | CustomQueueItem;
 
 // ── ConversationAgent ────────────────────────────────
@@ -171,6 +182,11 @@ export abstract class ConversationAgent extends BaseAgent {
             await this._think(ti.channel);
             break;
           }
+          case "task_notify": {
+            const ni = item as { kind: "task_notify"; notification: TaskNotificationPayload };
+            await this._handleTaskNotify(ni.notification);
+            break;
+          }
           default:
             await this.onCustomQueueItem(item);
             break;
@@ -199,8 +215,12 @@ export abstract class ConversationAgent extends BaseAgent {
   protected async _handleMessage(message: InboundMessage): Promise<void> {
     this.lastChannel = message.channel;
 
+    // Channel metadata for LLM visibility
+    const channelMeta = formatChannelMeta(message.channel);
+    const content = channelMeta ? `${channelMeta}\n${message.text}` : message.text;
+
     // Add user message to session
-    const userMsg: Message = { role: "user", content: message.text };
+    const userMsg: Message = { role: "user", content };
     if (message.images?.length) userMsg.images = message.images;
     this.sessionMessages.push(userMsg);
     await this.sessionStore.append(userMsg, { channel: message.channel });
@@ -233,6 +253,52 @@ export abstract class ConversationAgent extends BaseAgent {
     // Trigger thinking to process the result
     await this._think(this.lastChannel);
   }
+
+  /**
+   * Handle a task notification (completed, failed, or progress update).
+   * Formats the notification text, injects into session, and triggers thinking.
+   * Subclasses override onTaskNotificationHandled() for tick management.
+   */
+  protected async _handleTaskNotify(notification: TaskNotificationPayload): Promise<void> {
+    let resultText: string;
+    if (notification.type === "failed") {
+      resultText = `[Task ${notification.taskId} failed]\nError: ${notification.error}`;
+    } else if (notification.type === "notify") {
+      resultText = `[Task ${notification.taskId} update]\n${notification.message}`;
+    } else {
+      resultText = `[Task ${notification.taskId} completed]\nResult: ${JSON.stringify(notification.result)}`;
+    }
+
+    const systemMsg: Message = { role: "user", content: resultText };
+
+    // Attach image refs from notification
+    const imageRefs = (notification.type === "completed" || notification.type === "notify")
+      ? notification.imageRefs
+      : undefined;
+    if (imageRefs?.length) {
+      systemMsg.images = imageRefs.map(ref => ({ id: ref.id, mimeType: ref.mimeType }));
+    }
+
+    this.sessionMessages.push(systemMsg);
+    await this.sessionStore.append(systemMsg, {
+      type: "task_notify",
+      taskId: notification.taskId,
+    });
+
+    const lastChannel = this.lastChannel;
+    if (lastChannel) {
+      this.pushQueue({ kind: "think", channel: lastChannel } as QueueItem);
+    }
+
+    // Hook for subclass tick management
+    await this.onTaskNotificationHandled(notification);
+  }
+
+  /**
+   * Hook called after task notification is handled.
+   * Subclasses override for tick management (e.g. checkShouldStop).
+   */
+  protected async onTaskNotificationHandled(_notification: TaskNotificationPayload): Promise<void> {}
 
   /**
    * Run thinking via processStep with a completion Promise.
@@ -409,4 +475,15 @@ export abstract class ConversationAgent extends BaseAgent {
     // Cleanup
     this.removeTaskState(taskId);
   }
+}
+
+// ── Helpers ──────────────────────────────────────────
+
+/**
+ * Format channel metadata as a prefix line for LLM visibility.
+ * Includes timestamp, channel type, ID, user, and thread info.
+ */
+export function formatChannelMeta(channel: ChannelInfo): string {
+  const now = formatTimestamp(Date.now());
+  return `[${now} | channel: ${channel.type} | id: ${channel.channelId}${channel.userId ? ` | user: ${channel.userId}` : ""}${channel.replyTo ? ` | thread: ${channel.replyTo}` : ""}]`;
 }

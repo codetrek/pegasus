@@ -24,7 +24,7 @@ import type { Persona } from "../identity/persona.ts";
 import { buildSystemPrompt, formatSize } from "../prompts/index.ts";
 import type { Settings } from "../infra/config.ts";
 import { sanitizeForPrompt } from "../infra/sanitize.ts";
-import { formatTimestamp, formatToolTimestamp } from "../infra/time.ts";
+import { formatToolTimestamp } from "../infra/time.ts";
 import { getSettings } from "../infra/config.ts";
 import { errorToString } from "../infra/errors.ts";
 import { getLogger } from "../infra/logger.ts";
@@ -51,7 +51,7 @@ import { classifyMessage } from "../security/message-classifier.ts";
 import { TickManager } from "./tick-manager.ts";
 import { AuthManager } from "./auth-manager.ts";
 import { ReflectionOrchestrator } from "./reflection-orchestrator.ts";
-import { ConversationAgent, type QueueItem } from "./base/conversation-agent.ts";
+import { ConversationAgent, formatChannelMeta, type QueueItem } from "./base/conversation-agent.ts";
 import { mechanicalSummary } from "./base/base-agent.ts";
 import { EventBus } from "../events/bus.ts";
 
@@ -258,9 +258,7 @@ export class MainAgent extends ConversationAgent {
   // ═══════════════════════════════════════════════════
 
   protected override async _handleMessage(message: InboundMessage): Promise<void> {
-    // Track last channel for task notification routing
-    this.lastChannel = message.channel;
-
+    // Sanitize text
     const text = sanitizeForPrompt(message.text.trim());
 
     // Detect SubAgent completion/failure from tagged notify messages.
@@ -292,28 +290,8 @@ export class MainAgent extends ConversationAgent {
       }
     }
 
-    // Normal message: add to session with channel metadata for LLM visibility
-    const now = formatTimestamp(Date.now());
-    const channelMeta = `[${now} | channel: ${message.channel.type} | id: ${message.channel.channelId}${message.channel.userId ? ` | user: ${message.channel.userId}` : ""}${message.channel.replyTo ? ` | thread: ${message.channel.replyTo}` : ""}]`;
-    const userMsg: Message = { role: "user", content: `${channelMeta}\n${text}` };
-    // Attach images from InboundMessage if present
-    if (message.images?.length) {
-      userMsg.images = message.images;
-    }
-    this.sessionMessages.push(userMsg);
-    await this.sessionStore.append(userMsg, { channel: message.channel });
-
-    await this._think(message.channel);
-  }
-
-  // ═══════════════════════════════════════════════════
-  // Custom queue item handling
-  // ═══════════════════════════════════════════════════
-
-  protected override async onCustomQueueItem(item: QueueItem): Promise<void> {
-    if (item.kind === "task_notify") {
-      await this._handleTaskNotify((item as { kind: "task_notify"; notification: TaskNotification }).notification);
-    }
+    // Delegate to ConversationAgent — handles channel metadata, session, and thinking
+    await super._handleMessage({ ...message, text });
   }
 
   // ═══════════════════════════════════════════════════
@@ -719,38 +697,10 @@ export class MainAgent extends ConversationAgent {
 
   // ── Task notification handling ──
 
-  private async _handleTaskNotify(notification: TaskNotification): Promise<void> {
-    let resultText: string;
-    if (notification.type === "failed") {
-      resultText = `[Task ${notification.taskId} failed]\nError: ${notification.error}`;
-    } else if (notification.type === "notify") {
-      resultText = `[Task ${notification.taskId} update]\n${notification.message}`;
-    } else {
-      resultText = `[Task ${notification.taskId} completed]\nResult: ${JSON.stringify(notification.result)}`;
-    }
+  // ── Task notification tick management ──
 
-    const systemMsg: Message = { role: "user", content: resultText };
-
-    // Attach image refs from notification — MainAgent LLM will see them via hydration
-    const imageRefs = (notification.type === "completed" || notification.type === "notify")
-      ? notification.imageRefs
-      : undefined;
-    if (imageRefs?.length) {
-      systemMsg.images = imageRefs.map(ref => ({ id: ref.id, mimeType: ref.mimeType }));
-    }
-
-    this.sessionMessages.push(systemMsg);
-    await this.sessionStore.append(systemMsg, {
-      type: "task_notify",
-      taskId: notification.taskId,
-    });
-
-    const lastChannel = this._getLastChannel();
-    if (lastChannel) {
-      this.pushQueue({ kind: "think", channel: lastChannel } as QueueItem);
-    }
-
-    // Stop tick if no more active work
+  protected override async onTaskNotificationHandled(notification: import("./base/conversation-agent.ts").TaskNotificationPayload): Promise<void> {
+    // Stop tick if no more active work (completed/failed, not progress updates)
     if (notification.type !== "notify") {
       this.tickManager.checkShouldStop();
     }
@@ -861,10 +811,9 @@ export class MainAgent extends ConversationAgent {
     }
 
     // Prepend channel metadata so the Project Worker knows the source context.
-    // This mirrors how MainAgent formats messages in _handleMessage() — the LLM
+    // This mirrors how ConversationAgent formats messages in _handleMessage() — the LLM
     // sees the channel info and can reference it in replies.
-    const now = formatTimestamp(Date.now());
-    const metaLine = `[${now} | channel: ${message.channel.type} | id: ${message.channel.channelId}${message.channel.userId ? ` | user: ${message.channel.userId}` : ""}${message.channel.replyTo ? ` | thread: ${message.channel.replyTo}` : ""}]`;
+    const metaLine = formatChannelMeta(message.channel);
     const enrichedMessage: InboundMessage = {
       ...message,
       text: `${metaLine}\n${message.text}`,
