@@ -20,7 +20,6 @@ import type { Message } from "../../infra/llm-types.ts";
 import type { Event } from "../../events/types.ts";
 import { EventType, createEvent } from "../../events/types.ts";
 import type { ToolCall } from "../../models/tool.ts";
-import { SessionStore } from "../../session/store.ts";
 import { getLogger } from "../../infra/logger.ts";
 
 const logger = getLogger("orchestrator_agent");
@@ -34,8 +33,6 @@ export interface OrchestratorAgentDeps extends BaseAgentDeps {
   input: string;
   /** System prompt additions (e.g., memory snapshot). */
   contextPrompt?: string;
-  /** Session directory for debugging/resume. */
-  sessionDir: string;
   /** Callback to spawn ExecutionAgents. */
   onSpawnExecution: (config: ExecutionSpawnConfig) => ExecutionHandle;
   /** Callback to notify parent agent of progress/completion. */
@@ -75,8 +72,6 @@ export class OrchestratorAgent extends BaseAgent {
   private taskDescription: string;
   private input: string;
   private contextPrompt: string;
-  private sessionStore: SessionStore;
-  private sessionMessages: Message[] = [];
   private onSpawnExecution: (config: ExecutionSpawnConfig) => ExecutionHandle;
   private onNotifyParent: (notification: OrchestratorNotification) => void;
   private childResults = new Map<string, { success: boolean; result?: unknown; error?: string }>();
@@ -95,7 +90,6 @@ export class OrchestratorAgent extends BaseAgent {
     this.taskDescription = deps.taskDescription;
     this.input = deps.input;
     this.contextPrompt = deps.contextPrompt ?? "";
-    this.sessionStore = new SessionStore(deps.sessionDir);
     this.onSpawnExecution = deps.onSpawnExecution;
     this.onNotifyParent = deps.onNotify;
   }

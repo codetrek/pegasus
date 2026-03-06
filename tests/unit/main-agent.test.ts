@@ -113,6 +113,31 @@ function createMonologueModel(monologueText: string): LanguageModel {
   };
 }
 
+/**
+ * Pre-populate a session JSONL file with enough messages to exceed
+ * char-based compaction threshold. Used by compaction tests since
+ * MainAgent.beforeLLMCall now uses estimateTokensFromChars.
+ *
+ * @param sessionDir - session directory path
+ * @param totalChars - approximate total chars needed (default: 300k for 128k context)
+ * @param messageCount - number of messages to create (must be >= 8)
+ */
+async function prePopulateSessionForCompact(
+  sessionDir: string,
+  totalChars = 300_000,
+  messageCount = 10,
+): Promise<void> {
+  await mkdir(sessionDir, { recursive: true });
+  const charsPerMessage = Math.ceil(totalChars / messageCount);
+  const lines: string[] = [];
+  for (let i = 0; i < messageCount; i++) {
+    const role = i % 2 === 0 ? "user" : "assistant";
+    const content = `msg-${i}: ` + "x".repeat(charsPerMessage);
+    lines.push(JSON.stringify({ role, content }));
+  }
+  writeFileSync(`${sessionDir}/current.jsonl`, lines.join("\n") + "\n");
+}
+
 function testSettings() {
   return SettingsSchema.parse({
     dataDir: testDataDir,
@@ -862,10 +887,13 @@ describe("MainAgent", () => {
   }, 10_000);
 
   it("should use config contextWindow for compact threshold", async () => {
-    // Create a model that returns moderate promptTokens.
-    // With default gpt-4o (128k), 80k tokens would NOT trigger compact (threshold 0.8 → 102.4k).
-    // But with contextWindow override of 50_000, threshold is 0.8 * 50k = 40k → SHOULD trigger compact.
-    let callCount = 0;
+    // With contextWindow: 50_000 and threshold 0.8:
+    // compactTrigger = floor(floor(50_000 / 1.2) * 0.8) ≈ 33_333 tokens
+    // Need ~117k chars (33_333 * 3.5) in sessionMessages to trigger compact.
+    // Pre-populate session with enough content, then send one more message to trigger.
+    const sessionDir = `${testDataDir}/agents/main/session`;
+    await prePopulateSessionForCompact(sessionDir, 120_000);
+
     const model: LanguageModel = {
       provider: "test",
       modelId: "gpt-4o", // Built-in: 128k
@@ -873,25 +901,7 @@ describe("MainAgent", () => {
         system?: string;
         messages: Message[];
       }): Promise<GenerateTextResult> {
-        callCount++;
-
-        // First call: return 80k promptTokens
-        if (callCount === 1) {
-          return {
-            text: "",
-            finishReason: "tool_calls",
-            toolCalls: [
-              {
-                id: "tc-reply-1",
-                name: "reply",
-                arguments: { text: "Got it!", channelType: "cli", channelId: "test" },
-              },
-            ],
-            usage: { promptTokens: 80_000, completionTokens: 10 },
-          };
-        }
-        // Summarize call — use "conversation summarizer" to avoid matching
-        // the main agent system prompt which contains "summarize" as a usage example
+        // Summarize call
         if (options.system?.includes("conversation summarizer")) {
           return {
             text: "Summary: user asked a question.",
@@ -899,15 +909,15 @@ describe("MainAgent", () => {
             usage: { promptTokens: 50, completionTokens: 20 },
           };
         }
-        // After compact
+        // Normal reply
         return {
           text: "",
           finishReason: "tool_calls",
           toolCalls: [
             {
-              id: `tc-reply-${callCount}`,
+              id: "tc-reply-1",
               name: "reply",
-              arguments: { text: "After compact!", channelType: "cli", channelId: "test" },
+              arguments: { text: "Got it!", channelType: "cli", channelId: "test" },
             },
           ],
           usage: { promptTokens: 100, completionTokens: 10 },
@@ -929,17 +939,13 @@ describe("MainAgent", () => {
     const replies: OutboundMessage[] = [];
     agent.onReply((msg) => replies.push(msg));
 
-    // First message — sets lastPromptTokens to 80k
+    // Send a message — beforeLLMCall detects session chars exceed threshold → compacts
     agent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(50);
-
-    // Second message — should trigger compact (80k > 50k * 0.8 = 40k)
-    agent.send({ text: "how are you", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(50);
+    await Bun.sleep(100);
 
     // Verify compact happened: archive file should exist
     const { readdir } = await import("node:fs/promises");
-    const files = await readdir(`${testDataDir}/agents/main/session`);
+    const files = await readdir(sessionDir);
     const archives = files.filter((f: string) => f.endsWith(".jsonl") && f !== "current.jsonl");
     expect(archives.length).toBeGreaterThanOrEqual(1);
 
@@ -947,8 +953,12 @@ describe("MainAgent", () => {
   }, 10_000);
 
   it("should compact session when tokens exceed threshold", async () => {
-    // Create a model that returns large promptTokens to trigger compact
-    let callCount = 0;
+    // Pre-populate session with enough content to exceed char-based compact threshold.
+    // Default context window (128k, test-model not in registry → defaults):
+    // compactTrigger ≈ 85_333 tokens → ~299k chars needed.
+    const sessionDir = `${testDataDir}/agents/main/session`;
+    await prePopulateSessionForCompact(sessionDir, 300_000);
+
     const model: LanguageModel = {
       provider: "test",
       modelId: "test-model",
@@ -956,25 +966,7 @@ describe("MainAgent", () => {
         system?: string;
         messages: Message[];
       }): Promise<GenerateTextResult> {
-        callCount++;
-
-        // First call: return huge promptTokens to trigger compact on next think
-        if (callCount === 1) {
-          return {
-            text: "",
-            finishReason: "tool_calls",
-            toolCalls: [
-              {
-                id: "tc-reply-1",
-                name: "reply",
-                arguments: { text: "Got it!", channelType: "cli", channelId: "test" },
-              },
-            ],
-            usage: { promptTokens: 110_000, completionTokens: 10 },
-          };
-        }
-        // Summarize call — use "conversation summarizer" to avoid matching
-        // the main agent system prompt which contains "summarize" as a usage example
+        // Summarize call
         if (options.system?.includes("conversation summarizer")) {
           return {
             text: "Summary: user asked a question and got a reply.",
@@ -982,13 +974,13 @@ describe("MainAgent", () => {
             usage: { promptTokens: 50, completionTokens: 20 },
           };
         }
-        // After compact: normal response
+        // Normal reply
         return {
           text: "",
           finishReason: "tool_calls",
           toolCalls: [
             {
-              id: `tc-reply-${callCount}`,
+              id: "tc-reply-1",
               name: "reply",
               arguments: { text: "After compact!", channelType: "cli", channelId: "test" },
             },
@@ -1011,17 +1003,13 @@ describe("MainAgent", () => {
     const replies: OutboundMessage[] = [];
     agent.onReply((msg) => replies.push(msg));
 
-    // First message — triggers large promptTokens
+    // Send a message — beforeLLMCall detects session chars exceed threshold → compacts
     agent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(50);
-
-    // Second message — should trigger compact before _think
-    agent.send({ text: "how are you", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(50);
+    await Bun.sleep(100);
 
     // Verify compact happened: archive file should exist
     const { readdir } = await import("node:fs/promises");
-    const files = await readdir(`${testDataDir}/agents/main/session`);
+    const files = await readdir(sessionDir);
     const archives = files.filter((f: string) => f.endsWith(".jsonl") && f !== "current.jsonl");
     expect(archives.length).toBeGreaterThanOrEqual(1);
 
@@ -1032,9 +1020,11 @@ describe("MainAgent", () => {
   }, 10_000);
 
   it("should fall back to mechanical summary when LLM summarization fails during compact", async () => {
-    // When _generateSummary throws, _compactWithFallback should fall back
+    // When LLM summarization throws, _compactAndReloadSession should fall back
     // to _mechanicalSummary which produces a structured summary without LLM.
-    let callCount = 0;
+    const sessionDir = `${testDataDir}/agents/main/session`;
+    await prePopulateSessionForCompact(sessionDir, 300_000);
+
     const model: LanguageModel = {
       provider: "test",
       modelId: "test-model",
@@ -1042,34 +1032,17 @@ describe("MainAgent", () => {
         system?: string;
         messages: Message[];
       }): Promise<GenerateTextResult> {
-        callCount++;
-
-        // First call: return huge promptTokens to trigger compact on next think
-        if (callCount === 1) {
-          return {
-            text: "",
-            finishReason: "tool_calls",
-            toolCalls: [
-              {
-                id: "tc-reply-1",
-                name: "reply",
-                arguments: { text: "Got it!", channelType: "cli", channelId: "test" },
-              },
-            ],
-            usage: { promptTokens: 110_000, completionTokens: 10 },
-          };
-        }
         // Summarize call — THROW to force mechanical summary fallback
         if (options.system?.includes("conversation summarizer")) {
           throw new Error("LLM summarization unavailable");
         }
-        // After compact: normal response
+        // Normal reply
         return {
           text: "",
           finishReason: "tool_calls",
           toolCalls: [
             {
-              id: `tc-reply-${callCount}`,
+              id: "tc-reply-1",
               name: "reply",
               arguments: { text: "After compact!", channelType: "cli", channelId: "test" },
             },
@@ -1092,23 +1065,19 @@ describe("MainAgent", () => {
     const replies: OutboundMessage[] = [];
     agent.onReply((msg) => replies.push(msg));
 
-    // First message — triggers large promptTokens
+    // Send a message — triggers compact; summarize fails → mechanical summary
     agent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(50);
-
-    // Second message — triggers compact; summarize fails → mechanical summary
-    agent.send({ text: "how are you", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(50);
+    await Bun.sleep(100);
 
     // Verify compact happened: archive file should exist
     const { readdir } = await import("node:fs/promises");
-    const files = await readdir(`${testDataDir}/agents/main/session`);
+    const files = await readdir(sessionDir);
     const archives = files.filter((f: string) => f.endsWith(".jsonl") && f !== "current.jsonl");
     expect(archives.length).toBeGreaterThanOrEqual(1);
 
     // Verify the current session contains the mechanical summary format
     const currentSession = await Bun.file(
-      `${testDataDir}/agents/main/session/current.jsonl`,
+      `${sessionDir}/current.jsonl`,
     ).text();
     expect(currentSession).toContain("messages archived");
     expect(currentSession).toContain("Recent user messages");
@@ -1588,9 +1557,30 @@ describe("MainAgent", () => {
 
   describe("compact triggers reflection", () => {
     it("should trigger reflection when compact happens with sufficient messages", async () => {
+      // Pre-populate session with enough content to exceed compact threshold.
+      // Include multiple user messages so reflection gate passes (≥3 user messages).
+      const sessionDir = `${testDataDir}/agents/main/session`;
+      await mkdir(sessionDir, { recursive: true });
+      const padding = "x".repeat(30_000);
+      const seedMessages = [
+        { role: "user", content: `My name is Alice ${padding}` },
+        { role: "assistant", content: `Nice to meet you Alice ${padding}` },
+        { role: "user", content: `I work at Acme Corp ${padding}` },
+        { role: "assistant", content: `Great company! ${padding}` },
+        { role: "user", content: `Tell me more ${padding}` },
+        { role: "assistant", content: `Sure thing ${padding}` },
+        { role: "user", content: `One more question ${padding}` },
+        { role: "assistant", content: `Go ahead ${padding}` },
+        { role: "user", content: `Last question ${padding}` },
+        { role: "assistant", content: `Yes? ${padding}` },
+      ];
+      writeFileSync(
+        `${sessionDir}/current.jsonl`,
+        seedMessages.map((m) => JSON.stringify(m)).join("\n") + "\n",
+      );
+
       // Track whether reflection model is called (it uses "fast" tier, same mock)
       let reflectionCalled = false;
-      let thinkCount = 0;
       const model: LanguageModel = {
         provider: "test",
         modelId: "test-model",
@@ -1598,8 +1588,7 @@ describe("MainAgent", () => {
           system?: string;
           messages?: Message[];
         }): Promise<GenerateTextResult> {
-          // Summarize call — use "conversation summarizer" to avoid matching
-          // the main agent system prompt which contains "summarize" as a usage example
+          // Summarize call
           if (options.system?.includes("conversation summarizer")) {
             return {
               text: "Summary: user introduced themselves.",
@@ -1607,7 +1596,7 @@ describe("MainAgent", () => {
               usage: { promptTokens: 50, completionTokens: 20 },
             };
           }
-          // Reflection call (PostTaskReflector uses system prompt with "reviewing a completed task")
+          // Reflection call
           if (options.system?.includes("reviewing a completed task")) {
             reflectionCalled = true;
             return {
@@ -1616,201 +1605,15 @@ describe("MainAgent", () => {
               usage: { promptTokens: 10, completionTokens: 10 },
             };
           }
-
-          // Normal _think calls: track count and return large tokens on 3rd+ call
-          thinkCount++;
-          // Odd think calls: reply. Even think calls: follow-up → stop.
-          if (thinkCount % 2 === 0) {
-            return {
-              text: "",
-              finishReason: "stop",
-              usage: { promptTokens: 5, completionTokens: 0 },
-            };
-          }
-          // First 2 reply calls: normal tokens. 3rd+ reply call: huge tokens to trigger compact
-          const replyNum = Math.ceil(thinkCount / 2);
-          const promptTokens = replyNum >= 3 ? 110_000 : 100;
+          // Normal reply
           return {
             text: "",
             finishReason: "tool_calls",
             toolCalls: [
               {
-                id: `tc-reply-${replyNum}`,
+                id: "tc-reply-1",
                 name: "reply",
-                arguments: { text: `Reply ${replyNum}`, channelType: "cli", channelId: "test" },
-              },
-            ],
-            usage: { promptTokens, completionTokens: 10 },
-          };
-        },
-      };
-
-      const settings = SettingsSchema.parse({
-        dataDir: testDataDir,
-        logLevel: "warn",
-        session: { compactThreshold: 0.8 },
-        authDir: "/tmp/pegasus-test-auth",
-      });
-
-      const agent = new MainAgent({ models: createMockModelRegistry(model), persona: testPersona, settings });
-      await agent.start();
-      agent.onReply(() => {});
-
-      // Send 3 messages with normal tokens, building up the session
-      // Each creates user + assistant + tool = 3 messages per send
-      // After 3 sends: 9+ messages, 3 user messages — plenty for reflection gate
-      agent.send({ text: "My name is Alice", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(50);
-
-      agent.send({ text: "I work at Acme Corp", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(50);
-
-      // 3rd message: thinkCount=3 returns 110k tokens, setting lastPromptTokens
-      agent.send({ text: "Tell me more", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(50);
-
-      // 4th message: compact triggers (lastPromptTokens=110k > 128k*0.8=102.4k)
-      agent.send({ text: "One last thing", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(50); // Wait for compact + reflection to fire
-
-      // Verify compact happened
-      const { readdir } = await import("node:fs/promises");
-      const files = await readdir(`${testDataDir}/agents/main/session`).catch(() => [] as string[]);
-      const archives = files.filter((f: string) => f.endsWith(".jsonl") && f !== "current.jsonl");
-      expect(archives.length).toBeGreaterThanOrEqual(1);
-
-      // Wait for fire-and-forget reflection to complete
-      await Bun.sleep(50);
-
-      // Reflection should have been called
-      expect(reflectionCalled).toBe(true);
-
-      await agent.stop();
-    }, 10_000);
-
-    it("should not crash compact when reflection fails", async () => {
-      // This test verifies that a reflection failure (thrown error) does not crash
-      // the main agent's compact flow. The .catch() wrapper in _think handles this.
-      // The detailed runReflection error handling is tested in reflection-orchestrator.test.ts.
-      // Here we verify the integration: reflection error is logged but doesn't propagate.
-
-      let thinkCount = 0;
-      const model: LanguageModel = {
-        provider: "test",
-        modelId: "test-model",
-        async generate(options: {
-          system?: string;
-          messages?: Message[];
-        }): Promise<GenerateTextResult> {
-          thinkCount++;
-          // Summarize call
-          if (options.system?.includes("conversation summarizer")) {
-            return {
-              text: "Summary: user said hello.",
-              finishReason: "stop",
-              usage: { promptTokens: 50, completionTokens: 20 },
-            };
-          }
-          // Reflection call — throw to simulate failure
-          if (options.system?.includes("reviewing a completed task")) {
-            throw new Error("LLM reflection error");
-          }
-          // Normal think calls: return huge tokens on 3rd+ to trigger compact
-          const promptTokens = thinkCount >= 3 ? 110_000 : 100;
-          return {
-            text: "",
-            finishReason: "tool_calls",
-            toolCalls: [
-              {
-                id: `tc-reply-${thinkCount}`,
-                name: "reply",
-                arguments: { text: `Reply ${thinkCount}`, channelType: "cli", channelId: "test" },
-              },
-            ],
-            usage: { promptTokens, completionTokens: 10 },
-          };
-        },
-      };
-
-      const settings = SettingsSchema.parse({
-        dataDir: testDataDir,
-        logLevel: "warn",
-        session: { compactThreshold: 0.8 },
-        authDir: "/tmp/pegasus-test-auth",
-      });
-
-      const agent = new MainAgent({ models: createMockModelRegistry(model), persona: testPersona, settings });
-      await agent.start();
-      agent.onReply(() => {});
-
-      // Build up enough messages to pass the reflection gate
-      agent.send({ text: "My name is Alice", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(50);
-      agent.send({ text: "I work at Acme Corp", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(50);
-      agent.send({ text: "Tell me more", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(50);
-
-      // This triggers compact → reflection (which throws) → .catch() handles it
-      agent.send({ text: "One last thing", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(50);
-
-      // Agent should still be operational (error was caught, not propagated)
-      // Just verifying no crash occurred
-      await agent.stop();
-    }, 10_000);
-
-    it("should skip reflection for trivial sessions", async () => {
-      // Ensure reflection is NOT called when session is trivial (few messages)
-      let reflectionCalled = false;
-      let callCount = 0;
-      const model: LanguageModel = {
-        provider: "test",
-        modelId: "test-model",
-        async generate(options: {
-          system?: string;
-          messages?: Message[];
-        }): Promise<GenerateTextResult> {
-          callCount++;
-
-          // Return huge tokens on first call to trigger immediate compact
-          if (callCount === 1) {
-            return {
-              text: "",
-              finishReason: "tool_calls",
-              toolCalls: [
-                {
-                  id: "tc-reply-1",
-                  name: "reply",
-                  arguments: { text: "Hi!", channelType: "cli", channelId: "test" },
-                },
-              ],
-              usage: { promptTokens: 110_000, completionTokens: 10 },
-            };
-          }
-          if (options.system?.includes("conversation summarizer")) {
-            return {
-              text: "Summary.",
-              finishReason: "stop",
-              usage: { promptTokens: 50, completionTokens: 20 },
-            };
-          }
-          if (options.system?.includes("reviewing a completed task")) {
-            reflectionCalled = true;
-            return {
-              text: "Reviewed.",
-              finishReason: "stop",
-              usage: { promptTokens: 10, completionTokens: 10 },
-            };
-          }
-          return {
-            text: "",
-            finishReason: "tool_calls",
-            toolCalls: [
-              {
-                id: `tc-reply-${callCount}`,
-                name: "reply",
-                arguments: { text: "After compact!", channelType: "cli", channelId: "test" },
+                arguments: { text: "Got it!", channelType: "cli", channelId: "test" },
               },
             ],
             usage: { promptTokens: 100, completionTokens: 10 },
@@ -1829,15 +1632,172 @@ describe("MainAgent", () => {
       await agent.start();
       agent.onReply(() => {});
 
-      // Send only ONE message — compact triggers, but session is trivial (<6 messages)
-      agent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(50);
+      // Send message — beforeLLMCall detects char threshold exceeded → compacts → reflection fires
+      agent.send({ text: "One last thing", channel: { type: "cli", channelId: "test" } });
+      await Bun.sleep(200); // Wait for compact + reflection to fire
 
-      // Second message triggers compact (high promptTokens)
+      // Verify compact happened
+      const { readdir } = await import("node:fs/promises");
+      const files = await readdir(sessionDir).catch(() => [] as string[]);
+      const archives = files.filter((f: string) => f.endsWith(".jsonl") && f !== "current.jsonl");
+      expect(archives.length).toBeGreaterThanOrEqual(1);
+
+      // Reflection should have been called
+      expect(reflectionCalled).toBe(true);
+
+      await agent.stop();
+    }, 10_000);
+
+    it("should not crash compact when reflection fails", async () => {
+      // This test verifies that a reflection failure (thrown error) does not crash
+      // the main agent's compact flow. The .catch() wrapper handles this.
+      // Pre-populate session with enough content and user messages for compact + reflection.
+      const sessionDir = `${testDataDir}/agents/main/session`;
+      await mkdir(sessionDir, { recursive: true });
+      const padding = "x".repeat(30_000);
+      const seedMessages = [
+        { role: "user", content: `My name is Alice ${padding}` },
+        { role: "assistant", content: `Nice to meet you ${padding}` },
+        { role: "user", content: `I work at Acme Corp ${padding}` },
+        { role: "assistant", content: `Great! ${padding}` },
+        { role: "user", content: `Tell me more ${padding}` },
+        { role: "assistant", content: `Sure ${padding}` },
+        { role: "user", content: `One more ${padding}` },
+        { role: "assistant", content: `OK ${padding}` },
+        { role: "user", content: `Last one ${padding}` },
+        { role: "assistant", content: `Yes ${padding}` },
+      ];
+      writeFileSync(
+        `${sessionDir}/current.jsonl`,
+        seedMessages.map((m) => JSON.stringify(m)).join("\n") + "\n",
+      );
+
+      const model: LanguageModel = {
+        provider: "test",
+        modelId: "test-model",
+        async generate(options: {
+          system?: string;
+          messages?: Message[];
+        }): Promise<GenerateTextResult> {
+          // Summarize call
+          if (options.system?.includes("conversation summarizer")) {
+            return {
+              text: "Summary: user said hello.",
+              finishReason: "stop",
+              usage: { promptTokens: 50, completionTokens: 20 },
+            };
+          }
+          // Reflection call — throw to simulate failure
+          if (options.system?.includes("reviewing a completed task")) {
+            throw new Error("LLM reflection error");
+          }
+          // Normal reply
+          return {
+            text: "",
+            finishReason: "tool_calls",
+            toolCalls: [
+              {
+                id: "tc-reply-1",
+                name: "reply",
+                arguments: { text: "Got it!", channelType: "cli", channelId: "test" },
+              },
+            ],
+            usage: { promptTokens: 100, completionTokens: 10 },
+          };
+        },
+      };
+
+      const settings = SettingsSchema.parse({
+        dataDir: testDataDir,
+        logLevel: "warn",
+        session: { compactThreshold: 0.8 },
+        authDir: "/tmp/pegasus-test-auth",
+      });
+
+      const agent = new MainAgent({ models: createMockModelRegistry(model), persona: testPersona, settings });
+      await agent.start();
+      agent.onReply(() => {});
+
+      // Send message — triggers compact → reflection (which throws) → .catch() handles it
+      agent.send({ text: "One last thing", channel: { type: "cli", channelId: "test" } });
+      await Bun.sleep(200);
+
+      // Agent should still be operational (error was caught, not propagated)
+      // Just verifying no crash occurred
+      await agent.stop();
+    }, 10_000);
+
+    it("should skip reflection for trivial sessions", async () => {
+      // Ensure reflection is NOT called when session has few user messages.
+      // Pre-populate with enough chars for compact but 0 user messages in seed.
+      // When the test sends 1 message, total user messages = 1, which is < 2 (shouldReflect gate).
+      const sessionDir = `${testDataDir}/agents/main/session`;
+      await mkdir(sessionDir, { recursive: true });
+      const padding = "x".repeat(50_000);
+      // 0 user messages in seed — only assistant messages for padding
+      const seedMessages = [
+        { role: "assistant", content: `response 1 ${padding}` },
+        { role: "assistant", content: `response 2 ${padding}` },
+        { role: "assistant", content: `response 3 ${padding}` },
+        { role: "assistant", content: `response 4 ${padding}` },
+        { role: "assistant", content: `response 5 ${padding}` },
+        { role: "assistant", content: `response 6 ${padding}` },
+        { role: "assistant", content: `response 7 ${padding}` },
+        { role: "assistant", content: `response 8 ${padding}` },
+      ];
+      writeFileSync(
+        `${sessionDir}/current.jsonl`,
+        seedMessages.map((m) => JSON.stringify(m)).join("\n") + "\n",
+      );
+
+      let reflectionCalled = false;
+      const model: LanguageModel = {
+        provider: "test",
+        modelId: "test-model",
+        async generate(options: {
+          system?: string;
+          messages?: Message[];
+        }): Promise<GenerateTextResult> {
+          if (options.system?.includes("conversation summarizer")) {
+            return {
+              text: "Summary.",
+              finishReason: "stop",
+              usage: { promptTokens: 50, completionTokens: 20 },
+            };
+          }
+          if (options.system?.includes("reviewing a completed task")) {
+            reflectionCalled = true;
+            return {
+              text: "Reviewed.",
+              finishReason: "stop",
+              usage: { promptTokens: 10, completionTokens: 10 },
+            };
+          }
+          return {
+            text: "",
+            finishReason: "stop",
+            usage: { promptTokens: 100, completionTokens: 10 },
+          };
+        },
+      };
+
+      const settings = SettingsSchema.parse({
+        dataDir: testDataDir,
+        logLevel: "warn",
+        session: { compactThreshold: 0.8 },
+        authDir: "/tmp/pegasus-test-auth",
+      });
+
+      const agent = new MainAgent({ models: createMockModelRegistry(model), persona: testPersona, settings });
+      await agent.start();
+      agent.onReply(() => {});
+
+      // Send message — triggers compact. preCompactMessages has 0 seed user + 1 incoming = 1 user.
+      // shouldReflect returns false (userMessages < 2).
       agent.send({ text: "test", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(50);
+      await Bun.sleep(200);
 
-      // Reflection should NOT have been called (session too short)
+      // Reflection should NOT have been called (only 1 user message)
       expect(reflectionCalled).toBe(false);
 
       await agent.stop();

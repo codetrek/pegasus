@@ -50,6 +50,8 @@ export interface TaskRunnerDeps {
   onNotification: (notification: TaskNotification) => void;
   /** Optional storeImage callback passed through to ExecutionAgent → ToolContext. */
   storeImage?: ToolContext["storeImage"];
+  /** Context window override for task agents (tokens). */
+  contextWindow?: number;
 }
 
 // ── TaskRunner ───────────────────────────────────────
@@ -60,6 +62,7 @@ export class TaskRunner {
   private tasksDir: string;
   private onNotification: (notification: TaskNotification) => void;
   private storeImage?: ToolContext["storeImage"];
+  private contextWindow?: number;
   private activeTasks = new Map<string, TaskInfo>();
 
   /** Cached per-type ToolRegistry instances. */
@@ -74,6 +77,7 @@ export class TaskRunner {
     this.tasksDir = deps.tasksDir;
     this.onNotification = deps.onNotification;
     this.storeImage = deps.storeImage;
+    this.contextWindow = deps.contextWindow;
   }
 
   // ═══════════════════════════════════════════════════
@@ -105,6 +109,7 @@ export class TaskRunner {
       sessionDir,
       contextPrompt: this.taskTypeRegistry.getPrompt(taskType),
       storeImage: this.storeImage,
+      contextWindow: this.contextWindow,
       onNotify: (message: string) => {
         this.onNotification({ type: "notify", taskId, message });
       },

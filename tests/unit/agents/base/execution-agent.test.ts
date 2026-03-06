@@ -64,6 +64,7 @@ function createTaskDeps(
     input: "Do the thing",
     description: "Test task description",
     mode: "task",
+    sessionDir: tempDir,
     ...overrides,
   };
 }
@@ -125,22 +126,21 @@ describe("ExecutionAgent", () => {
 
     test("task mode does not persist session", async () => {
       const model = createMockModel();
-      const sessionDir = await createTempDir();
+      const taskSessionDir = await createTempDir();
 
       const agent = new ExecutionAgent(
-        createTaskDeps({ model, sessionDir: undefined }),
+        createTaskDeps({ model, sessionDir: taskSessionDir }),
       );
       const result = await agent.run();
 
       expect(result.success).toBe(true);
-      // No session file should exist (no sessionDir provided in task mode)
-      // Verify the sessionStore is null by checking no file created
+      // Task mode should not write session files even though sessionDir exists
       try {
-        await readFile(path.join(sessionDir, "current.jsonl"), "utf-8");
-        // If we get here, file exists — unexpected
+        await readFile(path.join(taskSessionDir, "current.jsonl"), "utf-8");
+        // If we get here, file exists — unexpected for task mode
         expect(true).toBe(false);
       } catch {
-        // Expected: no session file
+        // Expected: no session file in task mode
       }
     });
   });

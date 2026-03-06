@@ -321,6 +321,7 @@ export async function initSubAgent(config: SubAgentConfig): Promise<void> {
       mode: "worker",
       sessionDir,
       storeImage,
+      contextWindow: settings.llm.contextWindow,
     });
 
     const promise = agent.run().then((execResult) => ({
@@ -379,6 +380,7 @@ export async function initSubAgent(config: SubAgentConfig): Promise<void> {
     onSpawnExecution,
     onNotify,
     storeImage,
+    contextWindow: settings.llm.contextWindow,
   });
 
   // 12. Store module-level ref for handleShutdown()

@@ -8,7 +8,9 @@
  * Key overrides:
  *   - send()            → security classification before queuing
  *   - _handleMessage()  → custom formatting, subagent completion, skill commands
- *   - _think()          → compaction, image hydration, direct LLM call (no processStep)
+ *   - _think()          → image hydration, direct LLM call (no processStep)
+ *   - beforeLLMCall()   → session compaction using this.models (not placeholder)
+ *   - onLLMError()      → overflow recovery with session reload + re-hydration
  *   - onStart()/onStop()→ complex lifecycle management
  *   - buildSystemPrompt()→ cached system prompt with skills/projects/etc.
  */
@@ -32,7 +34,7 @@ import { extToMime } from "../media/image-helpers.ts";
 import { TaskRunner } from "./task-runner.ts";
 import type { TaskNotification } from "./task-runner.ts";
 import type { ToolCall } from "../models/tool.ts";
-import { computeTokenBudget, calculateMaxToolResultChars, truncateToolResult, isContextOverflowError, MAX_OVERFLOW_COMPACT_RETRIES, ModelLimitsCache } from "../context/index.ts";
+import { computeTokenBudget, estimateTokensFromChars, summarizeMessages, calculateMaxToolResultChars, truncateToolResult, isContextOverflowError, MAX_OVERFLOW_COMPACT_RETRIES, ModelLimitsCache } from "../context/index.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import path from "node:path";
 import os from "node:os";
@@ -47,9 +49,9 @@ import { OwnerStore } from "../security/owner-store.ts";
 import { classifyMessage } from "../security/message-classifier.ts";
 import { TickManager } from "./tick-manager.ts";
 import { AuthManager } from "./auth-manager.ts";
-import { CompactionManager } from "./compaction-manager.ts";
 import { ReflectionOrchestrator } from "./reflection-orchestrator.ts";
 import { ConversationAgent, type QueueItem } from "./base/conversation-agent.ts";
+import { mechanicalSummary } from "./base/base-agent.ts";
 import { EventBus } from "../events/bus.ts";
 
 // Main Agent's curated tool set
@@ -80,8 +82,7 @@ export class MainAgent extends ConversationAgent {
   private tokenRefreshMonitor: TokenRefreshMonitor | null = null;
   private replyCallback: ((msg: OutboundMessage) => void) | null = null;
   private adapters: ChannelAdapter[] = [];
-  private lastPromptTokens = 0;
-  private _overflowRetryCount = 0;
+  private _mainOverflowRetryCount = 0;
   private skillRegistry: SkillRegistry;
   private skillDirs: Array<{ dir: string; source: "builtin" | "user" }> = [];
   private aiTaskTypeRegistry: AITaskTypeRegistry;
@@ -94,9 +95,7 @@ export class MainAgent extends ConversationAgent {
   private ownerStore: OwnerStore;
   private _channelNotifyTimes = new Map<string, number>();
   private _systemPrompt: string = "";
-  private modelLimitsCache!: ModelLimitsCache;
   private authManager!: AuthManager;
-  private compactionManager!: CompactionManager;
   private reflectionOrchestrator!: ReflectionOrchestrator;
   private _mcpAuthDir: string;
   private tickManager: TickManager;
@@ -126,6 +125,7 @@ export class MainAgent extends ConversationAgent {
       persona: deps.persona,
       sessionDir: mainStorePaths.session,
       eventBus: new EventBus({ keepHistory: true }),
+      contextWindow: settings.llm.contextWindow,
     });
 
     this.models = deps.models;
@@ -256,14 +256,6 @@ export class MainAgent extends ConversationAgent {
     const modelLimitsCacheDir = path.join(os.homedir(), ".pegasus", "model-limits");
     this.modelLimitsCache = new ModelLimitsCache(modelLimitsCacheDir);
 
-    // CompactionManager — context window management
-    this.compactionManager = new CompactionManager({
-      sessionStore: this.sessionStore,
-      models: this.models,
-      settings: this.settings,
-      modelLimitsCache: this.modelLimitsCache,
-    });
-
     // ReflectionOrchestrator — post-session memory extraction
     this.reflectionOrchestrator = new ReflectionOrchestrator({
       models: this.models,
@@ -356,6 +348,7 @@ export class MainAgent extends ConversationAgent {
       taskTypeRegistry: this.aiTaskTypeRegistry,
       tasksDir: this.mainStorePaths.tasks,
       storeImage: this._getStoreImageCallback(),
+      contextWindow: this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
       onNotification: (notification) => {
         this.pushQueue({ kind: "task_notify", notification } as QueueItem);
       },
@@ -555,6 +548,104 @@ export class MainAgent extends ConversationAgent {
   }
 
   // ═══════════════════════════════════════════════════
+  // Compaction overrides — MainAgent uses this.models (not BaseAgent placeholder)
+  // ═══════════════════════════════════════════════════
+
+  /**
+   * Pre-LLM compaction check.
+   *
+   * MainAgent calls generateText() directly (not processStep), so BaseAgent's
+   * beforeLLMCall is never invoked automatically. We override it to use
+   * this.models and session-level settings instead of BaseAgent's placeholder model.
+   *
+   * Returns true if compaction occurred.
+   */
+  protected override async beforeLLMCall(_taskId: string): Promise<void> {
+    if (this.sessionMessages.length < 8) return;
+
+    const totalChars = this.sessionMessages.reduce(
+      (sum, m) => sum + (typeof m.content === "string" ? m.content.length : String(m.content).length),
+      0,
+    );
+    const estimatedTokens = estimateTokensFromChars(totalChars);
+
+    const defaultModel = this.models.getDefault();
+    const budget = computeTokenBudget({
+      modelId: defaultModel.modelId,
+      provider: defaultModel.provider,
+      configContextWindow:
+        this.models.getDefaultContextWindow() ??
+        this.settings.llm.contextWindow,
+      compactThreshold: this.settings.session?.compactThreshold,
+      modelLimitsCache: this.modelLimitsCache,
+    });
+
+    if (estimatedTokens < budget.compactTrigger) return;
+
+    await this._compactAndReloadSession();
+  }
+
+  /**
+   * Overflow error handler.
+   *
+   * Called from _think()'s catch block when generateText() fails with a context
+   * overflow. Forces compaction and returns true if the caller should retry.
+   */
+  protected override async onLLMError(_taskId: string, error: unknown): Promise<boolean> {
+    if (!isContextOverflowError(error)) return false;
+    if (this._mainOverflowRetryCount >= MAX_OVERFLOW_COMPACT_RETRIES) return false;
+
+    this._mainOverflowRetryCount++;
+    logger.warn(
+      { error: errorToString(error), attempt: this._mainOverflowRetryCount },
+      "context_overflow_detected_forcing_compact",
+    );
+
+    await this._compactAndReloadSession();
+    return true;
+  }
+
+  /**
+   * Compact session messages, reload from store, and re-inject memory.
+   * Shared by beforeLLMCall (proactive) and onLLMError (reactive).
+   */
+  private async _compactAndReloadSession(): Promise<void> {
+    const preCompactMessages = [...this.sessionMessages];
+
+    // Generate summary via LLM with mechanical fallback
+    let summary: string;
+    try {
+      summary = await summarizeMessages({
+        messages: this.sessionMessages,
+        model: this.models.getForTier("fast"),
+        configContextWindow: this.models.getContextWindowForTier("fast"),
+        modelLimitsCache: this.modelLimitsCache,
+      });
+    } catch (err) {
+      logger.warn(
+        { error: errorToString(err) },
+        "session_summary_failed_using_mechanical",
+      );
+      summary = mechanicalSummary(this.sessionMessages);
+    }
+
+    await this.sessionStore.compact(summary);
+    this.sessionMessages = await this.sessionStore.load();
+    await this._injectMemoryIndex();
+    this.imageReadCache.clear();
+
+    logger.info({ agentId: this.agentId }, "session_compacted");
+
+    // Fire-and-forget reflection on the archived session
+    if (this.reflectionOrchestrator.shouldReflect(preCompactMessages)) {
+      this.reflectionOrchestrator.runReflection(preCompactMessages).catch((err) => {
+        logger.warn({ error: err instanceof Error ? err.message : String(err) }, "main_reflection_failed");
+      });
+    }
+  }
+
+
+  // ═══════════════════════════════════════════════════
   // Thinking override — uses direct LLM call (not processStep)
   // ═══════════════════════════════════════════════════
 
@@ -566,25 +657,8 @@ export class MainAgent extends ConversationAgent {
    * which will trigger another _think when processed.
    */
   protected override async _think(channel: ChannelInfo): Promise<void> {
-    // Check if compact is needed before LLM call
-    const preCompactMessages = [...this.sessionMessages];
-    const didCompact = await this.compactionManager.checkAndCompact(
-      this.sessionMessages,
-      this.lastPromptTokens,
-    );
-    if (didCompact) {
-      this.sessionMessages = await this.sessionStore.load();
-      await this._injectMemoryIndex();
-      this.lastPromptTokens = 0;
-      this.imageReadCache.clear();
-
-      // Fire-and-forget reflection on the archived session
-      if (this.reflectionOrchestrator.shouldReflect(preCompactMessages)) {
-        this.reflectionOrchestrator.runReflection(preCompactMessages).catch((err) => {
-          logger.warn({ error: err instanceof Error ? err.message : String(err) }, "main_reflection_failed");
-        });
-      }
-    }
+    // Proactive compaction check before LLM call
+    await this.beforeLLMCall("session");
 
     // Hydrate images for recent turns (vision support)
     const messages = this.imageManager
@@ -606,31 +680,11 @@ export class MainAgent extends ConversationAgent {
         tools: tools.length ? tools : undefined,
         toolChoice: tools.length ? "auto" : undefined,
       });
-      this._overflowRetryCount = 0;
+      this._mainOverflowRetryCount = 0;
     } catch (err) {
-      if (isContextOverflowError(err) && this._overflowRetryCount < MAX_OVERFLOW_COMPACT_RETRIES) {
-        this._overflowRetryCount++;
-        logger.warn(
-          { error: errorToString(err), attempt: this._overflowRetryCount },
-          "context_overflow_detected_forcing_compact",
-        );
-        const compacted = await this.compactionManager.checkAndCompact(
-          this.sessionMessages,
-          this.lastPromptTokens,
-        );
-        if (compacted) {
-          this.sessionMessages = await this.sessionStore.load();
-          await this._injectMemoryIndex();
-          this.lastPromptTokens = 0;
-        }
-        if (!compacted) {
-          const summary = await this.compactionManager.compactWithFallback(this.sessionMessages);
-          await this.sessionStore.compact(summary);
-          this.sessionMessages = await this.sessionStore.load();
-          await this._injectMemoryIndex();
-          this.lastPromptTokens = 0;
-        }
-        // Re-hydrate images after compact (sessionMessages changed)
+      const retried = await this.onLLMError("session", err);
+      if (retried) {
+        // Compaction happened — re-hydrate images and retry
         const retryMessages = this.imageManager
           ? await hydrateImages(
               this.sessionMessages,
@@ -645,14 +699,11 @@ export class MainAgent extends ConversationAgent {
           tools: tools.length ? tools : undefined,
           toolChoice: tools.length ? "auto" : undefined,
         });
-        this._overflowRetryCount = 0;
+        this._mainOverflowRetryCount = 0;
       } else {
         throw err;
       }
     }
-
-    // Update lastPromptTokens for compact estimation
-    this.lastPromptTokens = result.usage.promptTokens;
 
     // Handle tool calls
     if (result.toolCalls?.length) {

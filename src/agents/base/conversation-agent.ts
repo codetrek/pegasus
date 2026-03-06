@@ -27,7 +27,6 @@ import type {
   InboundMessage,
   OutboundMessage,
 } from "../../channels/types.ts";
-import { SessionStore } from "../../session/store.ts";
 import { getLogger } from "../../infra/logger.ts";
 
 const logger = getLogger("conversation_agent");
@@ -37,8 +36,6 @@ const logger = getLogger("conversation_agent");
 export interface ConversationAgentDeps extends BaseAgentDeps {
   /** Agent persona (identity + personality). */
   persona: Persona;
-  /** Session directory for JSONL persistence. */
-  sessionDir: string;
 }
 
 /** Callback for sending replies to channel adapters. */
@@ -70,8 +67,6 @@ export type QueueItem =
 
 export abstract class ConversationAgent extends BaseAgent {
   protected persona: Persona;
-  protected sessionStore: SessionStore;
-  protected sessionMessages: Message[] = [];
 
   private _onReply: ReplyCallback | null = null;
   private _onSpawnAgent: SpawnAgentCallback | null = null;
@@ -84,7 +79,6 @@ export abstract class ConversationAgent extends BaseAgent {
   constructor(deps: ConversationAgentDeps) {
     super(deps);
     this.persona = deps.persona;
-    this.sessionStore = new SessionStore(deps.sessionDir);
   }
 
   // ═══════════════════════════════════════════════════

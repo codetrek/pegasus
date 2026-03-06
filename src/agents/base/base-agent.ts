@@ -6,7 +6,9 @@
  *   2. 3-state model (IDLE/BUSY/WAITING) via AgentStateManager
  *   3. Event-driven processStep engine (non-blocking tool dispatch)
  *   4. Concurrency control (event queue for BUSY state)
- *   5. Hooks for subclass customization
+ *   5. Session persistence (SessionStore + sessionMessages)
+ *   6. Context compaction (beforeLLMCall + onLLMError overflow recovery)
+ *   7. Hooks for subclass customization
  *
  * Subclass contract:
  *   - Override buildSystemPrompt()  — what identity/instructions the LLM sees
@@ -32,6 +34,16 @@ import {
 import { ToolCallCollector, type ToolCallResult } from "./tool-call-collector.ts";
 import { createTaskState, type TaskExecutionState, type CreateTaskStateOptions } from "./task-execution-state.ts";
 import { getLogger } from "../../infra/logger.ts";
+import { SessionStore } from "../../session/store.ts";
+import {
+  computeTokenBudget,
+  estimateTokensFromChars,
+  summarizeMessages,
+  isContextOverflowError,
+  TASK_COMPACT_THRESHOLD,
+  MAX_OVERFLOW_COMPACT_RETRIES,
+  type ModelLimitsCache,
+} from "../../context/index.ts";
 
 const logger = getLogger("base_agent");
 
@@ -44,6 +56,8 @@ export interface BaseAgentDeps {
   model: LanguageModel;
   /** Tool registry with available tools. */
   toolRegistry: ToolRegistry;
+  /** Session directory for JSONL persistence. */
+  sessionDir: string;
   /** Optional shared EventBus. If not provided, creates a new one. */
   eventBus?: EventBus;
   /** Tool execution timeout in ms. Default: 30000. */
@@ -52,6 +66,10 @@ export interface BaseAgentDeps {
   maxIterations?: number;
   /** Optional storeImage callback injected into ToolContext for all tool executions. */
   storeImage?: ToolContext["storeImage"];
+  /** Context window override (tokens). */
+  contextWindow?: number;
+  /** Model limits cache for token budget computation. */
+  modelLimitsCache?: ModelLimitsCache;
 }
 
 // ── Helpers ──────────────────────────────────────────
@@ -107,6 +125,10 @@ export abstract class BaseAgent {
   protected toolRegistry: ToolRegistry;
   protected toolExecutor: ToolExecutor;
   protected maxIterations: number;
+  protected sessionStore: SessionStore;
+  protected sessionMessages: Message[] = [];
+  protected contextWindow?: number;
+  protected modelLimitsCache?: ModelLimitsCache;
 
   /** Optional storeImage callback injected into ToolContext for all tool executions. */
   private _storeImage?: ToolContext["storeImage"];
@@ -117,6 +139,7 @@ export abstract class BaseAgent {
   /** Queue for events that arrive while agent is BUSY. */
   private _eventQueue: Event[] = [];
   private _running = false;
+  private _overflowRetryCount = 0;
 
   constructor(deps: BaseAgentDeps) {
     this.agentId = deps.agentId;
@@ -126,6 +149,9 @@ export abstract class BaseAgent {
     this.stateManager = new AgentStateManager();
     this.maxIterations = deps.maxIterations ?? 25;
     this._storeImage = deps.storeImage;
+    this.sessionStore = new SessionStore(deps.sessionDir);
+    this.contextWindow = deps.contextWindow;
+    this.modelLimitsCache = deps.modelLimitsCache;
 
     this.toolExecutor = new ToolExecutor(
       this.toolRegistry,
@@ -278,6 +304,7 @@ export abstract class BaseAgent {
 
       state.iteration++;
       await this.onLLMUsage(result);
+      this._overflowRetryCount = 0; // Reset on successful LLM call
 
       // No tool calls → task complete
       if (!result.toolCalls?.length) {
@@ -432,16 +459,37 @@ export abstract class BaseAgent {
     finishReason: "complete" | "max_iterations" | "interrupted" | "error",
   ): Promise<void>;
 
-  /** Hook called before each LLM call. Override for context window management. */
-  protected async beforeLLMCall(_taskId: string): Promise<void> {}
+  /** Hook called before each LLM call. Checks token budget and triggers compaction if needed. */
+  protected async beforeLLMCall(taskId: string): Promise<void> {
+    const state = this.taskStates.get(taskId);
+    if (!state || state.messages.length < 8) return;
+
+    const totalChars = state.messages.reduce((sum, m) => sum + m.content.length, 0);
+    const estimatedTokens = estimateTokensFromChars(totalChars);
+    const budget = computeTokenBudget({
+      modelId: this.model.modelId,
+      configContextWindow: this.contextWindow,
+      compactThreshold: TASK_COMPACT_THRESHOLD,
+      modelLimitsCache: this.modelLimitsCache,
+    });
+
+    if (estimatedTokens < budget.compactTrigger) return;
+
+    await this._compactState(taskId);
+  }
 
   /**
    * Hook called when LLM call fails in processStep.
-   * Return true to retry processStep, false to fail the task.
-   * Default: return false (fail immediately).
+   * Returns true to retry processStep on context overflow (after compaction),
+   * false to fail the task.
    */
-  protected async onLLMError(_taskId: string, _error: unknown): Promise<boolean> {
-    return false;
+  protected async onLLMError(taskId: string, error: unknown): Promise<boolean> {
+    if (!isContextOverflowError(error)) return false;
+    if (this._overflowRetryCount >= MAX_OVERFLOW_COMPACT_RETRIES) return false;
+
+    this._overflowRetryCount++;
+    await this._compactState(taskId);
+    return true;
   }
 
   /**
@@ -469,4 +517,68 @@ export abstract class BaseAgent {
   protected removeTaskState(taskId: string): void {
     this.taskStates.delete(taskId);
   }
+
+  /**
+   * Compact the message history for a task: summarize, archive, and reload.
+   * Falls back to mechanical summary if LLM summarization fails.
+   */
+  private async _compactState(taskId: string): Promise<void> {
+    const state = this.taskStates.get(taskId);
+    if (!state) return;
+
+    let summary: string;
+    try {
+      summary = await summarizeMessages({
+        messages: state.messages,
+        model: this.model,
+        configContextWindow: this.contextWindow,
+        modelLimitsCache: this.modelLimitsCache,
+      });
+    } catch {
+      summary = mechanicalSummary(state.messages);
+    }
+
+    await this.sessionStore.compact(summary);
+    state.messages = await this.sessionStore.load();
+
+    logger.info(
+      { taskId, agentId: this.agentId },
+      "state_compacted",
+    );
+  }
+}
+
+// ── Private Helpers ──────────────────────────────────
+
+/**
+ * Mechanical (non-LLM) summary: extract key stats from messages.
+ * Used as fallback when LLM summarization fails.
+ */
+export function mechanicalSummary(messages: Message[]): string {
+  const userMessages = messages.filter((m) => m.role === "user");
+  const assistantMessages = messages.filter((m) => m.role === "assistant");
+  const toolMessages = messages.filter((m) => m.role === "tool");
+  const recentUsers = userMessages.slice(-3).map(
+    (m, i) =>
+      `  ${i + 1}. ${
+        typeof m.content === "string"
+          ? m.content.slice(0, 200)
+          : String(m.content).slice(0, 200)
+      }`,
+  );
+  const toolNames = new Set<string>();
+  for (const m of assistantMessages) {
+    if (m.toolCalls) {
+      for (const tc of m.toolCalls) toolNames.add(tc.name);
+    }
+  }
+  return [
+    `[Session compacted — ${messages.length} messages archived]`,
+    "",
+    "Recent user messages:",
+    ...recentUsers,
+    "",
+    `Tools used: ${[...toolNames].join(", ") || "(none)"}`,
+    `Total exchanges: ${userMessages.length} user, ${assistantMessages.length} assistant, ${toolMessages.length} tool`,
+  ].join("\n");
 }
