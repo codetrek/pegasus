@@ -36,7 +36,7 @@ import { hydrateImages } from "../media/image-prune.ts";
 import { extToMime } from "../media/image-helpers.ts";
 import { TaskRunner } from "./task-runner.ts";
 import type { TaskNotification } from "./task-runner.ts";
-import { computeTokenBudget, estimateTokensFromChars, summarizeMessages, calculateMaxToolResultChars, truncateToolResult, isContextOverflowError, MAX_OVERFLOW_COMPACT_RETRIES, ModelLimitsCache } from "../context/index.ts";
+import { computeTokenBudget, summarizeMessages, calculateMaxToolResultChars, truncateToolResult, isContextOverflowError, MAX_OVERFLOW_COMPACT_RETRIES, ModelLimitsCache } from "../context/index.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
@@ -101,6 +101,7 @@ export class MainAgent extends ConversationAgent {
   private settings: Settings;
   private taskRunner!: TaskRunner; // Task execution — initialized in start()
   private _mainOverflowRetryCount = 0;
+  private _lastPromptTokens = 0;
   private skillRegistry!: SkillRegistry;
   private skillDirs: Array<{ dir: string; source: "builtin" | "user" }> = [];
   private aiTaskTypeRegistry!: AITaskTypeRegistry;
@@ -340,11 +341,19 @@ export class MainAgent extends ConversationAgent {
   protected override async beforeLLMCall(_taskId: string): Promise<void> {
     if (this.sessionMessages.length < 8) return;
 
-    const totalChars = this.sessionMessages.reduce(
-      (sum, m) => sum + (typeof m.content === "string" ? m.content.length : String(m.content).length),
-      0,
-    );
-    const estimatedTokens = estimateTokensFromChars(totalChars);
+    // Use actual token count from last API response when available;
+    // fall back to token counter for the first call.
+    let estimatedTokens: number;
+    if (this._lastPromptTokens > 0) {
+      estimatedTokens = this._lastPromptTokens;
+    } else {
+      const allText = this.sessionMessages.map((m) => {
+        let text = typeof m.content === "string" ? m.content : String(m.content);
+        if (m.toolCalls) text += JSON.stringify(m.toolCalls);
+        return text;
+      }).join("\n");
+      estimatedTokens = await this.tokenCounter.count(allText);
+    }
 
     const defaultModel = this.models.getDefault();
     const budget = computeTokenBudget({
@@ -458,6 +467,8 @@ export class MainAgent extends ConversationAgent {
         toolChoice: tools.length ? "auto" : undefined,
       });
       this._mainOverflowRetryCount = 0;
+      this._lastPromptTokens =
+        (result.usage.promptTokens ?? 0) + (result.usage.cacheReadTokens ?? 0);
     } catch (err) {
       const retried = await this.onLLMError("session", err);
       if (retried) {
@@ -477,6 +488,8 @@ export class MainAgent extends ConversationAgent {
           toolChoice: tools.length ? "auto" : undefined,
         });
         this._mainOverflowRetryCount = 0;
+        this._lastPromptTokens =
+          (result.usage.promptTokens ?? 0) + (result.usage.cacheReadTokens ?? 0);
       } else {
         throw err;
       }

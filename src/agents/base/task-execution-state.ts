@@ -25,6 +25,8 @@ export interface TaskExecutionState {
   startedAt: number;
   /** Metadata from task creation. */
   metadata: Record<string, unknown>;
+  /** Last known prompt token count from API (promptTokens + cacheReadTokens). */
+  lastPromptTokens: number;
   /** Resolved when task finishes (for ConversationAgent await pattern). */
   onComplete?: () => void;
 }
@@ -49,6 +51,7 @@ export function createTaskState(
     aborted: false,
     startedAt: Date.now(),
     metadata: opts?.metadata ?? {},
+    lastPromptTokens: 0,
     onComplete: opts?.onComplete,
   };
 }
