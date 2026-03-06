@@ -86,6 +86,8 @@ export interface InjectedSubsystems {
   imageManager: ImageManager | null;
   tickManager: TickManager;
   reflectionOrchestrator: ReflectionOrchestrator;
+  /** Pre-wrapped MCP tools for MainAgent's tool registry (avoids double-wrapping). */
+  mcpTools: Tool[];
 }
 
 export interface MainAgentDeps {
@@ -129,6 +131,9 @@ export class MainAgent extends ConversationAgent {
    * onStart() skips infrastructure init; onStop() skips infrastructure shutdown.
    */
   private _injectedMode = false;
+
+  /** Pre-wrapped MCP tools from PegasusApp (avoids double-wrapping in injected mode). */
+  private _injectedMcpTools: Tool[] = [];
 
   // ── Custom tool executor for MainAgent's rich ToolContext ──
   private mainToolExecutor: ToolExecutor;
@@ -192,6 +197,7 @@ export class MainAgent extends ConversationAgent {
       this.imageManager = inj.imageManager;
       this.tickManager = inj.tickManager;
       this.reflectionOrchestrator = inj.reflectionOrchestrator;
+      this._injectedMcpTools = inj.mcpTools;
     } else {
       // ── Self-init mode: MainAgent creates everything itself (backward compat) ──
 
@@ -305,25 +311,12 @@ export class MainAgent extends ConversationAgent {
     }
 
     // In injected mode, PegasusApp already initialized all infrastructure.
-    // We only need to build the system prompt.
+    // We only need to register pre-wrapped MCP tools and build the system prompt.
     if (this._injectedMode) {
-      // Register MCP tools in MainAgent's own tool registry (for conversation)
-      if (this.mcpManager) {
-        const mcpConfigs = (this.settings.tools?.mcpServers ?? []) as MCPServerConfig[];
-        for (const config of mcpConfigs.filter((c) => c.enabled)) {
-          try {
-            const mcpTools = await this.mcpManager.listTools(config.name);
-            const wrapped = wrapMCPTools(config.name, mcpTools, this.mcpManager);
-            for (const tool of wrapped) {
-              this.toolRegistry.register(tool);
-            }
-          } catch (err) {
-            logger.warn(
-              { server: config.name, error: errorToString(err) },
-              "main_agent_mcp_tools_register_failed",
-            );
-          }
-        }
+      // Register pre-wrapped MCP tools in MainAgent's own tool registry (for conversation).
+      // PegasusApp already wrapped them once — no need to re-call listTools/wrapMCPTools.
+      for (const tool of this._injectedMcpTools) {
+        this.toolRegistry.register(tool);
       }
 
       // Build system prompt once (stable for LLM prefix caching)
@@ -1692,6 +1685,15 @@ export class MainAgent extends ConversationAgent {
    */
   _rebuildSystemPrompt(): void {
     this._systemPrompt = this._buildSystemPrompt();
+  }
+
+  /**
+   * Set SubAgentManager (called by PegasusApp after initialization order resolves).
+   * SubAgentManager depends on ProjectAdapter's WorkerAdapter, which requires
+   * MainAgent to exist first — so it's created after MainAgent and injected here.
+   */
+  setSubAgentManager(mgr: SubAgentManager): void {
+    this.subAgentManager = mgr;
   }
 
   /** Whether this MainAgent is running in injected (PegasusApp) mode. */

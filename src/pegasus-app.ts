@@ -188,7 +188,9 @@ export class PegasusApp {
     const modelLimitsCacheDir = path.join(os.homedir(), ".pegasus", "model-limits");
     this.modelLimitsCache = new ModelLimitsCache(modelLimitsCacheDir);
 
-    // Tool executor for reflection orchestrator (and later for MainAgent)
+    // Intentional separate ToolRegistry — ReflectionOrchestrator runs independently
+    // (fire-and-forget after compaction) and needs its own tool execution pipeline.
+    // Sharing MainAgent's ToolExecutor would couple their lifecycles unnecessarily.
     const toolRegistry = new ToolRegistry();
     toolRegistry.registerMany(mainAgentTools);
     const mainToolExecutor = new ToolExecutor(
@@ -293,17 +295,17 @@ export class PegasusApp {
       },
     });
 
-    // Register MCP tools in TaskRunner (if MCP is active)
+    // Wrap MCP tools once — shared by both TaskRunner and MainAgent (via injection)
+    let wrappedMcpTools: Tool[] = [];
     if (this.mcpManager && mcpConfigs.length > 0) {
-      const mcpToolsList: Tool[] = [];
       for (const config of mcpConfigs.filter((c) => c.enabled)) {
         try {
-          const mcpToolsForRunner = await this.mcpManager.listTools(config.name);
-          mcpToolsList.push(...wrapMCPTools(config.name, mcpToolsForRunner, this.mcpManager));
+          const mcpToolsRaw = await this.mcpManager.listTools(config.name);
+          wrappedMcpTools.push(...wrapMCPTools(config.name, mcpToolsRaw, this.mcpManager));
         } catch { /* already logged during MCP connection */ }
       }
-      if (mcpToolsList.length > 0) {
-        this.taskRunner.setAdditionalTools(mcpToolsList);
+      if (wrappedMcpTools.length > 0) {
+        this.taskRunner.setAdditionalTools(wrappedMcpTools);
       }
     }
 
@@ -342,6 +344,7 @@ export class PegasusApp {
       imageManager: this.imageManager,
       tickManager: this.tickManager,
       reflectionOrchestrator: this.reflectionOrchestrator,
+      mcpTools: wrappedMcpTools,
     };
 
     this._mainAgent = new MainAgent({
@@ -389,11 +392,10 @@ export class PegasusApp {
     const workerAdapter = this.projectAdapter.getWorkerAdapter();
     this.subAgentManager = new SubAgentManager(workerAdapter, this.settings.dataDir);
 
-    // Update injected reference so MainAgent sees it
-    // Note: MainAgent already has the subAgentManager reference from injection,
-    // but it was null at injection time. We need to update it.
-    // This is safe because MainAgent stores it as a mutable field.
-    (this._mainAgent as any).subAgentManager = this.subAgentManager;
+    // SubAgentManager was null at injection time (chicken-and-egg: it needs
+    // ProjectAdapter's WorkerAdapter, which requires MainAgent to exist first).
+    // Use the type-safe setter to update MainAgent's reference.
+    this._mainAgent.setSubAgentManager(this.subAgentManager);
 
     // Handle SubAgent Worker close events
     workerAdapter.addOnWorkerClose((channelType, channelId) => {
@@ -425,7 +427,11 @@ export class PegasusApp {
       await this._mainAgent.stop();
     }
 
-    // 2. Stop active SubAgents
+    // 2. Ensure TickManager is stopped — PegasusApp owns it, so we stop it explicitly
+    // even though MainAgent.onStop() also calls tickManager.stop() in injected mode.
+    this.tickManager?.stop();
+
+    // 3. Stop active SubAgents
     if (this.subAgentManager) {
       const activeSubAgents = this.subAgentManager.list("active");
       for (const entry of activeSubAgents) {
@@ -441,22 +447,22 @@ export class PegasusApp {
       this.subAgentManager = null;
     }
 
-    // 3. Stop project Workers
+    // 4. Stop project Workers
     await this.projectAdapter.stop();
 
-    // 4. Stop token refresh monitor
+    // 5. Stop token refresh monitor
     if (this.tokenRefreshMonitor) {
       this.tokenRefreshMonitor.stop();
       this.tokenRefreshMonitor = null;
     }
 
-    // 5. Disconnect MCP servers
+    // 6. Disconnect MCP servers
     if (this.mcpManager) {
       await this.mcpManager.disconnectAll();
       this.mcpManager = null;
     }
 
-    // 6. Close ImageManager
+    // 7. Close ImageManager
     if (this.imageManager) {
       this.imageManager.close();
       this.imageManager = null;
