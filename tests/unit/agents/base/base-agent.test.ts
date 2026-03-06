@@ -1227,6 +1227,7 @@ describe("BaseAgent — compaction", () => {
 
       // Build messages that exceed default compactTrigger
       const messages = buildLargeMessages(20, 20000);
+      const originalLength = messages.length;
       agent.testCreateTaskState("task-1", messages);
 
       await agent.testBeforeLLMCall("task-1");
@@ -1234,7 +1235,7 @@ describe("BaseAgent — compaction", () => {
       // After compaction, messages should be replaced (loaded from session store)
       const state = agent.getTaskStates().get("task-1")!;
       // The session store would have 1 compact entry (summary) loaded back
-      expect(state.messages.length).toBeLessThan(messages.length);
+      expect(state.messages.length).toBeLessThan(originalLength);
     }, 10000);
   });
 
@@ -1385,6 +1386,7 @@ describe("BaseAgent — compaction", () => {
 
       // Build enough messages to trigger compaction
       const messages = buildLargeMessages(20, 20000);
+      const originalLength = messages.length;
       agent.testCreateTaskState("task-1", messages);
 
       // Trigger compaction via beforeLLMCall (messages exceed budget)
@@ -1393,7 +1395,7 @@ describe("BaseAgent — compaction", () => {
       // After compaction with fallback, state should have compact summary
       const state = agent.getTaskStates().get("task-1")!;
       // Mechanical summary is stored as system message via sessionStore.compact()
-      expect(state.messages.length).toBeLessThan(messages.length);
+      expect(state.messages.length).toBeLessThan(originalLength);
       // The first message should be the compact system message
       expect(state.messages[0]!.content).toContain("[Session compacted");
     }, 10000);

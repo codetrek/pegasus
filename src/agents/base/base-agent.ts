@@ -517,8 +517,12 @@ export abstract class BaseAgent {
     if (!state) return;
 
     // Image hydration — if imageHydrator is set, hydrate images in messages
+    // IMPORTANT: mutate in-place to preserve array reference
+    // (state.messages may be the same array as sessionMessages via _think).
     if (this._imageHydrator) {
-      state.messages = await this._imageHydrator(state.messages);
+      const hydrated = await this._imageHydrator(state.messages);
+      state.messages.length = 0;
+      state.messages.push(...hydrated);
     }
 
     if (state.messages.length < 8) return;
@@ -610,7 +614,11 @@ export abstract class BaseAgent {
     }
 
     await this.sessionStore.compact(summary);
-    state.messages = await this.sessionStore.load();
+    // Mutate in-place to preserve array reference
+    // (state.messages may be the same array as sessionMessages via _think).
+    const reloaded = await this.sessionStore.load();
+    state.messages.length = 0;
+    state.messages.push(...reloaded);
 
     logger.info(
       { taskId, agentId: this.agentId },

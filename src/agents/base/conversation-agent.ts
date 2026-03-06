@@ -16,7 +16,7 @@
  */
 
 import { BaseAgent, type BaseAgentDeps, type ToolCallInterceptResult } from "./base-agent.ts";
-import type { PendingWork, PendingWorkResult } from "./agent-state.ts";
+import type { PendingWorkResult } from "./agent-state.ts";
 import type { Message } from "../../infra/llm-types.ts";
 import type { Event } from "../../events/types.ts";
 import { EventType } from "../../events/types.ts";
@@ -45,6 +45,7 @@ export type ReplyCallback = (msg: OutboundMessage) => void;
 /**
  * Callback for spawning child agents.
  * Returns the child agent ID.
+ * @deprecated Use spawn_task/spawn_subagent tools via ToolContext instead.
  */
 export type SpawnAgentCallback = (
   kind: "orchestrator" | "execution",
@@ -80,7 +81,6 @@ export abstract class ConversationAgent extends BaseAgent {
   protected persona: Persona;
 
   protected _onReply: ReplyCallback | null = null;
-  private _onSpawnAgent: SpawnAgentCallback | null = null;
 
   private queue: QueueItem[] = [];
   private processing = false;
@@ -99,11 +99,6 @@ export abstract class ConversationAgent extends BaseAgent {
   /** Register callback for outbound replies. */
   onReply(callback: ReplyCallback): void {
     this._onReply = callback;
-  }
-
-  /** Register callback for spawning child agents. */
-  onSpawnAgent(callback: SpawnAgentCallback): void {
-    this._onSpawnAgent = callback;
   }
 
   /** Send an inbound message to this conversation agent. */
@@ -338,9 +333,8 @@ export abstract class ConversationAgent extends BaseAgent {
     if (tc.name === "reply") {
       return this._interceptReply(tc);
     }
-    if (tc.name === "spawn_task" || tc.name === "spawn_subagent") {
-      return this._interceptSpawn(tc);
-    }
+    // spawn_task and spawn_subagent go through the tool executor
+    // (they use ToolContext.taskRegistry and SubAgentManager respectively).
     // Everything else: normal execution
     return { action: "execute" };
   }
@@ -373,37 +367,6 @@ export abstract class ConversationAgent extends BaseAgent {
         toolCallId: tc.id,
         content: JSON.stringify({ delivered: true }),
       },
-    };
-  }
-
-  private _interceptSpawn(tc: ToolCall): ToolCallInterceptResult {
-    if (!this._onSpawnAgent) {
-      return {
-        action: "skip",
-        result: {
-          toolCallId: tc.id,
-          content: JSON.stringify({ error: "Agent spawning not configured" }),
-        },
-      };
-    }
-
-    const kind = tc.name === "spawn_subagent" ? "orchestrator" : "execution";
-    const childId = this._onSpawnAgent(kind, tc.arguments as Record<string, unknown>);
-
-    const pendingWork: PendingWork = {
-      id: childId,
-      kind: "child_agent",
-      description: (tc.arguments as Record<string, unknown>).description as string ?? tc.name,
-      dispatchedAt: Date.now(),
-    };
-
-    return {
-      action: "intercept",
-      result: {
-        toolCallId: tc.id,
-        content: JSON.stringify({ childId, status: "spawned" }),
-      },
-      pendingWork,
     };
   }
 

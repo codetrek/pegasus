@@ -326,12 +326,16 @@ export class MainAgent extends ConversationAgent {
     // So let's NOT call super and handle hydration separately.
 
     // Image hydration via the injected imageHydrator (set on BaseAgentDeps)
+    // IMPORTANT: mutate state.messages in-place to preserve array reference
+    // (state.messages is the same array as this.sessionMessages via _think).
     if (this.imageManager) {
-      state.messages = await hydrateImages(
+      const hydrated = await hydrateImages(
         state.messages,
         this.settings.vision?.keepLastNTurns ?? 5,
         this._cachedImageRead.bind(this),
       );
+      state.messages.length = 0;
+      state.messages.push(...hydrated);
     }
 
     if (state.messages.length < 8) return;
@@ -411,7 +415,11 @@ export class MainAgent extends ConversationAgent {
     }
 
     await this.sessionStore.compact(summary);
-    this.sessionMessages = await this.sessionStore.load();
+    // Reload session from store — mutate in-place to preserve array reference
+    // (task state's messages may reference this.sessionMessages via _think).
+    const reloaded = await this.sessionStore.load();
+    this.sessionMessages.length = 0;
+    this.sessionMessages.push(...reloaded);
     await this._injectMemoryIndex();
     this.imageReadCache.clear();
 
