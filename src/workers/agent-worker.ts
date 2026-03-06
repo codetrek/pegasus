@@ -3,7 +3,8 @@
  *
  * Supports two modes:
  *   - "project" — loads PROJECT.md, builds project persona, persistent session
- *   - "subagent" — receives input directly, temporary session, auto-submits initial input
+ *   - "subagent" — runs OrchestratorAgent with Worker-local EventBus,
+ *     input provided at init, fire-and-forget via run()
  *
  * Communicates with the main thread via postMessage/onmessage:
  *   Receives: init, message, llm_response, llm_error, shutdown
@@ -269,10 +270,13 @@ export async function initProject(config: ProjectConfig): Promise<void> {
 // ── SubAgent mode init ───────────────────────────────
 
 export async function initSubAgent(config: SubAgentConfig): Promise<void> {
-  const { input, subagentDir, channelType, channelId, memorySnapshot, proxyModelId } = config;
+  const { input, subagentDir, channelType, channelId, contextWindow, memorySnapshot, proxyModelId } = config;
 
-  // 1. Load global settings
-  const settings = getSettings();
+  // 1. Load global settings — override contextWindow if provided
+  const baseSettings = getSettings();
+  const settings: Settings = contextWindow != null
+    ? { ...baseSettings, llm: { ...baseSettings.llm, contextWindow } }
+    : baseSettings;
 
   // 2. Create ProxyLanguageModel
   //    Use proxyModelId from WorkerAdapter when available (matches actual proxy model).

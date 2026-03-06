@@ -990,7 +990,7 @@ describe("initSubAgent", () => {
     expect(lastMockOrchestratorInstance.run).not.toHaveBeenCalled();
   }, 10_000);
 
-  it("should inject contextWindow when provided", async () => {
+  it("should accept contextWindow config without error", async () => {
     const subagentDir = `${TEST_DIR}/session-cw`;
     mkdirSync(subagentDir, { recursive: true });
 
@@ -1007,6 +1007,10 @@ describe("initSubAgent", () => {
     });
 
     expect(messages).toContainEqual({ type: "ready" });
+    // Note: contextWindow is applied to the local settings used during init
+    // (e.g. for ImageManager config). OrchestratorAgent/ExecutionAgent don't
+    // currently consume it directly — preserved for future use and consistency
+    // with initProject().
   }, 10_000);
 
   it("should handle default role as object with model field", async () => {
