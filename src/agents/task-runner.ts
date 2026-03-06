@@ -116,7 +116,7 @@ export class TaskRunner {
     });
 
     // Write task index entry (for task_list / task_replay tools)
-    this._appendTaskIndex(taskId, dateStr).catch((err) => {
+    this._appendTaskIndex(taskId, dateStr, { description, taskType, source }).catch((err) => {
       logger.warn({ taskId, err }, "task_index_append_failed");
     });
 
@@ -320,12 +320,20 @@ export class TaskRunner {
 
   /**
    * Append a task entry to the index.jsonl file (for task_list / task_replay).
-   * Compatible with the format used by TaskPersister.
+   * Includes metadata so task_list can display summaries without opening sessions.
    */
-  private async _appendTaskIndex(taskId: string, date: string): Promise<void> {
+  private async _appendTaskIndex(
+    taskId: string,
+    date: string,
+    meta?: { description?: string; taskType?: string; source?: string },
+  ): Promise<void> {
     await mkdir(this.tasksDir, { recursive: true });
     const indexPath = path.join(this.tasksDir, "index.jsonl");
-    const line = JSON.stringify({ taskId, date }) + "\n";
+    const entry: Record<string, string> = { taskId, date };
+    if (meta?.description) entry.description = meta.description;
+    if (meta?.taskType) entry.taskType = meta.taskType;
+    if (meta?.source) entry.source = meta.source;
+    const line = JSON.stringify(entry) + "\n";
     await appendFile(indexPath, line, "utf-8");
   }
 }

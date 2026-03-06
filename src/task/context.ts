@@ -23,42 +23,6 @@ export interface Plan {
   reasoning: string;
 }
 
-export function currentStep(plan: Plan): PlanStep | null {
-  return plan.steps.find((s) => !s.completed) ?? null;
-}
-
-export function hasMoreSteps(plan: Plan): boolean {
-  return plan.steps.some((s) => !s.completed);
-}
-
-export function markStepDone(plan: Plan, index: number): void {
-  const step = plan.steps.find((s) => s.index === index);
-  if (step) step.completed = true;
-}
-
-// ── ActionResult ─────────────────────────────────────
-
-export interface ActionResult {
-  stepIndex: number;
-  actionType: string;
-  actionInput: Record<string, unknown>;
-  result?: unknown;
-  success: boolean;
-  error?: string;
-  startedAt: number; // Unix ms
-  completedAt?: number;
-  durationMs?: number;
-}
-
-// ── Reflection ───────────────────────────────────────
-
-export interface Reflection {
-  verdict: "complete" | "continue" | "replan";
-  assessment: string;
-  lessons: string[];
-  nextFocus?: string;
-}
-
 /** Output of async post-task reflection (M4). */
 export interface PostTaskReflection {
   assessment: string;
@@ -85,8 +49,8 @@ export interface TaskContext {
   // Cognitive stage outputs
   reasoning: Record<string, unknown> | null;
   plan: Plan | null;
-  actionsDone: ActionResult[];
-  reflections: Reflection[];
+  actionsDone: Array<{ success: boolean; [key: string]: unknown }>;
+  reflections: Array<{ verdict: string; assessment: string; [key: string]: unknown }>;
   postReflection?: PostTaskReflection | null;
 
   // Loop control

@@ -6,7 +6,7 @@
  *   - TOOL_CALL_COMPLETED (410) / TOOL_CALL_FAILED (420): emitted via
  *     emitCompletion() AFTER execute() returns, NOT inside execute().
  *     The caller is responsible for emitting these events after it has
- *     finished updating context (actionsDone, markStepDone).
+ *     finished updating context.
  *     This avoids a race condition where the EventBus consumes the
  *     completion event before the caller has updated state.
  */
@@ -124,8 +124,8 @@ export class ToolExecutor {
   /**
    * Emit TOOL_CALL_COMPLETED or TOOL_CALL_FAILED event.
    *
-   * Call this AFTER updating context (actionsDone, markStepDone) so that
-   * the FSM sees up-to-date state when processing the event.
+   * Call this AFTER execute() returns so that
+   * downstream listeners see up-to-date state when processing the event.
    */
   emitCompletion(
     toolName: string,
