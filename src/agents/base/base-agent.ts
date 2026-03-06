@@ -511,21 +511,42 @@ export abstract class BaseAgent {
     finishReason: "complete" | "max_iterations" | "interrupted" | "error",
   ): Promise<void>;
 
-  /** Hook called before each LLM call. Checks token budget, hydrates images, and triggers compaction if needed. */
+  /**
+   * Hook called before each LLM call.
+   * Hydrates images and checks token budget for compaction.
+   * Subclasses override individual hooks (hydrateImagesForLLM, compactIfNeeded)
+   * rather than this method.
+   */
   protected async beforeLLMCall(taskId: string): Promise<void> {
+    await this.hydrateImagesForLLM(taskId);
+    await this.compactIfNeeded(taskId);
+  }
+
+  /**
+   * Hydrate image references in task messages for LLM consumption.
+   * Uses the imageHydrator injected via BaseAgentDeps.
+   * Subclasses can override for custom hydration logic.
+   */
+  protected async hydrateImagesForLLM(taskId: string): Promise<void> {
+    if (!this._imageHydrator) return;
     const state = this.taskStates.get(taskId);
     if (!state) return;
 
-    // Image hydration — if imageHydrator is set, hydrate images in messages
     // IMPORTANT: mutate in-place to preserve array reference
     // (state.messages may be the same array as sessionMessages via _think).
-    if (this._imageHydrator) {
-      const hydrated = await this._imageHydrator(state.messages);
-      state.messages.length = 0;
-      state.messages.push(...hydrated);
-    }
+    const hydrated = await this._imageHydrator(state.messages);
+    state.messages.length = 0;
+    state.messages.push(...hydrated);
+  }
 
-    if (state.messages.length < 8) return;
+  /**
+   * Check token budget and trigger compaction if messages exceed threshold.
+   * Subclasses override for custom budget computation (e.g. MainAgent uses
+   * ModelRegistry for dynamic model resolution and configurable thresholds).
+   */
+  protected async compactIfNeeded(taskId: string): Promise<void> {
+    const state = this.taskStates.get(taskId);
+    if (!state || state.messages.length < 8) return;
 
     // Use actual token count from last API response when available;
     // fall back to token counter for the first call.

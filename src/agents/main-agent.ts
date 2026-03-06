@@ -9,12 +9,12 @@
  * by PegasusApp — MainAgent never self-initializes them.
  *
  * Key overrides:
- *   - _handleMessage()   → sanitization, imageRef extraction
- *   - buildToolContext()  → rich ToolContext with all dependencies
- *   - beforeLLMCall()     → session compaction using this.models
- *   - onLLMError()        → overflow recovery with session reload
- *   - onStart()/onStop()  → session lifecycle (load, memory, prompt; tick + drain)
- *   - buildSystemPrompt() → cached system prompt with skills/projects/etc.
+ *   - _handleMessage()       → sanitization, imageRef extraction
+ *   - buildToolContext()      → rich ToolContext with all dependencies
+ *   - compactIfNeeded()       → session compaction using ModelRegistry
+ *   - onLLMError()            → overflow recovery with session reload
+ *   - onStart()/onStop()      → session lifecycle (load, memory, prompt; tick + drain)
+ *   - buildSystemPrompt()     → cached system prompt with skills/projects/etc.
  *   - getMaxToolResultChars() → truncation budget from model context window
  */
 
@@ -133,13 +133,7 @@ export class MainAgent extends ConversationAgent {
           return hydrateImages(
             messages,
             settings.vision?.keepLastNTurns ?? 5,
-            async (id: string) => {
-              const cached = this.imageReadCache.get(id);
-              if (cached) return cached;
-              const result = await imageManager.read(id);
-              if (result) this.imageReadCache.set(id, result);
-              return result;
-            },
+            this._cachedImageRead.bind(this),
           );
         }
       : undefined;
@@ -304,41 +298,19 @@ export class MainAgent extends ConversationAgent {
   }
 
   // ═══════════════════════════════════════════════════
-  // Compaction overrides — MainAgent uses this.models
+  // Compaction override — MainAgent uses ModelRegistry
   // ═══════════════════════════════════════════════════
 
   /**
-   * Pre-LLM compaction check.
+   * Custom compaction check using ModelRegistry for dynamic model resolution,
+   * provider-aware caching, and configurable threshold.
    *
-   * Overrides BaseAgent's beforeLLMCall to use this.models and session-level
-   * settings instead of BaseAgent's model for budget computation.
-   * Image hydration is handled by BaseAgent via imageHydrator dep.
+   * Image hydration is handled by BaseAgent.hydrateImagesForLLM() via the
+   * imageHydrator injected through BaseAgentDeps — no override needed.
    */
-  protected override async beforeLLMCall(taskId: string): Promise<void> {
+  protected override async compactIfNeeded(taskId: string): Promise<void> {
     const state = this.taskStates.get(taskId);
-    if (!state) return;
-
-    // Image hydration is handled by BaseAgent via imageHydrator — call super
-    // first so images are hydrated before token estimation.
-    // But we skip the compaction part of super — we do our own below.
-    // Actually, BaseAgent.beforeLLMCall does both hydration AND compaction.
-    // We want hydration from BaseAgent, but our own compaction logic.
-    // So let's NOT call super and handle hydration separately.
-
-    // Image hydration via the injected imageHydrator (set on BaseAgentDeps)
-    // IMPORTANT: mutate state.messages in-place to preserve array reference
-    // (state.messages is the same array as this.sessionMessages via _think).
-    if (this.imageManager) {
-      const hydrated = await hydrateImages(
-        state.messages,
-        this.settings.vision?.keepLastNTurns ?? 5,
-        this._cachedImageRead.bind(this),
-      );
-      state.messages.length = 0;
-      state.messages.push(...hydrated);
-    }
-
-    if (state.messages.length < 8) return;
+    if (!state || state.messages.length < 8) return;
 
     // Use actual token count from last API response when available;
     // fall back to token counter for the first call.
