@@ -573,9 +573,8 @@ export function _setTaskRunnerFactoryForTest(fn: TaskRunnerFactory): () => void 
 }
 
 /**
- * Backward-compat alias — tests that still import _setAgentFactoryForTest
- * will get a type error but won't crash at import time.
- * Phase 5 will update tests to use _setTaskRunnerFactoryForTest.
+ * Backward-compat alias for tests that still import _setAgentFactoryForTest.
+ * @deprecated Use _setTaskRunnerFactoryForTest instead.
  */
 export const _setAgentFactoryForTest = _setTaskRunnerFactoryForTest as any;
 

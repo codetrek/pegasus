@@ -141,6 +141,11 @@ export class TaskRunner {
     taskType?: string,
     description?: string,
   ): Promise<string> {
+    // Guard: cannot resume a task that is still running
+    if (this.activeTasks.has(taskId)) {
+      throw new Error(`Task ${taskId} is still running, cannot resume`);
+    }
+
     const index = await this._loadIndex();
     const date = index.get(taskId);
     if (!date) {
