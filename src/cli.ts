@@ -3,9 +3,9 @@
  *
  * Uses CLIAdapter for terminal interaction and optionally starts
  * TelegramAdapter when configured. Both adapters route through
- * MainAgent's multi-channel adapter system.
+ * PegasusApp's multi-channel adapter system.
  */
-import { MainAgent } from "./agents/main-agent.ts";
+import { PegasusApp } from "./pegasus-app.ts";
 import { loadPersona } from "./identity/persona.ts";
 import { setSettings } from "./infra/config.ts";
 import { loadSettings } from "./infra/config-loader.ts";
@@ -45,33 +45,33 @@ export async function startCLI(): Promise<void> {
   const persona = loadPersona(settings.identity.personaPath);
   const models = new ModelRegistry(settings.llm);
 
-  const mainAgent = new MainAgent({ models, persona, settings });
+  const app = new PegasusApp({ models, persona, settings });
 
   // Get StoreImageFn for channel adapters (undefined when vision disabled)
-  const storeImageFn = mainAgent.getStoreImageFn();
+  const storeImageFn = app.getStoreImageFn();
 
   // Register CLI adapter
   const cliAdapter = new CLIAdapter(persona.name, async () => {
-    await mainAgent.stop();
+    await app.stop();
   }, storeImageFn);
-  mainAgent.registerAdapter(cliAdapter);
+  app.registerAdapter(cliAdapter);
 
-  await mainAgent.start();
+  await app.start();
 
   // Start Telegram if configured
   const telegramConfig = settings.channels?.telegram;
   if (telegramConfig?.enabled && telegramConfig?.token) {
     // Build / command menu from user-invocable skills
-    const commands = buildTelegramCommands(mainAgent.skills.listUserInvocable());
+    const commands = buildTelegramCommands(app.mainAgent.skills.listUserInvocable());
     const telegramAdapter = new TelegramAdapter(telegramConfig.token, storeImageFn, commands);
-    mainAgent.registerAdapter(telegramAdapter);
-    await telegramAdapter.start({ send: (msg) => mainAgent.send(msg) });
+    app.registerAdapter(telegramAdapter);
+    await telegramAdapter.start({ send: (msg) => app.mainAgent.send(msg) });
     logger.info({ commandCount: commands.length }, "telegram_adapter_started");
   }
 
   printBanner(persona.name, persona.role);
 
-  await cliAdapter.start({ send: (msg) => mainAgent.send(msg) });
+  await cliAdapter.start({ send: (msg) => app.mainAgent.send(msg) });
 }
 
 // Entry point: run CLI when this file is executed directly

@@ -412,11 +412,11 @@ Each adapter listens for input on its channel and calls `agent.send()`. When Mai
 
 ### Adapter Routing
 
-Main Agent supports multi-channel routing via `registerAdapter()`. Each adapter is stored in an internal list, and the unified reply callback routes outbound messages by `channel.type`:
+Main Agent supports multi-channel routing via `PegasusApp.registerAdapter()`. Each adapter is stored in PegasusApp's adapter list, and the unified reply callback routes outbound messages by `channel.type`:
 
 ```typescript
-mainAgent.registerAdapter(cliAdapter);      // type: "cli"
-mainAgent.registerAdapter(telegramAdapter); // type: "telegram"
+app.registerAdapter(cliAdapter);      // type: "cli"
+app.registerAdapter(telegramAdapter); // type: "telegram"
 
 // When reply tool is called with channel.type = "telegram",
 // the message is routed to telegramAdapter.deliver()
@@ -425,8 +425,8 @@ mainAgent.registerAdapter(telegramAdapter); // type: "telegram"
 Adapters are started independently and connected to Main Agent's `send()`:
 
 ```typescript
-await cliAdapter.start({ send: (msg) => mainAgent.send(msg) });
-await telegramAdapter.start({ send: (msg) => mainAgent.send(msg) });
+await cliAdapter.start({ send: (msg) => app.agent.send(msg) });
+await telegramAdapter.start({ send: (msg) => app.agent.send(msg) });
 ```
 
 The `lastChannel` field tracks the most recent inbound message's channel, used for routing task completion notifications back to the correct channel.

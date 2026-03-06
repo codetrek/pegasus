@@ -1,7 +1,12 @@
 /**
- * Tests for multi-channel adapter routing in MainAgent.
+ * Tests for multi-channel adapter routing via PegasusApp.
+ *
+ * Adapter registration and routing is now managed by PegasusApp,
+ * not MainAgent. These tests verify the full flow: inbound message →
+ * LLM reply tool call → routed outbound delivery via adapters.
  */
 import { describe, it, expect, afterEach, beforeEach } from "bun:test";
+import { PegasusApp } from "@pegasus/pegasus-app.ts";
 import { MainAgent } from "@pegasus/agents/main-agent.ts";
 import type {
   LanguageModel,
@@ -18,9 +23,11 @@ import { ModelRegistry } from "@pegasus/infra/model-registry.ts";
 import type { LLMConfig } from "@pegasus/infra/config-schema.ts";
 import { OwnerStore } from "@pegasus/security/owner-store.ts";
 import { mkdir } from "node:fs/promises";
+import { createInjectedSubsystems } from "../../helpers/create-injected-subsystems.ts";
 
-const testDataDir = "/tmp/pegasus-test-routing";
-const testAuthDir = "/tmp/pegasus-test-routing-auth";
+let testSeq = 0;
+let testDataDir = "/tmp/pegasus-test-routing";
+let testAuthDir = "/tmp/pegasus-test-routing-auth";
 
 const testPersona: Persona = {
   name: "TestBot",
@@ -75,8 +82,17 @@ function createMockAdapter(
   return { adapter, delivered };
 }
 
+function createApp(model: LanguageModel): PegasusApp {
+  const settings = testSettings();
+  const models = createMockModelRegistry(model);
+  return new PegasusApp({ models, persona: testPersona, settings });
+}
+
 describe("Multi-channel routing", () => {
   beforeEach(async () => {
+    testSeq++;
+    testDataDir = `/tmp/pegasus-test-routing-${testSeq}-${Date.now()}`;
+    testAuthDir = `/tmp/pegasus-test-routing-auth-${testSeq}-${Date.now()}`;
     await mkdir(testAuthDir, { recursive: true });
     // Pre-register owners for channel types used in routing tests
     // so trust-based routing allows messages through
@@ -114,22 +130,18 @@ describe("Multi-channel routing", () => {
       },
     };
 
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: testSettings(),
-    });
+    const app = createApp(model);
 
     const cliMock = createMockAdapter("cli");
     const telegramMock = createMockAdapter("telegram");
 
-    agent.registerAdapter(cliMock.adapter);
-    agent.registerAdapter(telegramMock.adapter);
+    app.registerAdapter(cliMock.adapter);
+    app.registerAdapter(telegramMock.adapter);
 
-    await agent.start();
+    await app.start();
 
     // Send from telegram channel
-    agent.send({
+    app.mainAgent.send({
       text: "hello",
       channel: { type: "telegram", channelId: "tg-123", userId: "any" },
     });
@@ -142,7 +154,7 @@ describe("Multi-channel routing", () => {
     // CLI should not receive the telegram reply
     expect(cliMock.delivered).toHaveLength(0);
 
-    await agent.stop();
+    await app.stop();
   }, 10_000);
 
   it("should log warning for unknown channel type", async () => {
@@ -169,19 +181,15 @@ describe("Multi-channel routing", () => {
       },
     };
 
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: testSettings(),
-    });
+    const app = createApp(model);
 
     const cliMock = createMockAdapter("cli");
-    agent.registerAdapter(cliMock.adapter);
+    app.registerAdapter(cliMock.adapter);
 
-    await agent.start();
+    await app.start();
 
     // Send from "sms" which has no adapter registered
-    agent.send({
+    app.mainAgent.send({
       text: "hello",
       channel: { type: "sms", channelId: "unknown-123", userId: "any" },
     });
@@ -191,7 +199,7 @@ describe("Multi-channel routing", () => {
     expect(cliMock.delivered).toHaveLength(0);
 
     // No crash — the warning is logged but no error thrown
-    await agent.stop();
+    await app.stop();
   }, 10_000);
 
   it("should support multiple adapters coexisting (CLI + Telegram)", async () => {
@@ -240,29 +248,25 @@ describe("Multi-channel routing", () => {
       },
     };
 
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: testSettings(),
-    });
+    const app = createApp(model);
 
     const cliMock = createMockAdapter("cli");
     const telegramMock = createMockAdapter("telegram");
 
-    agent.registerAdapter(cliMock.adapter);
-    agent.registerAdapter(telegramMock.adapter);
+    app.registerAdapter(cliMock.adapter);
+    app.registerAdapter(telegramMock.adapter);
 
-    await agent.start();
+    await app.start();
 
     // Send from CLI
-    agent.send({
+    app.mainAgent.send({
       text: "hello from cli",
       channel: { type: "cli", channelId: "main" },
     });
     await Bun.sleep(100);
 
     // Send from Telegram
-    agent.send({
+    app.mainAgent.send({
       text: "hello from telegram",
       channel: { type: "telegram", channelId: "tg-456", userId: "any" },
     });
@@ -275,7 +279,7 @@ describe("Multi-channel routing", () => {
     expect(telegramMock.delivered).toHaveLength(1);
     expect(telegramMock.delivered[0]!.text).toBe("TG reply");
 
-    await agent.stop();
+    await app.stop();
   }, 15_000);
 
   it("should handle adapter deliver failure gracefully", async () => {
@@ -301,11 +305,7 @@ describe("Multi-channel routing", () => {
       },
     };
 
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: testSettings(),
-    });
+    const app = createApp(model);
 
     // Adapter that throws on deliver
     const brokenAdapter: ChannelAdapter = {
@@ -317,19 +317,19 @@ describe("Multi-channel routing", () => {
       async stop() {},
     };
 
-    agent.registerAdapter(brokenAdapter);
+    app.registerAdapter(brokenAdapter);
 
-    await agent.start();
+    await app.start();
 
     // Should not crash
-    agent.send({
+    app.mainAgent.send({
       text: "hello",
       channel: { type: "broken", channelId: "broken-123", userId: "any" },
     });
     await Bun.sleep(100);
 
     // No crash occurred
-    await agent.stop();
+    await app.stop();
   }, 10_000);
 
   it("onReply still works when no adapters registered", async () => {
@@ -355,15 +355,14 @@ describe("Multi-channel routing", () => {
       },
     };
 
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: testSettings(),
-    });
+    const settings = testSettings();
+    const models = createMockModelRegistry(model);
+    const injected = createInjectedSubsystems({ models, settings, persona: testPersona });
+    const agent = new MainAgent({ models, persona: testPersona, settings, injected });
 
     await agent.start();
 
-    // Use onReply directly (legacy mode, no adapters)
+    // Use onReply directly (no adapters, direct callback)
     const replies: OutboundMessage[] = [];
     agent.onReply((msg) => replies.push(msg));
 

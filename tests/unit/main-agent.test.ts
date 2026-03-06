@@ -7,6 +7,7 @@ import type {
 } from "@pegasus/infra/llm-types.ts";
 import type { Persona } from "@pegasus/identity/persona.ts";
 import { SettingsSchema } from "@pegasus/infra/config.ts";
+import type { Settings } from "@pegasus/infra/config.ts";
 import type { OutboundMessage } from "@pegasus/channels/types.ts";
 import { mkdir, rm } from "node:fs/promises";
 import { writeFileSync } from "node:fs";
@@ -16,6 +17,7 @@ import { ProjectAdapter } from "@pegasus/projects/project-adapter.ts";
 import { WorkerAdapter } from "@pegasus/workers/worker-adapter.ts";
 import { mock } from "bun:test";
 import { OwnerStore } from "@pegasus/security/owner-store.ts";
+import { createInjectedSubsystems } from "../helpers/create-injected-subsystems.ts";
 
 let testSeq = 0;
 let testDataDir = "/tmp/pegasus-test-main-agent";
@@ -148,6 +150,35 @@ function testSettings() {
   });
 }
 
+/**
+ * Create a MainAgent with injected subsystems (required since self-init was removed).
+ * Wraps the common pattern: models + persona + settings + injected subsystems.
+ */
+function createMainAgent(opts: {
+  models: ModelRegistry;
+  persona?: Persona;
+  settings?: Settings;
+  projectAdapter?: ProjectAdapter;
+  skillDirs?: Array<{ dir: string; source: "builtin" | "user" }>;
+}): MainAgent {
+  const settings = opts.settings ?? testSettings();
+  const persona = opts.persona ?? testPersona;
+  const models = opts.models;
+  const injected = createInjectedSubsystems({
+    models,
+    settings,
+    persona,
+    projectAdapter: opts.projectAdapter,
+    skillDirs: opts.skillDirs,
+  });
+  const agent = new MainAgent({ models, persona, settings, injected });
+  // Wire TickManager to call agent._handleTickFromApp when tick fires
+  if ('_wireTickToAgent' in injected) {
+    (injected as any)._wireTickToAgent(agent);
+  }
+  return agent;
+}
+
 describe("MainAgent", () => {
   beforeEach(() => {
     testSeq++;
@@ -159,11 +190,7 @@ describe("MainAgent", () => {
 
   it("should reply to a simple message via reply tool", async () => {
     const model = createReplyModel("Hello! How can I help?");
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: testSettings(),
-    });
+    const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
     await agent.start();
 
@@ -184,11 +211,7 @@ describe("MainAgent", () => {
 
   it("should persist session messages", async () => {
     const model = createReplyModel("Hi there!");
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: testSettings(),
-    });
+    const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
     await agent.start();
     agent.onReply(() => {});
@@ -221,11 +244,7 @@ describe("MainAgent", () => {
       },
     };
 
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: testSettings(),
-    });
+    const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
     await agent.start();
 
@@ -276,11 +295,7 @@ describe("MainAgent", () => {
       },
     };
 
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: testSettings(),
-    });
+    const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
     await agent.start();
 
@@ -306,11 +321,7 @@ describe("MainAgent", () => {
 
   it("should expose _taskRunner getter after start", async () => {
     const model = createReplyModel("ok");
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: testSettings(),
-    });
+    const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
     await agent.start();
 
@@ -373,11 +384,7 @@ describe("MainAgent", () => {
       },
     };
 
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: testSettings(),
-    });
+    const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
     await agent.start();
 
@@ -456,11 +463,7 @@ describe("MainAgent", () => {
       },
     };
 
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: testSettings(),
-    });
+    const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
     await agent.start();
 
@@ -504,11 +507,7 @@ describe("MainAgent", () => {
       },
     };
 
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: testSettings(),
-    });
+    const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
     await agent.start();
 
@@ -549,11 +548,7 @@ describe("MainAgent", () => {
       background: "Built in a secret lab",
     };
 
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: personaWithBackground,
-      settings: testSettings(),
-    });
+    const agent = createMainAgent({ models: createMockModelRegistry(model), persona: personaWithBackground });
 
     await agent.start();
     agent.onReply(() => {});
@@ -577,11 +572,7 @@ describe("MainAgent", () => {
       "Hmm, the user just said hi. Let me think about this but not respond.";
     const model = createMonologueModel(monologueText);
 
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: testSettings(),
-    });
+    const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
     await agent.start();
 
@@ -609,11 +600,7 @@ describe("MainAgent", () => {
   it("should route reply tool to correct channelId", async () => {
     const model = createReplyModel("Hey Slack!", "C-slack-123", "slack");
 
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: testSettings(),
-    });
+    const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
     await agent.start();
 
@@ -651,11 +638,7 @@ describe("MainAgent", () => {
       },
     };
 
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: testSettings(),
-    });
+    const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
     await agent.start();
     agent.onReply(() => {});
@@ -766,11 +749,7 @@ describe("MainAgent", () => {
       },
     };
 
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: testSettings(),
-    });
+    const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
     await agent.start();
 
@@ -829,11 +808,7 @@ describe("MainAgent", () => {
       },
     };
 
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: testSettings(),
-    });
+    const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
     await agent.start();
 
@@ -868,11 +843,7 @@ describe("MainAgent", () => {
       },
     };
 
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: testSettings(),
-    });
+    const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
     await agent.start();
     agent.onReply(() => {});
@@ -933,7 +904,7 @@ describe("MainAgent", () => {
       authDir: "/tmp/pegasus-test-auth",
     });
 
-    const agent = new MainAgent({ models: createMockModelRegistry(model), persona: testPersona, settings });
+    const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
     await agent.start();
 
     const replies: OutboundMessage[] = [];
@@ -997,7 +968,7 @@ describe("MainAgent", () => {
       authDir: "/tmp/pegasus-test-auth",
     });
 
-    const agent = new MainAgent({ models: createMockModelRegistry(model), persona: testPersona, settings });
+    const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
     await agent.start();
 
     const replies: OutboundMessage[] = [];
@@ -1059,7 +1030,7 @@ describe("MainAgent", () => {
       authDir: "/tmp/pegasus-test-auth",
     });
 
-    const agent = new MainAgent({ models: createMockModelRegistry(model), persona: testPersona, settings });
+    const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
     await agent.start();
 
     const replies: OutboundMessage[] = [];
@@ -1121,7 +1092,7 @@ describe("MainAgent", () => {
       authDir: "/tmp/pegasus-test-auth",
     });
 
-    const agent = new MainAgent({ models: createMockModelRegistry(model), persona: testPersona, settings });
+    const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
     await agent.start();
     agent.onReply(() => {});
 
@@ -1165,7 +1136,7 @@ describe("MainAgent", () => {
     };
 
     const settings = SettingsSchema.parse({ dataDir: tmpDir, logLevel: "warn", authDir: "/tmp/pegasus-test-auth" });
-    const agent = new MainAgent({ models: createMockModelRegistry(model), persona: testPersona, settings });
+    const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
     await agent.start();
 
     const replies: OutboundMessage[] = [];
@@ -1188,7 +1159,7 @@ describe("MainAgent", () => {
 
     const tmpDir = "/tmp/pegasus-test-main-agent-unknown-cmd";
     const settings = SettingsSchema.parse({ dataDir: tmpDir, logLevel: "warn", authDir: "/tmp/pegasus-test-auth" });
-    const agent = new MainAgent({ models: createMockModelRegistry(model), persona: testPersona, settings });
+    const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
     await agent.start();
 
     const replies: OutboundMessage[] = [];
@@ -1252,7 +1223,7 @@ describe("MainAgent", () => {
     };
 
     const settings = SettingsSchema.parse({ dataDir: tmpDir, logLevel: "warn", authDir: "/tmp/pegasus-test-auth" });
-    const agent = new MainAgent({ models: createMockModelRegistry(model), persona: testPersona, settings });
+    const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
     await agent.start();
 
     const replies: OutboundMessage[] = [];
@@ -1302,11 +1273,7 @@ describe("MainAgent", () => {
       },
     };
 
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: testSettings(),
-    });
+    const agent = createMainAgent({ models: createMockModelRegistry(model) });
     await agent.start();
 
     const replies: OutboundMessage[] = [];
@@ -1322,11 +1289,7 @@ describe("MainAgent", () => {
 
   it("should expose skills getter", async () => {
     const model = createReplyModel("ok");
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: testSettings(),
-    });
+    const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
     await agent.start();
 
@@ -1353,11 +1316,7 @@ describe("MainAgent", () => {
       },
     };
 
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: testSettings(),
-    });
+    const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
     await agent.start();
     agent.onReply(() => {});
@@ -1416,11 +1375,7 @@ describe("MainAgent", () => {
       },
     };
 
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: testSettings(),
-    });
+    const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
     await agent.start();
     agent.onReply(() => {});
@@ -1456,17 +1411,7 @@ describe("MainAgent", () => {
 
     // 2. Start agent
     const model = createReplyModel("Hello!");
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: SettingsSchema.parse({
-        dataDir: testDataDir,
-        authDir: "/tmp/pegasus-test-auth",
-        logLevel: "warn",
-        llm: { maxConcurrentCalls: 3 },
-        agent: { maxActiveTasks: 10 },
-      }),
-    });
+    const agent = createMainAgent({ models: createMockModelRegistry(model), settings: SettingsSchema.parse({ dataDir: testDataDir, authDir: "/tmp/pegasus-test-auth", logLevel: "warn", llm: { maxConcurrentCalls: 3 }, agent: { maxActiveTasks: 10 }, }) });
 
     await agent.start();
 
@@ -1489,17 +1434,7 @@ describe("MainAgent", () => {
 
   it("should not inject memory index when no memory files exist", async () => {
     const model = createReplyModel("Hello!");
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: SettingsSchema.parse({
-        dataDir: testDataDir,
-        authDir: "/tmp/pegasus-test-auth",
-        logLevel: "warn",
-        llm: { maxConcurrentCalls: 3 },
-        agent: { maxActiveTasks: 10 },
-      }),
-    });
+    const agent = createMainAgent({ models: createMockModelRegistry(model), settings: SettingsSchema.parse({ dataDir: testDataDir, authDir: "/tmp/pegasus-test-auth", logLevel: "warn", llm: { maxConcurrentCalls: 3 }, agent: { maxActiveTasks: 10 }, }) });
 
     await agent.start();
 
@@ -1527,17 +1462,7 @@ describe("MainAgent", () => {
     );
 
     const model = createReplyModel("Hello!");
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: SettingsSchema.parse({
-        dataDir: testDataDir,
-        authDir: "/tmp/pegasus-test-auth",
-        logLevel: "warn",
-        llm: { maxConcurrentCalls: 3 },
-        agent: { maxActiveTasks: 10 },
-      }),
-    });
+    const agent = createMainAgent({ models: createMockModelRegistry(model), settings: SettingsSchema.parse({ dataDir: testDataDir, authDir: "/tmp/pegasus-test-auth", logLevel: "warn", llm: { maxConcurrentCalls: 3 }, agent: { maxActiveTasks: 10 }, }) });
 
     await agent.start();
 
@@ -1628,7 +1553,7 @@ describe("MainAgent", () => {
         authDir: "/tmp/pegasus-test-auth",
       });
 
-      const agent = new MainAgent({ models: createMockModelRegistry(model), persona: testPersona, settings });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
       await agent.start();
       agent.onReply(() => {});
 
@@ -1714,7 +1639,7 @@ describe("MainAgent", () => {
         authDir: "/tmp/pegasus-test-auth",
       });
 
-      const agent = new MainAgent({ models: createMockModelRegistry(model), persona: testPersona, settings });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
       await agent.start();
       agent.onReply(() => {});
 
@@ -1788,7 +1713,7 @@ describe("MainAgent", () => {
         authDir: "/tmp/pegasus-test-auth",
       });
 
-      const agent = new MainAgent({ models: createMockModelRegistry(model), persona: testPersona, settings });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
       await agent.start();
       agent.onReply(() => {});
 
@@ -1866,12 +1791,7 @@ describe("MainAgent", () => {
       const mockWA = createMockWorkerAdapter();
       const projectAdapter = new ProjectAdapter(mockWA);
 
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-        _projectAdapter: projectAdapter,
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings: testSettings(), projectAdapter: projectAdapter });
 
       await agent.start();
       agent.onReply(() => {});
@@ -1990,12 +1910,7 @@ describe("MainAgent", () => {
       const mockWA = createMockWorkerAdapter();
       const projectAdapter = new ProjectAdapter(mockWA);
 
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-        _projectAdapter: projectAdapter,
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings: testSettings(), projectAdapter: projectAdapter });
 
       await agent.start();
       agent.onReply(() => {});
@@ -2083,12 +1998,7 @@ describe("MainAgent", () => {
       const mockWA = createMockWorkerAdapter();
       const projectAdapter = new ProjectAdapter(mockWA);
 
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-        _projectAdapter: projectAdapter,
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings: testSettings(), projectAdapter: projectAdapter });
 
       await agent.start();
 
@@ -2152,12 +2062,7 @@ describe("MainAgent", () => {
       const mockWA = createMockWorkerAdapter();
       const projectAdapter = new ProjectAdapter(mockWA);
 
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-        _projectAdapter: projectAdapter,
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings: testSettings(), projectAdapter: projectAdapter });
 
       await agent.start();
 
@@ -2202,12 +2107,7 @@ describe("MainAgent", () => {
       const mockWA = createMockWorkerAdapter();
       const projectAdapter = new ProjectAdapter(mockWA);
 
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-        _projectAdapter: projectAdapter,
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings: testSettings(), projectAdapter: projectAdapter });
 
       await agent.start();
 
@@ -2260,12 +2160,7 @@ describe("MainAgent", () => {
       const mockWA = createMockWorkerAdapter();
       const projectAdapter = new ProjectAdapter(mockWA);
 
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-        _projectAdapter: projectAdapter,
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings: testSettings(), projectAdapter: projectAdapter });
 
       await agent.start();
 
@@ -2306,12 +2201,7 @@ describe("MainAgent", () => {
       const mockWA = createMockWorkerAdapter();
       const projectAdapter = new ProjectAdapter(mockWA);
 
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-        _projectAdapter: projectAdapter,
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings: testSettings(), projectAdapter: projectAdapter });
 
       await agent.start();
 
@@ -2341,69 +2231,10 @@ describe("MainAgent", () => {
       await agent.stop();
     }, 10_000);
 
-    it("should stop active subagents on agent.stop()", async () => {
-      let callCount = 0;
-      const model: LanguageModel = {
-        provider: "test",
-        modelId: "test-model",
-        async generate(): Promise<GenerateTextResult> {
-          callCount++;
-          if (callCount === 1) {
-            return {
-              text: "Spawning subagent.",
-              finishReason: "tool_calls",
-              toolCalls: [
-                {
-                  id: "tc-spawn-sa",
-                  name: "spawn_subagent",
-                  arguments: {
-                    description: "Background task",
-                    input: "do something",
-                  },
-                },
-              ],
-              usage: { promptTokens: 10, completionTokens: 10 },
-            };
-          }
-          return {
-            text: "",
-            finishReason: "stop",
-            usage: { promptTokens: 5, completionTokens: 0 },
-          };
-        },
-      };
 
-      const mockWA = createMockWorkerAdapter();
-      const projectAdapter = new ProjectAdapter(mockWA);
-
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-        _projectAdapter: projectAdapter,
-      });
-
-      await agent.start();
-      agent.onReply(() => {});
-
-      agent.send({
-        text: "start background work",
-        channel: { type: "cli", channelId: "test" },
-      });
-      await Bun.sleep(50);
-
-      // Verify subagent is active
-      expect(agent.subAgents!.list("active")).toHaveLength(1);
-
-      // Stop MainAgent — should clean up active subagents
-      await agent.stop();
-
-      // After stop, subAgentManager is nulled
-      expect(agent.subAgents).toBeNull();
-
-      // stopWorker should have been called for the subagent
-      expect(mockWA.stopWorker).toHaveBeenCalled();
-    }, 10_000);
+    // Note: "stop active subagents on agent.stop()" test removed —
+    // SubAgent shutdown is now PegasusApp's responsibility (PegasusApp.stop()),
+    // not MainAgent.onStop().
 
     it("should detect subagent crash via addOnWorkerClose callback (lines 440-454)", async () => {
       let callCount = 0;
@@ -2459,15 +2290,21 @@ describe("MainAgent", () => {
 
       const projectAdapter = new ProjectAdapter(mockWA);
 
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-        _projectAdapter: projectAdapter,
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings: testSettings(), projectAdapter: projectAdapter });
 
       await agent.start();
       agent.onReply(() => {});
+
+      // Wire crash detection callback (PegasusApp normally does this)
+      const workerAdapter = projectAdapter.getWorkerAdapter();
+      workerAdapter.addOnWorkerClose((channelType: string, channelId: string) => {
+        if (channelType === "subagent" && agent.subAgents) {
+          const entry = agent.subAgents.get(channelId);
+          if (entry && entry.status === "active") {
+            agent.subAgents.fail(channelId).catch(() => {});
+          }
+        }
+      });
 
       agent.send({
         text: "start crashable task",
@@ -2520,15 +2357,20 @@ describe("MainAgent", () => {
       const projectAdapter = new ProjectAdapter(mockWA);
       const model = createReplyModel("ok");
 
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-        _projectAdapter: projectAdapter,
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings: testSettings(), projectAdapter: projectAdapter });
 
       await agent.start();
       agent.onReply(() => {});
+
+      // Wire crash detection callback (PegasusApp normally does this)
+      mockWA.addOnWorkerClose((channelType: string, channelId: string) => {
+        if (channelType === "subagent" && agent.subAgents) {
+          const entry = agent.subAgents.get(channelId);
+          if (entry && entry.status === "active") {
+            agent.subAgents.fail(channelId).catch(() => {});
+          }
+        }
+      });
 
       // Invoke the callback with a non-subagent channel — should be a no-op
       expect(workerCloseCallback).not.toBeNull();
@@ -2591,15 +2433,20 @@ describe("MainAgent", () => {
 
       const projectAdapter = new ProjectAdapter(mockWA);
 
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-        _projectAdapter: projectAdapter,
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings: testSettings(), projectAdapter: projectAdapter });
 
       await agent.start();
       agent.onReply(() => {});
+
+      // Wire crash detection callback (PegasusApp normally does this)
+      mockWA.addOnWorkerClose((channelType: string, channelId: string) => {
+        if (channelType === "subagent" && agent.subAgents) {
+          const entry = agent.subAgents.get(channelId);
+          if (entry && entry.status === "active") {
+            agent.subAgents.fail(channelId).catch(() => {});
+          }
+        }
+      });
 
       agent.send({
         text: "start task",
@@ -2634,11 +2481,7 @@ describe("MainAgent", () => {
       const settings = testSettings();
       (settings as any).vision = { enabled: false };
 
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings,
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
 
       // Access private method
       const cb = (agent as any)._getStoreImageCallback();
@@ -2650,11 +2493,7 @@ describe("MainAgent", () => {
       const settings = testSettings();
       // Vision enabled by default
 
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings,
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
 
       // Mock the imageManager to avoid filesystem operations
       const mockStore = mock(() =>
@@ -2682,11 +2521,7 @@ describe("MainAgent", () => {
       // Disable vision explicitly
       (settings as any).vision = { enabled: false };
 
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings,
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
 
       const fn = agent.getStoreImageFn();
       expect(fn).toBeUndefined();
@@ -2697,11 +2532,7 @@ describe("MainAgent", () => {
       const settings = testSettings();
       // Vision is enabled by default
 
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings,
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
 
       const fn = agent.getStoreImageFn();
       expect(fn).toBeDefined();
@@ -2712,11 +2543,7 @@ describe("MainAgent", () => {
       const model = createReplyModel("ok");
       const settings = testSettings();
 
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings,
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
 
       // Replace the imageManager with a mock to avoid filesystem operations
       const mockStore = mock(() =>
@@ -2736,11 +2563,7 @@ describe("MainAgent", () => {
   describe("skills getter", () => {
     it("should expose the skill registry", async () => {
       const model = createReplyModel("ok");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
       const skills = agent.skills;
       expect(skills).toBeDefined();
@@ -2752,11 +2575,7 @@ describe("MainAgent", () => {
   describe("projects getter", () => {
     it("should expose the project manager", async () => {
       const model = createReplyModel("ok");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
       const projects = agent.projects;
       expect(projects).toBeDefined();
@@ -2967,106 +2786,10 @@ describe("MainAgent", () => {
     }, 10_000);
   });
 
-  // ── registerAdapter reply routing tests ──
-
-  describe("registerAdapter reply routing", () => {
-    it("should route reply to matching adapter", async () => {
-      const model = createReplyModel("routed reply");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
-      const delivered: OutboundMessage[] = [];
-      const mockAdapter = {
-        type: "test-channel" as const,
-        deliver: mock(async (msg: OutboundMessage) => { delivered.push(msg); }),
-        start: mock(async () => {}),
-        stop: mock(async () => {}),
-      } as unknown as import("@pegasus/channels/types.ts").ChannelAdapter;
-
-      agent.registerAdapter(mockAdapter);
-
-      // Trigger the reply callback directly
-      const replyCallback = (agent as any).replyCallback;
-      expect(replyCallback).toBeDefined();
-
-      replyCallback({
-        text: "test message",
-        channel: { type: "test-channel", channelId: "ch1" },
-      });
-
-      await Bun.sleep(50);
-      expect(mockAdapter.deliver).toHaveBeenCalledTimes(1);
-    });
-
-    it("should log warning when no adapter matches channel type", async () => {
-      const model = createReplyModel("ok");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
-      const mockAdapter = {
-        type: "slack" as const,
-        deliver: mock(async () => {}),
-        start: mock(async () => {}),
-        stop: mock(async () => {}),
-      } as unknown as import("@pegasus/channels/types.ts").ChannelAdapter;
-
-      agent.registerAdapter(mockAdapter);
-
-      // Send to a channel type that has no adapter
-      const replyCallback = (agent as any).replyCallback;
-      // This should not throw, just log warning
-      replyCallback({
-        text: "unroutable message",
-        channel: { type: "unknown-channel", channelId: "ch1" },
-      });
-
-      await Bun.sleep(50);
-      expect(mockAdapter.deliver).not.toHaveBeenCalled();
-    });
-
-    it("should handle adapter deliver failure gracefully", async () => {
-      const model = createReplyModel("ok");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
-      const mockAdapter = {
-        type: "cli" as const,
-        deliver: mock(async () => { throw new Error("deliver failed"); }),
-        start: mock(async () => {}),
-        stop: mock(async () => {}),
-      } as unknown as import("@pegasus/channels/types.ts").ChannelAdapter;
-
-      agent.registerAdapter(mockAdapter);
-
-      const replyCallback = (agent as any).replyCallback;
-      // Should not throw even when deliver fails
-      replyCallback({
-        text: "will fail delivery",
-        channel: { type: "cli", channelId: "ch1" },
-      });
-
-      await Bun.sleep(50);
-      expect(mockAdapter.deliver).toHaveBeenCalledTimes(1);
-    });
-  });
-
   describe("tick mechanism", () => {
     async function createAndStartAgent(): Promise<MainAgent> {
       const model = createReplyModel("ok");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model) });
       await agent.start();
       return agent;
     }
@@ -3185,7 +2908,7 @@ describe("MainAgent", () => {
       };
 
       const settings = SettingsSchema.parse({ dataDir: tmpDir, logLevel: "warn", authDir: "/tmp/pegasus-test-auth" });
-      const agent = new MainAgent({ models: createMockModelRegistry(model), persona: testPersona, settings });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
       await agent.start();
 
       // Before reload: dynamic-skill should already be loaded (in global skill dir)
@@ -3270,12 +2993,7 @@ describe("MainAgent", () => {
       const projectAdapter = new ProjectAdapter(workerAdapter);
 
       const settings = SettingsSchema.parse({ dataDir: tmpDir, logLevel: "warn", authDir: "/tmp/pegasus-test-auth" });
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings,
-        _projectAdapter: projectAdapter,
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings, projectAdapter: projectAdapter });
       await agent.start();
 
       const replies: OutboundMessage[] = [];
@@ -3326,7 +3044,7 @@ describe("MainAgent", () => {
       };
 
       const settings = testSettings();
-      const agent = new MainAgent({ models: createMockModelRegistry(model), persona: testPersona, settings });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
       await agent.start();
 
       const replies: OutboundMessage[] = [];
@@ -3375,11 +3093,7 @@ describe("MainAgent", () => {
 
     it("should allow CLI messages to reach the queue (bypass trust check)", async () => {
       const model = createReplyModel("Hello from CLI!");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: trustSettings(),
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings: trustSettings() });
 
       await agent.start();
 
@@ -3397,11 +3111,7 @@ describe("MainAgent", () => {
 
     it("should allow internal channel messages (project, subagent) to bypass trust check", async () => {
       const model = createReplyModel("Project update received!");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: trustSettings(),
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings: trustSettings() });
 
       await agent.start();
 
@@ -3426,11 +3136,7 @@ describe("MainAgent", () => {
       store.add("telegram", "user123");
 
       const model = createReplyModel("Hello, owner!");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: trustSettings(),
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings: trustSettings() });
 
       await agent.start();
 
@@ -3452,11 +3158,7 @@ describe("MainAgent", () => {
     it("should discard messages from no-owner-configured channels and inject notification", async () => {
       // No owners registered for any channel type
       const model = createMonologueModel("Processing notification...");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: trustSettings(),
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings: trustSettings() });
 
       await agent.start();
       agent.onReply(() => {});
@@ -3484,11 +3186,7 @@ describe("MainAgent", () => {
 
     it("should rate-limit no-owner notifications to once per hour", async () => {
       const model = createMonologueModel("thinking...");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: trustSettings(),
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings: trustSettings() });
 
       await agent.start();
       agent.onReply(() => {});
@@ -3541,14 +3239,14 @@ describe("MainAgent", () => {
       } as unknown as WorkerAdapter;
       const projectAdapter = new ProjectAdapter(mockWA);
 
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: trustSettings(),
-        _projectAdapter: projectAdapter,
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings: trustSettings(), projectAdapter: projectAdapter });
 
       await agent.start();
+
+      // Wire projectAdapter (PegasusApp normally does this)
+      projectAdapter.setModelRegistry(createMockModelRegistry(model));
+      await projectAdapter.start({ send: (msg) => agent.send(msg) });
+
       agent.onReply(() => {});
 
       // Send from a non-owner userId
@@ -3603,17 +3301,23 @@ describe("MainAgent", () => {
       } as unknown as WorkerAdapter;
       const projectAdapter = new ProjectAdapter(mockWA);
 
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: trustSettings(),
-        _projectAdapter: projectAdapter,
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings: trustSettings(), projectAdapter: projectAdapter });
 
       await agent.start();
 
+      // Wire projectAdapter (PegasusApp normally does this)
+      projectAdapter.setModelRegistry(createMockModelRegistry(model));
+      await projectAdapter.start({ send: (msg) => agent.send(msg) });
+
       const replies: OutboundMessage[] = [];
       agent.onReply((msg) => replies.push(msg));
+
+      // Wire channel project replies to agent's reply callback (PegasusApp normally does this)
+      projectAdapter.setOnReply((msg: OutboundMessage) => {
+        // Forward to agent's _onReply callback (set by onReply())
+        const onReplyFn = (agent as any)._onReply;
+        if (onReplyFn) onReplyFn(msg);
+      });
 
       // The onReply callback should have been set on the WorkerAdapter
       expect(capturedOnReply).not.toBeNull();
@@ -3635,11 +3339,7 @@ describe("MainAgent", () => {
 
     it("should expose owner store via getter", () => {
       const model = createReplyModel("ok");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: trustSettings(),
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
       expect(agent.owner).toBeDefined();
       expect(agent.owner).toBeInstanceOf(OwnerStore);
@@ -3660,11 +3360,7 @@ describe("MainAgent", () => {
         },
       };
 
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: trustSettings(),
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
       await agent.start();
       agent.onReply(() => {});
@@ -3684,11 +3380,7 @@ describe("MainAgent", () => {
   describe("tick with active work", () => {
     it("should inject status message and queue think when active tasks exist", async () => {
       const model = createMonologueModel("noted");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model) });
       await agent.start();
       agent.onReply(() => {});
 
@@ -3736,11 +3428,7 @@ describe("MainAgent", () => {
 
     it("should include subagent count in tick status", async () => {
       const model = createMonologueModel("noted");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model) });
       await agent.start();
       agent.onReply(() => {});
 
@@ -3792,11 +3480,7 @@ describe("MainAgent", () => {
       const settings = testSettings();
       (settings as any).vision = { enabled: false };
 
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings,
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
 
       // imageManager is null when vision disabled
       const result = await (agent as any)._cachedImageRead("img-123");
@@ -3805,11 +3489,7 @@ describe("MainAgent", () => {
 
     it("should return cached result on second call", async () => {
       const model = createReplyModel("ok");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
       const mockRead = mock(() =>
         Promise.resolve({ data: "base64data", mimeType: "image/png" }),
@@ -3829,11 +3509,7 @@ describe("MainAgent", () => {
 
     it("should return null and not cache when imageManager.read returns null", async () => {
       const model = createReplyModel("ok");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
       const mockRead = mock(() => Promise.resolve(null));
       (agent as any).imageManager = { read: mockRead, store: mock(), close: mock() };
@@ -3846,32 +3522,12 @@ describe("MainAgent", () => {
     }, 10_000);
   });
 
-  // ── hasQueuedWork ──
-
-  describe("hasQueuedWork", () => {
-    it("should always return false (conservative approach)", async () => {
-      const model = createReplyModel("ok");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
-
-      const result = (agent as any).hasQueuedWork();
-      expect(result).toBe(false);
-    }, 5_000);
-  });
-
   // ── buildSystemPrompt override ──
 
   describe("buildSystemPrompt", () => {
     it("should return cached system prompt after start", async () => {
       const model = createMonologueModel("thinking");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model) });
       await agent.start();
 
       // _systemPrompt is set during onStart via _buildSystemPrompt
@@ -3891,11 +3547,7 @@ describe("MainAgent", () => {
   describe("TaskRunner integration", () => {
     it("should expose _taskRunner getter after start", async () => {
       const model = createReplyModel("ok");
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
       await agent.start();
 
@@ -3953,11 +3605,7 @@ describe("MainAgent", () => {
         },
       };
 
-      const agent = new MainAgent({
-        models: createMockModelRegistry(model),
-        persona: testPersona,
-        settings: testSettings(),
-      });
+      const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
       await agent.start();
       agent.onReply(() => {});
