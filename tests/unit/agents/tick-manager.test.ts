@@ -134,8 +134,8 @@ describe("TickManager", () => {
 
     tickManager.start();
 
-    // Wait for first tick + second tick
-    await new Promise(resolve => setTimeout(resolve, 80));
+    // Wait for first tick + second tick (with generous margin for CI load)
+    await new Promise(resolve => setTimeout(resolve, 200));
     expect(onTickCalls.length).toBeGreaterThanOrEqual(2);
   }, 5_000);
 

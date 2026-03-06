@@ -279,7 +279,7 @@ describe("MainAgent", () => {
     await agent.stop();
   }, 10_000);
 
-  it("should expose taskAgent getter", async () => {
+  it("should expose _taskRunner getter after start", async () => {
     const model = createReplyModel("ok");
     const agent = new MainAgent({
       models: createMockModelRegistry(model),
@@ -289,8 +289,7 @@ describe("MainAgent", () => {
 
     await agent.start();
 
-    expect(agent.taskAgent).toBeDefined();
-    expect(agent.taskAgent.isRunning).toBe(true);
+    expect(agent._taskRunner).toBeDefined();
 
     await agent.stop();
   }, 10_000);
@@ -3733,9 +3732,10 @@ describe("MainAgent", () => {
       await agent.start();
       agent.onReply(() => {});
 
-      // Send a message first so lastChannel is set
-      agent.send({ text: "hi", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(50);
+      // Set lastChannel directly — avoids triggering _think via send()
+      (agent as any).lastChannel = { type: "cli", channelId: "test" };
+      // Stub _think to prevent async side effects (we only test tick message injection)
+      (agent as any)._think = async () => {};
 
       // Mock TaskRunner.activeCount to return > 0 (TickManager now reads from TaskRunner)
       const origActiveCount = Object.getOwnPropertyDescriptor(
@@ -3784,9 +3784,10 @@ describe("MainAgent", () => {
       await agent.start();
       agent.onReply(() => {});
 
-      // Send a message first so lastChannel is set
-      agent.send({ text: "hi", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(50);
+      // Set lastChannel directly — avoids triggering _think via send()
+      (agent as any).lastChannel = { type: "cli", channelId: "test" };
+      // Stub _think to prevent async side effects (we only test tick message injection)
+      (agent as any)._think = async () => {};
 
       // Mock subAgentManager.activeCount to return > 0
       const subMgr = (agent as any).subAgentManager;
@@ -3820,8 +3821,6 @@ describe("MainAgent", () => {
 
       tick.stop();
       await agent.stop();
-      // Allow any fire-and-forget async work to settle after agent.stop()
-      await Bun.sleep(100);
     }, 10_000);
   });
 

@@ -1,5 +1,4 @@
-export { Agent } from "./agents/agent.ts";
-export type { AgentDeps } from "./agents/agent.ts";
+export type { TaskNotification } from "./agents/task-runner.ts";
 export { EventBus, EventType, createEvent, deriveEvent, effectivePriority } from "./events/index.ts";
 export type { Event, EventHandler } from "./events/index.ts";
 export { TaskFSM, TaskRegistry, TaskState } from "./task/index.ts";
