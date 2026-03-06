@@ -5,13 +5,16 @@
  * and reply routing. Adds multi-channel security, task/subagent delegation,
  * skills, MCP integration, memory, vision, and compaction.
  *
+ * All infrastructure subsystems (auth, MCP, skills, tasks, etc.) are injected
+ * by PegasusApp — MainAgent never self-initializes them.
+ *
  * Key overrides:
  *   - send()            → security classification before queuing
  *   - _handleMessage()  → custom formatting, subagent completion, skill commands
  *   - _think()          → image hydration, direct LLM call (no processStep)
  *   - beforeLLMCall()   → session compaction using this.models (not placeholder)
  *   - onLLMError()      → overflow recovery with session reload + re-hydration
- *   - onStart()/onStop()→ complex lifecycle management
+ *   - onStart()/onStop()→ session lifecycle (load, memory, prompt; tick + drain)
  *   - buildSystemPrompt()→ cached system prompt with skills/projects/etc.
  */
 
@@ -37,11 +40,10 @@ import type { ToolCall } from "../models/tool.ts";
 import { computeTokenBudget, estimateTokensFromChars, summarizeMessages, calculateMaxToolResultChars, truncateToolResult, isContextOverflowError, MAX_OVERFLOW_COMPACT_RETRIES, ModelLimitsCache } from "../context/index.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import path from "node:path";
-import os from "node:os";
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { SkillRegistry } from "../skills/index.ts";
-import { AITaskTypeRegistry, loadAITaskTypeDefinitions } from "../aitask-types/index.ts";
+import { AITaskTypeRegistry } from "../aitask-types/index.ts";
 import { ProjectManager } from "../projects/manager.ts";
 import { ProjectAdapter } from "../projects/project-adapter.ts";
 import { SubAgentManager } from "../subagent/manager.ts";
@@ -56,20 +58,17 @@ import { EventBus } from "../events/bus.ts";
 
 // Main Agent's curated tool set
 import { mainAgentTools } from "../tools/builtins/index.ts";
-import { MCPManager, wrapMCPTools } from "../mcp/index.ts";
-import type { MCPServerConfig } from "../mcp/index.ts";
-import type { Tool, ToolContext } from "../tools/types.ts";
+import { MCPManager } from "../mcp/index.ts";
 import { TokenRefreshMonitor } from "../mcp/auth/refresh-monitor.ts";
-import type { DeviceCodeAuthConfig } from "../mcp/auth/types.ts";
+import type { Tool, ToolContext } from "../tools/types.ts";
 import { buildMainAgentPaths } from "../storage/paths.ts";
 import type { AgentStorePaths } from "../storage/paths.ts";
 
 const logger = getLogger("main_agent");
 
 /**
- * Injected subsystems — provided by PegasusApp when running in orchestrated mode.
- * When present, MainAgent skips self-initialization of these subsystems in onStart().
- * When absent (backward compat), MainAgent creates them itself as before.
+ * Injected subsystems — provided by PegasusApp.
+ * MainAgent requires all subsystems to be injected; it never self-initializes.
  */
 export interface InjectedSubsystems {
   modelLimitsCache: ModelLimitsCache;
@@ -94,18 +93,14 @@ export interface MainAgentDeps {
   models: ModelRegistry;
   persona: Persona;
   settings?: Settings;
-  /** Optional ProjectAdapter for dependency injection (testing). */
-  _projectAdapter?: ProjectAdapter;
-  /** Optional injected subsystems from PegasusApp. When provided, MainAgent skips self-init. */
-  injected?: InjectedSubsystems;
+  /** Injected subsystems from PegasusApp — required. */
+  injected: InjectedSubsystems;
 }
 
 export class MainAgent extends ConversationAgent {
   private models: ModelRegistry;
   private settings: Settings;
   private taskRunner!: TaskRunner; // Task execution — initialized in start()
-  private mcpManager: MCPManager | null = null;
-  private tokenRefreshMonitor: TokenRefreshMonitor | null = null;
   private replyCallback: ((msg: OutboundMessage) => void) | null = null;
   private adapters: ChannelAdapter[] = [];
   private _mainOverflowRetryCount = 0;
@@ -121,19 +116,11 @@ export class MainAgent extends ConversationAgent {
   private ownerStore: OwnerStore;
   private _channelNotifyTimes = new Map<string, number>();
   private _systemPrompt: string = "";
-  private authManager!: AuthManager;
   private reflectionOrchestrator!: ReflectionOrchestrator;
-  private _mcpAuthDir: string;
   private tickManager!: TickManager;
 
-  /**
-   * When true, subsystems were injected by PegasusApp.
-   * onStart() skips infrastructure init; onStop() skips infrastructure shutdown.
-   */
-  private _injectedMode = false;
-
-  /** Pre-wrapped MCP tools from PegasusApp (avoids double-wrapping in injected mode). */
-  private _injectedMcpTools: Tool[] = [];
+  /** Injected subsystems from PegasusApp (stored for onStart MCP tool registration). */
+  private injected: InjectedSubsystems;
 
   // ── Custom tool executor for MainAgent's rich ToolContext ──
   private mainToolExecutor: ToolExecutor;
@@ -167,8 +154,6 @@ export class MainAgent extends ConversationAgent {
     this.settings = settings;
     this.mainStorePaths = mainStorePaths;
 
-    this._mcpAuthDir = path.join(this.settings.authDir, "mcp");
-
     // Owner trust store for channel security
     this.ownerStore = new OwnerStore(this.settings.authDir);
 
@@ -179,57 +164,20 @@ export class MainAgent extends ConversationAgent {
       (this.settings.tools?.timeout ?? 30) * 1000,
     );
 
-    // ── Injected mode: use subsystems from PegasusApp ──
-    if (deps.injected) {
-      this._injectedMode = true;
-      const inj = deps.injected;
-      this.modelLimitsCache = inj.modelLimitsCache;
-      this.authManager = inj.authManager;
-      this.mcpManager = inj.mcpManager;
-      this.tokenRefreshMonitor = inj.tokenRefreshMonitor;
-      this.skillRegistry = inj.skillRegistry;
-      this.skillDirs = inj.skillDirs;
-      this.aiTaskTypeRegistry = inj.aiTaskTypeRegistry;
-      this.taskRunner = inj.taskRunner;
-      this.projectManager = inj.projectManager;
-      this.projectAdapter = inj.projectAdapter;
-      this.subAgentManager = inj.subAgentManager;
-      this.imageManager = inj.imageManager;
-      this.tickManager = inj.tickManager;
-      this.reflectionOrchestrator = inj.reflectionOrchestrator;
-      this._injectedMcpTools = inj.mcpTools;
-    } else {
-      // ── Self-init mode: MainAgent creates everything itself (backward compat) ──
-
-      // Skill system
-      this.skillRegistry = new SkillRegistry();
-      this.aiTaskTypeRegistry = new AITaskTypeRegistry();
-
-      // Projects
-      const projectsDir = path.join(this.settings.dataDir, "agents", "projects");
-      this.projectManager = new ProjectManager(projectsDir);
-      this.projectAdapter = deps._projectAdapter ?? new ProjectAdapter();
-
-      // Vision: create ImageManager if enabled
-      const visionConfig = this.settings.vision;
-      if (visionConfig?.enabled !== false) {
-        const mediaDir = path.join(this.settings.dataDir, "media");
-        this.imageManager = new ImageManager(mediaDir, {
-          maxDimensionPx: visionConfig?.maxDimensionPx,
-          maxBytes: visionConfig?.maxImageBytes,
-        });
-      }
-
-      // Tick manager — periodic status injection for long-running work
-      this.tickManager = new TickManager({
-        getActiveWorkCount: () => ({
-          tasks: this.taskRunner?.activeCount ?? 0,
-          subagents: this.subAgentManager?.activeCount ?? 0,
-        }),
-        hasPendingWork: () => this.hasQueuedWork(),
-        onTick: (activeTasks, activeSubAgents) => this._handleTick(activeTasks, activeSubAgents),
-      });
-    }
+    // ── Store injected subsystems from PegasusApp ──
+    this.injected = deps.injected;
+    const inj = deps.injected;
+    this.modelLimitsCache = inj.modelLimitsCache;
+    this.skillRegistry = inj.skillRegistry;
+    this.skillDirs = inj.skillDirs;
+    this.aiTaskTypeRegistry = inj.aiTaskTypeRegistry;
+    this.taskRunner = inj.taskRunner;
+    this.projectManager = inj.projectManager;
+    this.projectAdapter = inj.projectAdapter;
+    this.subAgentManager = inj.subAgentManager;
+    this.imageManager = inj.imageManager;
+    this.tickManager = inj.tickManager;
+    this.reflectionOrchestrator = inj.reflectionOrchestrator;
   }
 
   // ═══════════════════════════════════════════════════
@@ -287,13 +235,6 @@ export class MainAgent extends ConversationAgent {
     }
   }
 
-  /** Check if there are queued items (used by TickManager). */
-  private hasQueuedWork(): boolean {
-    // Access parent's queue length via pushQueue side-effect check isn't possible,
-    // so we track this through the processing state.
-    // The TickManager uses this to avoid injecting ticks during active processing.
-    return false; // Conservative: let TickManager decide based on active work count
-  }
 
   // ═══════════════════════════════════════════════════
   // Lifecycle overrides
@@ -310,190 +251,11 @@ export class MainAgent extends ConversationAgent {
       await this._injectMemoryIndex();
     }
 
-    // In injected mode, PegasusApp already initialized all infrastructure.
-    // We only need to register pre-wrapped MCP tools and build the system prompt.
-    if (this._injectedMode) {
-      // Register pre-wrapped MCP tools in MainAgent's own tool registry (for conversation).
-      // PegasusApp already wrapped them once — no need to re-call listTools/wrapMCPTools.
-      for (const tool of this._injectedMcpTools) {
-        this.toolRegistry.register(tool);
-      }
-
-      // Build system prompt once (stable for LLM prefix caching)
-      this._systemPrompt = this._buildSystemPrompt();
-
-      logger.info(
-        { sessionMessages: this.sessionMessages.length, injectedMode: true },
-        "main_agent_started",
-      );
-      return;
+    // Register pre-wrapped MCP tools in MainAgent's own tool registry (for conversation).
+    // PegasusApp already wrapped them once — no need to re-call listTools/wrapMCPTools.
+    for (const tool of this.injected.mcpTools) {
+      this.toolRegistry.register(tool);
     }
-
-    // ── Self-init mode: MainAgent creates all infrastructure itself ──
-
-    // Initialize model limits cache for provider-aware token budget resolution
-    const modelLimitsCacheDir = path.join(os.homedir(), ".pegasus", "model-limits");
-    this.modelLimitsCache = new ModelLimitsCache(modelLimitsCacheDir);
-
-    // ReflectionOrchestrator — post-session memory extraction
-    this.reflectionOrchestrator = new ReflectionOrchestrator({
-      models: this.models,
-      persona: this.persona,
-      toolExecutor: this.mainToolExecutor,
-      memoryDir: this.mainStorePaths.memory!,
-      settings: this.settings,
-      modelLimitsCache: this.modelLimitsCache,
-    });
-
-    // Authenticate providers and fetch model limits via AuthManager
-    this.authManager = new AuthManager({
-      settings: this.settings,
-      models: this.models,
-      modelLimitsCache: this.modelLimitsCache,
-      credDir: this.settings.authDir,
-    });
-    await this.authManager.initialize();
-
-    // Task execution — created AFTER codex auth so models can resolve codex models
-
-    // Connect to MCP servers and register tools in MainAgent
-    const mcpConfigs = (this.settings.tools?.mcpServers ?? []) as MCPServerConfig[];
-    if (mcpConfigs.length > 0) {
-      this.mcpManager = new MCPManager(this._mcpAuthDir);
-      await this.mcpManager.connectAll(mcpConfigs);
-
-      // Register in MainAgent's own tool registry (for conversation)
-      for (const config of mcpConfigs.filter((c) => c.enabled)) {
-        try {
-          const mcpTools = await this.mcpManager.listTools(config.name);
-          const wrapped = wrapMCPTools(config.name, mcpTools, this.mcpManager);
-          for (const tool of wrapped) {
-            this.toolRegistry.register(tool);
-          }
-        } catch (err) {
-          logger.warn(
-            { server: config.name, error: errorToString(err) },
-            "main_agent_mcp_tools_register_failed",
-          );
-        }
-      }
-      logger.info(
-        { servers: mcpConfigs.filter((c) => c.enabled).length },
-        "mcp_connected",
-      );
-
-      // Start token refresh monitor for device_code servers
-      const deviceCodeConfigs = mcpConfigs.filter(
-        (c): c is MCPServerConfig & { auth: DeviceCodeAuthConfig } =>
-          c.enabled && c.auth?.type === "device_code",
-      );
-      if (deviceCodeConfigs.length > 0) {
-        this.tokenRefreshMonitor = new TokenRefreshMonitor(this.mcpManager.getTokenStore());
-        for (const config of deviceCodeConfigs) {
-          this.tokenRefreshMonitor.track(config.name, config.auth);
-        }
-        this.tokenRefreshMonitor.onEvent((event) => {
-          logger.warn({ authEvent: event.type, server: event.server }, event.message);
-        });
-        logger.info(
-          { servers: deviceCodeConfigs.length },
-          "token_refresh_monitor_started",
-        );
-      }
-    }
-
-    // Load skills from builtin, global, and main-only directories
-    // Priority: builtin < global < main-only (later dirs override earlier)
-    const builtinSkillDir = path.join(process.cwd(), "skills");
-    const globalSkillDir = path.join(this.settings.dataDir, "skills");
-    const mainSkillDir = path.join(this.settings.dataDir, "agents", "main", "skills");
-    this.skillDirs = [
-      { dir: builtinSkillDir, source: "builtin" },
-      { dir: globalSkillDir, source: "user" },
-      { dir: mainSkillDir, source: "user" },
-    ];
-    this.skillRegistry.reloadFromDirs(this.skillDirs);
-    logger.info({ skillCount: this.skillRegistry.listAll().length }, "skills_loaded");
-
-    // Load AI task type definitions from builtin and user directories
-    const builtinAITaskTypeDir = path.join(process.cwd(), "aitask-types");
-    const userAITaskTypeDir = path.join(this.settings.dataDir, "aitask-types");
-    this.aiTaskTypeRegistry.registerMany(loadAITaskTypeDefinitions(builtinAITaskTypeDir, userAITaskTypeDir));
-    logger.info({ aiTaskTypeCount: this.aiTaskTypeRegistry.listAll().length }, "aitask_types_loaded");
-
-    // Initialize TaskRunner — uses AITaskTypeRegistry for per-type tool resolution
-    this.taskRunner = new TaskRunner({
-      model: this.models.getForTier("balanced"),
-      taskTypeRegistry: this.aiTaskTypeRegistry,
-      tasksDir: this.mainStorePaths.tasks,
-      storeImage: this._getStoreImageCallback(),
-      contextWindow: this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
-      onNotification: (notification) => {
-        this.pushQueue({ kind: "task_notify", notification } as QueueItem);
-      },
-    });
-
-    // Register MCP tools in TaskRunner (if MCP is active)
-    if (this.mcpManager && mcpConfigs.length > 0) {
-      const mcpToolsList: Tool[] = [];
-      for (const config of mcpConfigs.filter((c) => c.enabled)) {
-        try {
-          const mcpToolsForRunner = await this.mcpManager.listTools(config.name);
-          mcpToolsList.push(...wrapMCPTools(config.name, mcpToolsForRunner, this.mcpManager));
-        } catch { /* already logged during MainAgent MCP registration */ }
-      }
-      if (mcpToolsList.length > 0) {
-        this.taskRunner.setAdditionalTools(mcpToolsList);
-      }
-    }
-
-    // Load projects
-    this.projectManager.loadAll();
-
-    // Set up ProjectAdapter
-    this.projectAdapter.setModelRegistry(this.models);
-    this.registerAdapter(this.projectAdapter);
-    await this.projectAdapter.start({ send: (msg) => this.send(msg) });
-
-    // Wire channel Project direct replies to channel adapters
-    this.projectAdapter.setOnReply((msg: OutboundMessage) => {
-      if (this.replyCallback) {
-        this.replyCallback(msg);
-      }
-    });
-
-    // Resume active projects
-    for (const project of this.projectManager.list("active")) {
-      try {
-        this.projectAdapter.startProject(project.name, project.projectDir);
-        logger.info({ project: project.name }, "project_resumed");
-      } catch (err) {
-        logger.warn({ project: project.name, error: errorToString(err) }, "project_resume_failed");
-      }
-    }
-
-    // Set up SubAgentManager (shares WorkerAdapter with ProjectAdapter)
-    const workerAdapter = this.projectAdapter.getWorkerAdapter();
-    this.subAgentManager = new SubAgentManager(workerAdapter, this.settings.dataDir);
-
-    // Handle SubAgent Worker close events (compose with ProjectAdapter's handler)
-    workerAdapter.addOnWorkerClose((channelType, channelId) => {
-      if (channelType === "subagent" && this.subAgentManager) {
-        const entry = this.subAgentManager.get(channelId);
-        if (entry && entry.status === "active") {
-          // Worker closed while still active and not marked done — this is a crash.
-          // Normal completion path: Worker sends completion notify → _handleMessage
-          // calls markDone() → Worker auto-shuts down → this handler sees non-active status.
-          this.subAgentManager.fail(channelId).catch((err) => {
-            logger.warn(
-              { subagentId: channelId, error: errorToString(err) },
-              "subagent_crash_fail_failed",
-            );
-          });
-        }
-        // If already completed/failed via markDone(), the close is expected — no action.
-      }
-    });
 
     // Build system prompt once (stable for LLM prefix caching)
     this._systemPrompt = this._buildSystemPrompt();
@@ -514,52 +276,8 @@ export class MainAgent extends ConversationAgent {
     // will exit after the current item — no risk of hanging.
     await this.waitForQueueDrain();
 
-    // In injected mode, PegasusApp owns infrastructure shutdown.
+    // PegasusApp owns infrastructure shutdown.
     // MainAgent only needs to stop tick + drain queue (done above).
-    if (this._injectedMode) {
-      logger.info({ injectedMode: true }, "main_agent_stopped");
-      return;
-    }
-
-    // ── Self-init mode: shut down all infrastructure ──
-
-    // Stop active SubAgents first (they share the WorkerAdapter)
-    if (this.subAgentManager) {
-      const activeSubAgents = this.subAgentManager.list("active");
-      for (const entry of activeSubAgents) {
-        try {
-          await this.subAgentManager.complete(entry.id);
-        } catch (err) {
-          logger.warn(
-            { subagentId: entry.id, error: errorToString(err) },
-            "subagent_stop_failed",
-          );
-        }
-      }
-      this.subAgentManager = null;
-    }
-
-    // Stop project Workers
-    await this.projectAdapter.stop();
-
-    // Stop token refresh monitor
-    if (this.tokenRefreshMonitor) {
-      this.tokenRefreshMonitor.stop();
-      this.tokenRefreshMonitor = null;
-    }
-
-    // Disconnect MCP servers
-    if (this.mcpManager) {
-      await this.mcpManager.disconnectAll();
-      this.mcpManager = null;
-    }
-
-    // Close ImageManager
-    if (this.imageManager) {
-      this.imageManager.close();
-      this.imageManager = null;
-    }
-
     logger.info("main_agent_stopped");
   }
 
@@ -1665,7 +1383,6 @@ export class MainAgent extends ConversationAgent {
 
   /**
    * Push a task notification into the queue (used by PegasusApp's TaskRunner callback).
-   * Equivalent to the self-init mode's onNotification callback.
    */
   pushTaskNotification(notification: TaskNotification): void {
     this.pushQueue({ kind: "task_notify", notification } as QueueItem);
@@ -1696,8 +1413,8 @@ export class MainAgent extends ConversationAgent {
     this.subAgentManager = mgr;
   }
 
-  /** Whether this MainAgent is running in injected (PegasusApp) mode. */
+  /** Whether this MainAgent is running in injected (PegasusApp) mode. Always true. */
   get isInjectedMode(): boolean {
-    return this._injectedMode;
+    return true;
   }
 }

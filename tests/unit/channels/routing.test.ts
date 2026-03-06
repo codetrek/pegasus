@@ -18,6 +18,7 @@ import { ModelRegistry } from "@pegasus/infra/model-registry.ts";
 import type { LLMConfig } from "@pegasus/infra/config-schema.ts";
 import { OwnerStore } from "@pegasus/security/owner-store.ts";
 import { mkdir } from "node:fs/promises";
+import { createInjectedSubsystems } from "../../helpers/create-injected-subsystems.ts";
 
 const testDataDir = "/tmp/pegasus-test-routing";
 const testAuthDir = "/tmp/pegasus-test-routing-auth";
@@ -57,6 +58,16 @@ function testSettings() {
     agent: { maxActiveTasks: 10 },
     authDir: testAuthDir,
   });
+}
+
+function createMainAgent(opts: { models: ModelRegistry }): MainAgent {
+  const settings = testSettings();
+  const injected = createInjectedSubsystems({
+    models: opts.models,
+    settings,
+    persona: testPersona,
+  });
+  return new MainAgent({ models: opts.models, persona: testPersona, settings, injected });
 }
 
 /** Create a simple mock adapter that records delivered messages. */
@@ -114,11 +125,7 @@ describe("Multi-channel routing", () => {
       },
     };
 
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: testSettings(),
-    });
+    const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
     const cliMock = createMockAdapter("cli");
     const telegramMock = createMockAdapter("telegram");
@@ -169,11 +176,7 @@ describe("Multi-channel routing", () => {
       },
     };
 
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: testSettings(),
-    });
+    const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
     const cliMock = createMockAdapter("cli");
     agent.registerAdapter(cliMock.adapter);
@@ -240,11 +243,7 @@ describe("Multi-channel routing", () => {
       },
     };
 
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: testSettings(),
-    });
+    const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
     const cliMock = createMockAdapter("cli");
     const telegramMock = createMockAdapter("telegram");
@@ -301,11 +300,7 @@ describe("Multi-channel routing", () => {
       },
     };
 
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: testSettings(),
-    });
+    const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
     // Adapter that throws on deliver
     const brokenAdapter: ChannelAdapter = {
@@ -355,11 +350,7 @@ describe("Multi-channel routing", () => {
       },
     };
 
-    const agent = new MainAgent({
-      models: createMockModelRegistry(model),
-      persona: testPersona,
-      settings: testSettings(),
-    });
+    const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
     await agent.start();
 

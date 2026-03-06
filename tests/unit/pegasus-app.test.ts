@@ -303,4 +303,71 @@ describe("PegasusApp", () => {
 
     await app.stop();
   }, 15_000);
+
+  it("should return undefined from getStoreImageFn before start", () => {
+    const model = createMonologueModel("thinking...");
+    const app = new PegasusApp({
+      models: createMockModelRegistry(model),
+      persona: testPersona,
+      settings: testSettings(),
+    });
+
+    // Before start, imageManager is not initialized
+    const fn = app.getStoreImageFn();
+    expect(fn).toBeUndefined();
+  });
+
+  it("should support multiple adapters", async () => {
+    const model = createReplyModel("Multi-adapter reply!", "test", "cli");
+    const app = new PegasusApp({
+      models: createMockModelRegistry(model),
+      persona: testPersona,
+      settings: testSettings(),
+    });
+
+    const cliReplies: OutboundMessage[] = [];
+    const otherReplies: OutboundMessage[] = [];
+
+    app.registerAdapter({
+      type: "cli",
+      async start() {},
+      async deliver(msg) { cliReplies.push(msg); },
+      async stop() {},
+    });
+    app.registerAdapter({
+      type: "other",
+      async start() {},
+      async deliver(msg) { otherReplies.push(msg); },
+      async stop() {},
+    });
+
+    await app.start();
+
+    app.mainAgent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
+    await Bun.sleep(100);
+
+    // Reply should go to CLI adapter only
+    expect(cliReplies.length).toBeGreaterThanOrEqual(1);
+    expect(otherReplies).toHaveLength(0);
+
+    await app.stop();
+  }, 15_000);
+
+  it("mainAgent should have skills, taskRunner, and projects accessible", async () => {
+    const model = createMonologueModel("thinking...");
+    const app = new PegasusApp({
+      models: createMockModelRegistry(model),
+      persona: testPersona,
+      settings: testSettings(),
+    });
+
+    await app.start();
+
+    const agent = app.mainAgent;
+    expect(agent.skills).toBeDefined();
+    expect(agent._taskRunner).toBeDefined();
+    expect(agent.projects).toBeDefined();
+
+    await app.stop();
+  }, 15_000);
 });
