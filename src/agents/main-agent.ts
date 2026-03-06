@@ -497,6 +497,15 @@ export class MainAgent extends ConversationAgent {
 
       const toolContext = this._buildToolContext();
 
+      // Pre-compute truncation budget once (same for all tools in this batch)
+      const toolBudget = computeTokenBudget({
+        modelId: this.models.getDefaultModelId(),
+        provider: this.models.getDefaultProvider(),
+        configContextWindow: this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
+        modelLimitsCache: this.modelLimitsCache,
+      });
+      const maxToolChars = calculateMaxToolResultChars(toolBudget.contextWindow, this.settings.context?.maxToolResultShare);
+
       for (const tc of result.toolCalls) {
         const toolResult = await this.mainToolExecutor.execute(
           tc.name,
@@ -513,13 +522,6 @@ export class MainAgent extends ConversationAgent {
           : `Error: ${toolResult.error}`;
 
         // Truncate large results
-        const toolBudget = computeTokenBudget({
-          modelId: this.models.getDefaultModelId(),
-          provider: this.models.getDefaultProvider(),
-          configContextWindow: this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
-          modelLimitsCache: this.modelLimitsCache,
-        });
-        const maxToolChars = calculateMaxToolResultChars(toolBudget.contextWindow, this.settings.context?.maxToolResultShare);
         const safeContent = rawContent.length > maxToolChars
           ? truncateToolResult(rawContent, maxToolChars)
           : rawContent;
@@ -613,7 +615,7 @@ export class MainAgent extends ConversationAgent {
 
   /**
    * Build a full ToolContext with all dependencies for self-executing tools.
-   * All tools (signal + generic) use the same context — no special-casing.
+   * All tools use the same context — no special-casing.
    */
   private _buildToolContext(): ToolContext {
     return {
