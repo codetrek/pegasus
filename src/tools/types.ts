@@ -69,7 +69,7 @@ export interface ToolContext {
   memoryDir?: string;
   sessionDir?: string;
   tasksDir?: string;
-  taskRegistry?: unknown; // TaskRegistry — used by task_status tool (loosely typed to avoid circular imports)
+  taskRegistry?: unknown; // TaskRunner — used by task_status tool (loosely typed to avoid circular imports)
   projectManager?: unknown; // ProjectManager — used by project tools (loosely typed to avoid circular imports)
   ownerStore?: unknown; // OwnerStore — used by trust tool (loosely typed to avoid circular imports)
   browserManager?: unknown; // BrowserManager — used by browser tools (loosely typed to avoid circular imports)

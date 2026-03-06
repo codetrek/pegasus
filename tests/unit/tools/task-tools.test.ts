@@ -1,250 +1,195 @@
 /**
  * Tests for task tools — task_list, task_replay.
+ *
+ * Uses the new SessionStore format (current.jsonl with messages)
+ * and enriched index.jsonl (with description, taskType, source).
  */
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { task_list, task_replay } from "../../../src/tools/builtins/task-tools.ts";
-import { TaskPersister } from "../../../src/task/persister.ts";
 import { rm, mkdir, appendFile } from "node:fs/promises";
 
 const testDir = "/tmp/pegasus-test-task-tools";
+const tasksDir = `${testDir}/tasks`;
+
+/** Write an index.jsonl entry. */
+async function writeIndex(entry: {
+  taskId: string;
+  date: string;
+  description?: string;
+  taskType?: string;
+  source?: string;
+}): Promise<void> {
+  await mkdir(tasksDir, { recursive: true });
+  await appendFile(
+    `${tasksDir}/index.jsonl`,
+    JSON.stringify(entry) + "\n",
+    "utf-8",
+  );
+}
+
+/** Write session messages to {date}/{taskId}/current.jsonl in SessionStore format. */
+async function writeSession(
+  taskId: string,
+  date: string,
+  messages: Array<{ role: string; content: string; toolCalls?: unknown[]; toolCallId?: string }>,
+): Promise<void> {
+  const sessionDir = `${tasksDir}/${date}/${taskId}`;
+  await mkdir(sessionDir, { recursive: true });
+  const lines = messages
+    .map((m, i) => JSON.stringify({ ts: Date.now() + i, ...m }))
+    .join("\n") + "\n";
+  await appendFile(`${sessionDir}/current.jsonl`, lines, "utf-8");
+}
 
 describe("task tools", () => {
-  let origDataDir: string | undefined;
-
   beforeEach(async () => {
-    origDataDir = process.env.PEGASUS_DATA_DIR;
-    process.env.PEGASUS_DATA_DIR = testDir;
     await rm(testDir, { recursive: true, force: true }).catch(() => {});
-    await mkdir(`${testDir}/tasks/2026-02-25`, { recursive: true });
+    await mkdir(testDir, { recursive: true });
   });
 
   afterEach(async () => {
-    if (origDataDir === undefined) {
-      delete process.env.PEGASUS_DATA_DIR;
-    } else {
-      process.env.PEGASUS_DATA_DIR = origDataDir;
-    }
     await rm(testDir, { recursive: true, force: true }).catch(() => {});
   });
 
   // ── task_list ─────────────────────────────────
 
   describe("task_list", () => {
-    it("should list tasks for a date from index.jsonl", async () => {
-      // Write index entries
-      await appendFile(
-        `${testDir}/tasks/index.jsonl`,
-        '{"taskId":"t1","date":"2026-02-25"}\n{"taskId":"t2","date":"2026-02-25"}\n',
-      );
+    it("should list tasks for a date from enriched index", async () => {
+      await writeIndex({ taskId: "t1", date: "2026-02-25", description: "Greeting task", taskType: "general", source: "user" });
+      await writeIndex({ taskId: "t2", date: "2026-02-25", description: "Search task", taskType: "web_search", source: "main-agent" });
 
-      // Write minimal JSONL logs so we can extract inputText and description
-      await appendFile(
-        `${testDir}/tasks/2026-02-25/t1.jsonl`,
-        '{"ts":1,"event":"TASK_CREATED","taskId":"t1","data":{"description":"Greeting task","inputText":"hello","source":"user"}}\n',
-      );
-      await appendFile(
-        `${testDir}/tasks/2026-02-25/t2.jsonl`,
-        '{"ts":2,"event":"TASK_CREATED","taskId":"t2","data":{"description":"Farewell task","inputText":"bye","source":"user"}}\n' +
-          '{"ts":3,"event":"TASK_COMPLETED","taskId":"t2","data":{"finalResult":{},"iterations":1}}\n',
-      );
-
-      const context = { taskId: "test", tasksDir: `${testDir}/tasks` };
-      const result = await task_list.execute(
-        { date: "2026-02-25" },
-        context,
-      );
+      const context = { taskId: "test", tasksDir };
+      const result = await task_list.execute({ date: "2026-02-25" }, context);
 
       expect(result.success).toBe(true);
-      const tasks = result.result as Array<{
-        taskId: string;
-        description: string;
-        inputText: string;
-        status: string;
-      }>;
+      const tasks = result.result as Array<{ taskId: string; description: string; taskType: string; source: string }>;
       expect(tasks).toHaveLength(2);
       expect(tasks[0]!.taskId).toBe("t1");
       expect(tasks[0]!.description).toBe("Greeting task");
-      expect(tasks[0]!.inputText).toBe("hello");
-      expect(tasks[0]!.status).toBe("in_progress");
+      expect(tasks[0]!.taskType).toBe("general");
+      expect(tasks[0]!.source).toBe("user");
       expect(tasks[1]!.taskId).toBe("t2");
-      expect(tasks[1]!.description).toBe("Farewell task");
-      expect(tasks[1]!.inputText).toBe("bye");
-      expect(tasks[1]!.status).toBe("completed");
+      expect(tasks[1]!.description).toBe("Search task");
+      expect(tasks[1]!.taskType).toBe("web_search");
+    }, 5000);
+
+    it("should handle legacy index entries without metadata", async () => {
+      // Old entries only have taskId + date
+      await writeIndex({ taskId: "old1", date: "2026-02-25" });
+
+      const context = { taskId: "test", tasksDir };
+      const result = await task_list.execute({ date: "2026-02-25" }, context);
+
+      expect(result.success).toBe(true);
+      const tasks = result.result as Array<{ taskId: string; description: string; taskType: string }>;
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0]!.taskId).toBe("old1");
+      expect(tasks[0]!.description).toBe("");
+      expect(tasks[0]!.taskType).toBe("general");
     }, 5000);
 
     it("should return empty list when no tasks exist for date", async () => {
-      const context = { taskId: "test", tasksDir: `${testDir}/tasks` };
-      const result = await task_list.execute(
-        { date: "2026-02-26" },
-        context,
-      );
+      const context = { taskId: "test", tasksDir };
+      const result = await task_list.execute({ date: "2026-02-26" }, context);
 
       expect(result.success).toBe(true);
       expect(result.result).toEqual([]);
     }, 5000);
 
     it("should return empty list when no index exists", async () => {
-      // testDir/tasks exists but no index.jsonl
-      const context = { taskId: "test", tasksDir: `${testDir}/tasks` };
-      const result = await task_list.execute(
-        { date: "2026-02-25" },
-        context,
-      );
+      const context = { taskId: "test", tasksDir };
+      const result = await task_list.execute({ date: "2026-02-25" }, context);
 
       expect(result.success).toBe(true);
       expect(result.result).toEqual([]);
-    }, 5000);
-
-    it("should handle corrupted index file gracefully", async () => {
-      // Write invalid content to index.jsonl — loadIndex swallows parse
-      // errors and returns an empty map, so task_list returns success with [].
-      await appendFile(`${testDir}/tasks/index.jsonl`, "not valid json\n");
-
-      const context = { taskId: "test", tasksDir: `${testDir}/tasks` };
-      const result = await task_list.execute(
-        { date: "2026-02-25" },
-        context,
-      );
-
-      expect(result.success).toBe(true);
-      expect(result.result).toEqual([]);
-    }, 5000);
-
-    it("should return error when loadIndex throws unexpectedly", async () => {
-      // Temporarily make loadIndex throw to cover the outer catch block
-      const original = TaskPersister.loadIndex;
-      TaskPersister.loadIndex = async () => {
-        throw new Error("disk read failure");
-      };
-      try {
-        const context = { taskId: "test", tasksDir: `${testDir}/tasks` };
-        const result = await task_list.execute(
-          { date: "2026-02-25" },
-          context,
-        );
-
-        expect(result.success).toBe(false);
-        expect(result.error).toBe("disk read failure");
-      } finally {
-        TaskPersister.loadIndex = original;
-      }
     }, 5000);
 
     it("should return error when tasksDir is missing from context", async () => {
       const context = { taskId: "test" };
-      const result = await task_list.execute(
-        { date: "2026-02-25" },
-        context,
-      );
+      const result = await task_list.execute({ date: "2026-02-25" }, context);
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("tasksDir is required but missing");
+    }, 5000);
+
+    it("should filter tasks by date correctly", async () => {
+      await writeIndex({ taskId: "t1", date: "2026-02-25", description: "Day 1" });
+      await writeIndex({ taskId: "t2", date: "2026-02-26", description: "Day 2" });
+
+      const context = { taskId: "test", tasksDir };
+      const result = await task_list.execute({ date: "2026-02-25" }, context);
+
+      expect(result.success).toBe(true);
+      const tasks = result.result as Array<{ taskId: string }>;
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0]!.taskId).toBe("t1");
     }, 5000);
   });
 
   // ── task_replay ─────────────────────────────────
 
   describe("task_replay", () => {
-    it("should return only messages from a task", async () => {
-      // Write index
-      await appendFile(
-        `${testDir}/tasks/index.jsonl`,
-        '{"taskId":"r1","date":"2026-02-25"}\n',
-      );
+    it("should replay messages from SessionStore", async () => {
+      await writeIndex({ taskId: "r1", date: "2026-02-25" });
+      await writeSession("r1", "2026-02-25", [
+        { role: "user", content: "hello" },
+        { role: "assistant", content: "hi there!" },
+      ]);
 
-      // Write event log with messages
-      const lines =
-        [
-          '{"ts":1,"event":"TASK_CREATED","taskId":"r1","data":{"inputText":"hi","source":"user"}}',
-          '{"ts":2,"event":"REASON_DONE","taskId":"r1","data":{"reasoning":{"response":"hello"},"plan":null,"newMessages":[{"role":"user","content":"hi"},{"role":"assistant","content":"hello"}]}}',
-          '{"ts":3,"event":"TASK_COMPLETED","taskId":"r1","data":{"finalResult":{},"iterations":1,"newMessages":[]}}',
-        ].join("\n") + "\n";
-      await appendFile(`${testDir}/tasks/2026-02-25/r1.jsonl`, lines);
-
-      const context = { taskId: "test", tasksDir: `${testDir}/tasks` };
-      const result = await task_replay.execute(
-        { taskId: "r1" },
-        context,
-      );
+      const context = { taskId: "test", tasksDir };
+      const result = await task_replay.execute({ taskId: "r1" }, context);
 
       expect(result.success).toBe(true);
-      const messages = result.result as Array<{
-        role: string;
-        content: string;
-      }>;
+      const messages = result.result as Array<{ role: string; content: string }>;
       expect(messages).toHaveLength(2);
       expect(messages[0]!.role).toBe("user");
-      expect(messages[0]!.content).toBe("hi");
+      expect(messages[0]!.content).toContain("hello");
       expect(messages[1]!.role).toBe("assistant");
-      expect(messages[1]!.content).toBe("hello");
+      expect(messages[1]!.content).toBe("hi there!");
+    }, 5000);
+
+    it("should replay messages with tool calls", async () => {
+      await writeIndex({ taskId: "r2", date: "2026-02-25" });
+      await writeSession("r2", "2026-02-25", [
+        { role: "user", content: "search for info" },
+        { role: "assistant", content: "", toolCalls: [{ id: "tc1", name: "web_search", arguments: { query: "info" } }] },
+        { role: "tool", content: "found results", toolCallId: "tc1" },
+        { role: "assistant", content: "Here is the info" },
+      ]);
+
+      const context = { taskId: "test", tasksDir };
+      const result = await task_replay.execute({ taskId: "r2" }, context);
+
+      expect(result.success).toBe(true);
+      const messages = result.result as Array<{ role: string; content: string; toolCalls?: unknown[] }>;
+      expect(messages).toHaveLength(4);
+      expect(messages[1]!.toolCalls).toBeDefined();
+      expect(messages[2]!.role).toBe("tool");
     }, 5000);
 
     it("should fail for unknown taskId", async () => {
-      const context = { taskId: "test", tasksDir: `${testDir}/tasks` };
-      const result = await task_replay.execute(
-        { taskId: "nonexistent" },
-        context,
-      );
+      const context = { taskId: "test", tasksDir };
+      const result = await task_replay.execute({ taskId: "nonexistent" }, context);
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("not found");
     }, 5000);
 
-    it("should handle corrupted JSONL file in replay gracefully", async () => {
-      await appendFile(`${testDir}/tasks/index.jsonl`, '{"taskId":"bad","date":"2026-02-25"}\n');
-      await appendFile(`${testDir}/tasks/2026-02-25/bad.jsonl`, "not valid json\n");
+    it("should return empty messages for task with no session", async () => {
+      await writeIndex({ taskId: "empty", date: "2026-02-25" });
+      // No session file written — SessionStore.load() returns []
 
-      const context = { taskId: "test", tasksDir: `${testDir}/tasks` };
-      const result = await task_replay.execute(
-        { taskId: "bad" },
-        context,
-      );
-
-      expect(result.success).toBe(false);
-      expect(result.error).toBeDefined();
-    }, 5000);
-
-    it("should not expose internal state (reasoning, plan, reflections)", async () => {
-      // Write index
-      await appendFile(
-        `${testDir}/tasks/index.jsonl`,
-        '{"taskId":"r2","date":"2026-02-25"}\n',
-      );
-
-      // Write event log with reasoning, plan, and reflections
-      const lines =
-        [
-          '{"ts":1,"event":"TASK_CREATED","taskId":"r2","data":{"inputText":"test","source":"user"}}',
-          '{"ts":2,"event":"REASON_DONE","taskId":"r2","data":{"reasoning":{"response":"secret"},"plan":{"goal":"do stuff","steps":[],"reasoning":"internal"},"newMessages":[{"role":"user","content":"test"}]}}',
-          '{"ts":3,"event":"TASK_COMPLETED","taskId":"r2","data":{"finalResult":{"response":"done"},"iterations":1,"newMessages":[{"role":"assistant","content":"done"}]}}',
-        ].join("\n") + "\n";
-      await appendFile(`${testDir}/tasks/2026-02-25/r2.jsonl`, lines);
-
-      const context = { taskId: "test", tasksDir: `${testDir}/tasks` };
-      const result = await task_replay.execute(
-        { taskId: "r2" },
-        context,
-      );
+      const context = { taskId: "test", tasksDir };
+      const result = await task_replay.execute({ taskId: "empty" }, context);
 
       expect(result.success).toBe(true);
-      const messages = result.result as Array<{
-        role: string;
-        content: string;
-      }>;
-      // Should only contain messages, not reasoning/plan/reflections
-      expect(messages).toHaveLength(2);
-      expect(messages[0]!.content).toBe("test");
-      expect(messages[1]!.content).toBe("done");
-      // Verify result is just the messages array, not the full context
-      expect(Array.isArray(result.result)).toBe(true);
+      const messages = result.result as unknown[];
+      expect(messages).toEqual([]);
     }, 5000);
 
     it("should return error when tasksDir is missing from context", async () => {
       const context = { taskId: "test" };
-      const result = await task_replay.execute(
-        { taskId: "r1" },
-        context,
-      );
+      const result = await task_replay.execute({ taskId: "r1" }, context);
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("tasksDir is required but missing");

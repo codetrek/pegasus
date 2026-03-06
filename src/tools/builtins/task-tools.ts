@@ -1,21 +1,46 @@
 /**
  * Task tools — list and replay historical task conversations.
  *
- * These tools expose read-only access to persisted task JSONL logs,
- * allowing the LLM to browse past tasks and replay their messages.
+ * Reads from the task index (index.jsonl) and SessionStore (current.jsonl)
+ * written by TaskRunner.
  */
 
 import { z } from "zod";
 import path from "node:path";
+import { readFile } from "node:fs/promises";
 import type { Tool, ToolResult, ToolContext } from "../types.ts";
 import { ToolCategory } from "../types.ts";
-import { TaskPersister } from "../../task/persister.ts";
+import { SessionStore } from "../../session/store.ts";
+
+// ── Shared index reader ──────────────────────────
+
+interface IndexEntry {
+  taskId: string;
+  date: string;
+  description?: string;
+  taskType?: string;
+  source?: string;
+}
+
+async function loadIndex(tasksDir: string): Promise<IndexEntry[]> {
+  const indexPath = path.join(tasksDir, "index.jsonl");
+  try {
+    const content = await readFile(indexPath, "utf-8");
+    return content
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as IndexEntry);
+  } catch {
+    return [];
+  }
+}
 
 // ── task_list ──────────────────────────────────
 
 export const task_list: Tool = {
   name: "task_list",
-  description: "List historical tasks for a date. Returns task IDs, descriptions, and statuses.",
+  description: "List historical tasks for a date. Returns task IDs, descriptions, and types.",
   category: ToolCategory.DATA,
   parameters: z.object({
     date: z
@@ -41,43 +66,19 @@ export const task_list: Tool = {
     const targetDate = date ?? new Date().toISOString().slice(0, 10);
 
     try {
-      const index = await TaskPersister.loadIndex(tasksDir);
-      const taskIds = [...index.entries()]
-        .filter(([, d]) => d === targetDate)
-        .map(([id]) => id);
-
-      const summaries: Array<{
-        taskId: string;
-        description: string;
-        inputText: string;
-        status: string;
-        createdAt: number;
-      }> = [];
-
-      for (const taskId of taskIds) {
-        const filePath = path.join(tasksDir, targetDate, `${taskId}.jsonl`);
-        try {
-          const ctx = await TaskPersister.replay(filePath);
-          const status = ctx.finalResult
-            ? "completed"
-            : ctx.error
-              ? "failed"
-              : "in_progress";
-          summaries.push({
-            taskId,
-            description: ctx.description,
-            inputText: ctx.inputText,
-            status,
-            createdAt: 0,
-          });
-        } catch {
-          // Skip corrupted files
-        }
-      }
+      const entries = await loadIndex(tasksDir);
+      const tasks = entries
+        .filter((e) => e.date === targetDate)
+        .map((e) => ({
+          taskId: e.taskId,
+          description: e.description ?? "",
+          taskType: e.taskType ?? "general",
+          source: e.source ?? "",
+        }));
 
       return {
         success: true,
-        result: summaries,
+        result: tasks,
         startedAt,
         completedAt: Date.now(),
         durationMs: Date.now() - startedAt,
@@ -120,8 +121,10 @@ export const task_replay: Tool = {
     const tasksDir = context.tasksDir;
 
     try {
-      const filePath = await TaskPersister.resolveTaskPath(tasksDir, taskId);
-      if (!filePath) {
+      // Look up task date from index
+      const entries = await loadIndex(tasksDir);
+      const entry = entries.find((e) => e.taskId === taskId);
+      if (!entry) {
         return {
           success: false,
           error: `Task "${taskId}" not found in index`,
@@ -131,11 +134,14 @@ export const task_replay: Tool = {
         };
       }
 
-      const ctx = await TaskPersister.replay(filePath);
-      // Only expose messages to LLM — internal state is hidden
+      // Load session from SessionStore
+      const sessionDir = path.join(tasksDir, entry.date, taskId);
+      const store = new SessionStore(sessionDir);
+      const messages = await store.load();
+
       return {
         success: true,
-        result: ctx.messages,
+        result: messages,
         startedAt,
         completedAt: Date.now(),
         durationMs: Date.now() - startedAt,
