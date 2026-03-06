@@ -83,6 +83,22 @@ export interface ToolContext {
     mimeType: string,
     source: string,
   ) => Promise<{ id: string; mimeType: string }>;
+  /** Reply callback — routes outbound message to channel adapter (loosely typed). */
+  onReply?: unknown;
+  /** Resolve an image by ID or file path. Returns base64 data or null (loosely typed). */
+  resolveImage?: unknown;
+  /** SubAgentManager for spawn/resume operations (loosely typed). */
+  subAgentManager?: unknown;
+  /** SkillRegistry for skill lookup and body loading (loosely typed). */
+  skillRegistry?: unknown;
+  /** TickManager for starting periodic status checks after spawning work (loosely typed). */
+  tickManager?: unknown;
+  /** Get memory snapshot for SubAgent context injection (loosely typed). */
+  getMemorySnapshot?: unknown;
+  /** Callback when skills are reloaded — triggers prompt rebuild + worker broadcast. Returns new skill count. */
+  onSkillsReloaded?: unknown;
+  /** ProjectAdapter for starting/stopping project Workers (loosely typed). */
+  projectAdapter?: unknown;
 }
 
 // ── ToolStats ─────────────────────────────────

@@ -1,12 +1,30 @@
 /**
  * use_skill — invoke a skill by name.
  *
- * Signal tool: returns skill metadata for MainAgent to intercept.
- * MainAgent handles actual execution (inline or fork).
+ * Self-executing: looks up the skill via skillRegistry, then either:
+ * - Returns an error if skill not found
+ * - Forks a background task for fork-context skills
+ * - Returns the skill body inline for inline-context skills
  */
 import { z } from "zod";
 import type { Tool, ToolResult, ToolContext } from "../types.ts";
 import { ToolCategory } from "../types.ts";
+
+/** Loose interface for SkillRegistry methods used by this tool. */
+interface SkillRegistryLike {
+  get(name: string): { name: string; context?: string; agent?: string } | undefined;
+  loadBody(name: string, args?: string): string | null;
+}
+
+/** Loose interface for TaskRunner methods used by this tool. */
+interface TaskRegistryLike {
+  submit(input: string, source: string, type: string, description: string): string;
+}
+
+/** Loose interface for TickManager methods used by this tool. */
+interface TickManagerLike {
+  start(): void;
+}
 
 export const use_skill: Tool = {
   name: "use_skill",
@@ -16,16 +34,80 @@ export const use_skill: Tool = {
     skill: z.string().describe("Skill name to invoke"),
     args: z.string().optional().describe("Arguments to pass to the skill"),
   }),
-  async execute(params: unknown, _context: ToolContext): Promise<ToolResult> {
+  async execute(params: unknown, context: ToolContext): Promise<ToolResult> {
     const startedAt = Date.now();
-    const { skill, args } = params as { skill: string; args?: string };
+    const { skill: skillName, args: skillArgs } = params as { skill: string; args?: string };
 
-    return {
-      success: true,
-      result: { action: "use_skill", skill, args },
-      startedAt,
-      completedAt: Date.now(),
-      durationMs: Date.now() - startedAt,
-    };
+    const registry = context.skillRegistry as SkillRegistryLike | undefined;
+    if (!registry) {
+      return {
+        success: false,
+        error: "skillRegistry not available in this context",
+        startedAt,
+        completedAt: Date.now(),
+        durationMs: Date.now() - startedAt,
+      };
+    }
+
+    const skill = registry.get(skillName);
+    if (!skill) {
+      return {
+        success: false,
+        error: `Skill "${skillName}" not found`,
+        startedAt,
+        completedAt: Date.now(),
+        durationMs: Date.now() - startedAt,
+      };
+    }
+
+    try {
+      if (skill.context === "fork") {
+        // Fork: submit as background task
+        const taskRegistry = context.taskRegistry as TaskRegistryLike | undefined;
+        if (!taskRegistry) {
+          return {
+            success: false,
+            error: "taskRegistry not available for fork skill execution",
+            startedAt,
+            completedAt: Date.now(),
+            durationMs: Date.now() - startedAt,
+          };
+        }
+
+        const body = registry.loadBody(skillName, skillArgs);
+        const taskType = skill.agent || "general";
+        const taskId = taskRegistry.submit(body ?? "", "skill:" + skillName, taskType, `Skill: ${skillName}`);
+
+        // Start tick manager to poll for task completion
+        const tick = context.tickManager as TickManagerLike | undefined;
+        if (tick) tick.start();
+
+        return {
+          success: true,
+          result: { taskId, status: "spawned", skill: skillName },
+          startedAt,
+          completedAt: Date.now(),
+          durationMs: Date.now() - startedAt,
+        };
+      }
+
+      // Inline: return skill body as result
+      const body = registry.loadBody(skillName, skillArgs);
+      return {
+        success: true,
+        result: body ?? `Skill "${skillName}" body could not be loaded`,
+        startedAt,
+        completedAt: Date.now(),
+        durationMs: Date.now() - startedAt,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        startedAt,
+        completedAt: Date.now(),
+        durationMs: Date.now() - startedAt,
+      };
+    }
   },
 };

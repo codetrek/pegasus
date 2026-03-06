@@ -1,14 +1,24 @@
 /**
- * reply tool — signals intent to send a message to the user.
+ * reply tool — send a message to the user via the channel adapter.
  *
- * The MainAgent intercepts the result and delivers it to the
- * appropriate channel. This is the ONLY way for the agent to
- * produce user-visible output; all other text is inner monologue.
+ * Self-executing: resolves images via resolveImage(), builds an outbound
+ * message, and delivers it via onReply(). This is the ONLY way for the
+ * agent to produce user-visible output; all other text is inner monologue.
  */
 
 import { z } from "zod";
 import { ToolCategory } from "../types.ts";
 import type { Tool, ToolResult, ToolContext } from "../types.ts";
+
+/** Loose type for the onReply callback. */
+type OnReplyFn = (msg: {
+  text: string;
+  channel: { type: string; channelId: string; replyTo?: string };
+  content?: { text: string; images: Array<{ id: string; data: string; mimeType: string }> };
+}) => void;
+
+/** Loose type for the resolveImage callback. */
+type ResolveImageFn = (idOrPath: string) => Promise<{ id: string; data: string; mimeType: string } | null>;
 
 export const reply: Tool = {
   name: "reply",
@@ -36,7 +46,7 @@ export const reply: Tool = {
         "Images are automatically stored for persistence.",
       ),
   }),
-  async execute(params: unknown, _context: ToolContext): Promise<ToolResult> {
+  async execute(params: unknown, context: ToolContext): Promise<ToolResult> {
     const startedAt = Date.now();
     const { text, channelType, channelId, replyTo, imageIds } = params as {
       text: string;
@@ -46,14 +56,77 @@ export const reply: Tool = {
       imageIds?: string[];
     };
 
-    // reply doesn't deliver the message — it signals intent.
-    // The MainAgent intercepts this tool result and routes to the channel.
-    return {
-      success: true,
-      result: { action: "reply", text, channelType, channelId, replyTo, imageIds },
-      startedAt,
-      completedAt: Date.now(),
-      durationMs: Date.now() - startedAt,
-    };
+    const onReply = context.onReply as OnReplyFn | undefined;
+    if (!onReply) {
+      return {
+        success: false,
+        error: "onReply not available in this context",
+        startedAt,
+        completedAt: Date.now(),
+        durationMs: Date.now() - startedAt,
+      };
+    }
+
+    try {
+      // Resolve images first so failures can be reported in the tool result
+      const images: Array<{ id: string; data: string; mimeType: string }> = [];
+      const failures: string[] = [];
+
+      if (imageIds?.length) {
+        const resolveImage = context.resolveImage as ResolveImageFn | undefined;
+        if (resolveImage) {
+          for (const idOrPath of imageIds) {
+            const img = await resolveImage(idOrPath);
+            if (img) {
+              images.push(img);
+            } else {
+              failures.push(idOrPath);
+            }
+          }
+        } else {
+          // No resolveImage available — all images fail
+          failures.push(...imageIds);
+        }
+      }
+
+      // Build delivered result
+      const delivered: Record<string, unknown> = { delivered: true };
+      if (failures.length > 0) {
+        delivered.imageFailures = failures.map(f => `Failed to load image: ${f}`);
+      }
+
+      // Build outbound message
+      const outbound: {
+        text: string;
+        channel: { type: string; channelId: string; replyTo?: string };
+        content?: { text: string; images: Array<{ id: string; data: string; mimeType: string }> };
+      } = {
+        text,
+        channel: { type: channelType, channelId, replyTo },
+      };
+
+      // Attach resolved images as structured content
+      if (images.length > 0) {
+        outbound.content = { text, images };
+      }
+
+      onReply(outbound);
+
+      return {
+        success: true,
+        result: delivered,
+        startedAt,
+        completedAt: Date.now(),
+        durationMs: Date.now() - startedAt,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        startedAt,
+        completedAt: Date.now(),
+        durationMs: Date.now() - startedAt,
+      };
+    }
   },
 };

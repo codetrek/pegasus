@@ -1,13 +1,26 @@
 /**
- * spawn_subagent tool — signals intent to launch a SubAgent Worker.
+ * spawn_subagent tool — launch a SubAgent Worker.
  *
- * The MainAgent intercepts the result and spawns the actual SubAgent
- * via the SubAgentManager.
+ * Self-executing: collects memory snapshot, calls subAgentManager.spawn(),
+ * and starts tickManager directly, eliminating signal interception.
  */
 
 import { z } from "zod";
 import { ToolCategory } from "../types.ts";
 import type { Tool, ToolResult, ToolContext } from "../types.ts";
+
+/** Loose interface for SubAgentManager methods used by this tool. */
+interface SubAgentManagerLike {
+  spawn(description: string, input: string, memorySnapshot?: string): string;
+}
+
+/** Loose interface for TickManager methods used by this tool. */
+interface TickManagerLike {
+  start(): void;
+}
+
+/** Loose type for getMemorySnapshot callback. */
+type GetMemorySnapshotFn = () => Promise<string | undefined>;
 
 export const spawn_subagent: Tool = {
   name: "spawn_subagent",
@@ -29,19 +42,43 @@ export const spawn_subagent: Tool = {
       input: string;
     };
 
-    // spawn_subagent doesn't execute — it signals intent.
-    // The MainAgent intercepts this tool result and spawns the actual SubAgent.
-    return {
-      success: true,
-      result: {
-        action: "spawn_subagent",
-        description,
-        input,
-        taskId: context.taskId, // placeholder, MainAgent replaces with real subagentId
-      },
-      startedAt,
-      completedAt: Date.now(),
-      durationMs: Date.now() - startedAt,
-    };
+    const manager = context.subAgentManager as SubAgentManagerLike | undefined;
+    if (!manager) {
+      return {
+        success: false,
+        error: "SubAgentManager not available in this context",
+        startedAt,
+        completedAt: Date.now(),
+        durationMs: Date.now() - startedAt,
+      };
+    }
+
+    try {
+      // Collect memory snapshot for SubAgent context
+      const getSnapshot = context.getMemorySnapshot as GetMemorySnapshotFn | undefined;
+      const memorySnapshot = getSnapshot ? await getSnapshot() : undefined;
+
+      const subagentId = manager.spawn(description, input, memorySnapshot);
+
+      // Start tick manager to poll for subagent completion
+      const tick = context.tickManager as TickManagerLike | undefined;
+      if (tick) tick.start();
+
+      return {
+        success: true,
+        result: { subagentId, status: "spawned", description },
+        startedAt,
+        completedAt: Date.now(),
+        durationMs: Date.now() - startedAt,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        startedAt,
+        completedAt: Date.now(),
+        durationMs: Date.now() - startedAt,
+      };
+    }
   },
 };
