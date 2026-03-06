@@ -34,10 +34,10 @@ import {
 import { ToolCallCollector, type ToolCallResult } from "./tool-call-collector.ts";
 import { createTaskState, type TaskExecutionState, type CreateTaskStateOptions } from "./task-execution-state.ts";
 import { getLogger } from "../../infra/logger.ts";
+import { createTokenCounter, type TokenCounter } from "../../infra/token-counter.ts";
 import { SessionStore } from "../../session/store.ts";
 import {
   computeTokenBudget,
-  estimateTokensFromChars,
   summarizeMessages,
   isContextOverflowError,
   TASK_COMPACT_THRESHOLD,
@@ -140,6 +140,7 @@ export abstract class BaseAgent {
   private _eventQueue: Event[] = [];
   private _running = false;
   private _overflowRetryCount = 0;
+  protected tokenCounter: TokenCounter;
 
   constructor(deps: BaseAgentDeps) {
     this.agentId = deps.agentId;
@@ -152,6 +153,9 @@ export abstract class BaseAgent {
     this.sessionStore = new SessionStore(deps.sessionDir);
     this.contextWindow = deps.contextWindow;
     this.modelLimitsCache = deps.modelLimitsCache;
+    this.tokenCounter = createTokenCounter(deps.model.provider, {
+      model: deps.model.modelId,
+    });
 
     this.toolExecutor = new ToolExecutor(
       this.toolRegistry,
@@ -303,6 +307,9 @@ export abstract class BaseAgent {
       });
 
       state.iteration++;
+      // Track actual prompt token count for accurate compaction decisions
+      state.lastPromptTokens =
+        (result.usage.promptTokens ?? 0) + (result.usage.cacheReadTokens ?? 0);
       await this.onLLMUsage(result);
       this._overflowRetryCount = 0; // Reset on successful LLM call
 
@@ -464,8 +471,20 @@ export abstract class BaseAgent {
     const state = this.taskStates.get(taskId);
     if (!state || state.messages.length < 8) return;
 
-    const totalChars = state.messages.reduce((sum, m) => sum + m.content.length, 0);
-    const estimatedTokens = estimateTokensFromChars(totalChars);
+    // Use actual token count from last API response when available;
+    // fall back to token counter for the first call.
+    let estimatedTokens: number;
+    if (state.lastPromptTokens > 0) {
+      estimatedTokens = state.lastPromptTokens;
+    } else {
+      const allText = state.messages.map((m) => {
+        let text = m.content;
+        if (m.toolCalls) text += JSON.stringify(m.toolCalls);
+        return text;
+      }).join("\n");
+      estimatedTokens = await this.tokenCounter.count(allText);
+    }
+
     const budget = computeTokenBudget({
       modelId: this.model.modelId,
       configContextWindow: this.contextWindow,

@@ -78,22 +78,35 @@ export class EstimateCounter implements TokenCounter {
 
 // ── Factory ──────────────────────────────────────
 
+/** Known model prefixes that use OpenAI-compatible tokenization. */
+const TIKTOKEN_MODEL_PREFIXES = ["gpt-", "o1-", "o3-", "o4-"];
+
+/** Known model prefixes that use Anthropic tokenization. */
+const ANTHROPIC_MODEL_PREFIXES = ["claude-"];
+
 export function createTokenCounter(
   provider: string,
   options?: { model?: string; apiKey?: string; baseURL?: string },
 ): TokenCounter {
-  switch (provider) {
-    case "openai":
-    case "openai-compatible":
-      return new TiktokenCounter(options?.model);
-    case "anthropic":
-      return new AnthropicAPICounter(
-        options?.apiKey ?? "",
-        options?.model,
-        options?.baseURL,
-      );
-    default:
-      log.info({ provider }, "unknown provider, using EstimateCounter");
-      return new EstimateCounter();
+  const model = options?.model ?? "";
+  const p = provider ?? "";
+
+  // 1. Check provider string
+  if (p === "openai" || p === "openai-compatible" || p.startsWith("openai-")) {
+    return new TiktokenCounter(model);
   }
+  if (p === "anthropic") {
+    return new AnthropicAPICounter(options?.apiKey ?? "", model, options?.baseURL);
+  }
+
+  // 2. Fall back to model prefix detection
+  if (TIKTOKEN_MODEL_PREFIXES.some((pfx) => model.startsWith(pfx))) {
+    return new TiktokenCounter(model);
+  }
+  if (ANTHROPIC_MODEL_PREFIXES.some((pfx) => model.startsWith(pfx))) {
+    return new AnthropicAPICounter(options?.apiKey ?? "", model, options?.baseURL);
+  }
+
+  log.info({ provider, model }, "unknown provider/model, using EstimateCounter");
+  return new EstimateCounter();
 }
