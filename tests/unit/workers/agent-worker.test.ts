@@ -875,7 +875,7 @@ describe("initSubAgent", () => {
 
   function createMockOrchestrator() {
     return {
-      run: mock(async () => ({ success: true, result: "done" })),
+      run: mock(async () => ({ success: true, result: "done" })) as any,
       stop: mock(async () => {}),
     };
   }
@@ -1085,7 +1085,7 @@ describe("initSubAgent", () => {
     expect(systemPrompt).toContain(SUBAGENT_SYSTEM_PROMPT);
   }, 10_000);
 
-  it("should map onNotify 'progress' to sendNotify without metadata", async () => {
+  it("should map toolContext.onNotify to sendNotify", async () => {
     const subagentDir = `${TEST_DIR}/session-notify-progress`;
     mkdirSync(subagentDir, { recursive: true });
 
@@ -1102,8 +1102,12 @@ describe("initSubAgent", () => {
 
     expect(lastOrchestratorDeps).not.toBeNull();
 
-    // Trigger progress notification via captured onNotify
-    lastOrchestratorDeps!.orchestration!.onNotify({ type: "progress", message: "Working on step 2..." });
+    // Verify toolContext has onNotify
+    expect(lastOrchestratorDeps!.toolContext).toBeDefined();
+    expect(typeof lastOrchestratorDeps!.toolContext!.onNotify).toBe("function");
+
+    // Trigger progress notification via captured toolContext.onNotify
+    lastOrchestratorDeps!.toolContext!.onNotify!("Working on step 2...");
 
     const notifyMsgs = (messages as any[]).filter(m => m.type === "notify");
     expect(notifyMsgs.length).toBeGreaterThanOrEqual(1);
@@ -1114,12 +1118,21 @@ describe("initSubAgent", () => {
     expect((progressMsg!.message as any)?.metadata).toBeUndefined();
   }, 10_000);
 
-  it("should map onNotify 'completed' to sendNotify with subagentDone metadata", async () => {
+  it("should send completed notification when run() succeeds", async () => {
     const subagentDir = `${TEST_DIR}/session-notify-done`;
     mkdirSync(subagentDir, { recursive: true });
 
     const settings = makeTestSettings(subagentDir);
     setSettings(settings);
+
+    // Create mock that resolves with success
+    const successAgent = createMockOrchestrator();
+    successAgent.run = mock(async () => ({ success: true, result: "All done!", llmCallCount: 1, toolCallCount: 0 }));
+    cleanupOrchestrator();
+    cleanupOrchestrator = _setOrchestratorFactoryForTest((deps) => {
+      lastOrchestratorDeps = deps;
+      return successAgent as any;
+    });
 
     await initSubAgent({
       input: "Task",
@@ -1129,10 +1142,8 @@ describe("initSubAgent", () => {
       settings,
     });
 
-    expect(lastOrchestratorDeps).not.toBeNull();
-
-    // Trigger completed notification
-    lastOrchestratorDeps!.orchestration!.onNotify({ type: "completed", result: "All done!" });
+    // Wait for async then to fire
+    await new Promise(resolve => setTimeout(resolve, 50));
 
     const doneNotifies = (messages as any[]).filter(
       m => m.type === "notify" && (m.message as any)?.metadata?.subagentDone === "completed",
@@ -1144,12 +1155,27 @@ describe("initSubAgent", () => {
     await new Promise(resolve => setTimeout(resolve, 200));
   }, 10_000);
 
-  it("should map onNotify 'completed' with imageRefs in metadata", async () => {
+  it("should send completed notification with imageRefs when run() succeeds with images", async () => {
     const subagentDir = `${TEST_DIR}/session-notify-imgs`;
     mkdirSync(subagentDir, { recursive: true });
 
     const settings = makeTestSettings(subagentDir);
     setSettings(settings);
+
+    // Create mock that resolves with imageRefs
+    const imgAgent = createMockOrchestrator();
+    imgAgent.run = mock(async () => ({
+      success: true,
+      result: "Screenshot captured",
+      llmCallCount: 1,
+      toolCallCount: 0,
+      imageRefs: [{ id: "img123", mimeType: "image/png" }],
+    }));
+    cleanupOrchestrator();
+    cleanupOrchestrator = _setOrchestratorFactoryForTest((deps) => {
+      lastOrchestratorDeps = deps;
+      return imgAgent as any;
+    });
 
     await initSubAgent({
       input: "Task",
@@ -1159,14 +1185,8 @@ describe("initSubAgent", () => {
       settings,
     });
 
-    expect(lastOrchestratorDeps).not.toBeNull();
-
-    // Trigger completed with imageRefs
-    lastOrchestratorDeps!.orchestration!.onNotify({
-      type: "completed",
-      result: "Screenshot captured",
-      imageRefs: [{ id: "img123", mimeType: "image/png" }],
-    });
+    // Wait for async then to fire
+    await new Promise(resolve => setTimeout(resolve, 50));
 
     const doneNotifies = (messages as any[]).filter(
       m => m.type === "notify" && (m.message as any)?.metadata?.subagentDone === "completed",
@@ -1179,12 +1199,26 @@ describe("initSubAgent", () => {
     await new Promise(resolve => setTimeout(resolve, 200));
   }, 10_000);
 
-  it("should JSON.stringify non-string result in onNotify 'completed'", async () => {
+  it("should JSON.stringify non-string result in completed notification", async () => {
     const subagentDir = `${TEST_DIR}/session-notify-obj`;
     mkdirSync(subagentDir, { recursive: true });
 
     const settings = makeTestSettings(subagentDir);
     setSettings(settings);
+
+    // Create mock that resolves with non-string result
+    const objAgent = createMockOrchestrator();
+    objAgent.run = mock(async () => ({
+      success: true,
+      result: { data: 42, summary: "analysis complete" },
+      llmCallCount: 1,
+      toolCallCount: 0,
+    }));
+    cleanupOrchestrator();
+    cleanupOrchestrator = _setOrchestratorFactoryForTest((deps) => {
+      lastOrchestratorDeps = deps;
+      return objAgent as any;
+    });
 
     await initSubAgent({
       input: "Task",
@@ -1194,13 +1228,8 @@ describe("initSubAgent", () => {
       settings,
     });
 
-    expect(lastOrchestratorDeps).not.toBeNull();
-
-    // Trigger completed with non-string result (object) → JSON.stringify branch
-    lastOrchestratorDeps!.orchestration!.onNotify({
-      type: "completed",
-      result: { data: 42, summary: "analysis complete" },
-    });
+    // Wait for async then to fire
+    await new Promise(resolve => setTimeout(resolve, 50));
 
     const doneNotifies = (messages as any[]).filter(
       m => m.type === "notify" && (m.message as any)?.metadata?.subagentDone === "completed",
@@ -1213,12 +1242,26 @@ describe("initSubAgent", () => {
     await new Promise(resolve => setTimeout(resolve, 200));
   }, 10_000);
 
-  it("should map onNotify 'failed' to sendNotify with subagentDone metadata", async () => {
+  it("should send failed notification when run() returns failure", async () => {
     const subagentDir = `${TEST_DIR}/session-notify-fail`;
     mkdirSync(subagentDir, { recursive: true });
 
     const settings = makeTestSettings(subagentDir);
     setSettings(settings);
+
+    // Create mock that resolves with failure
+    const failAgent = createMockOrchestrator();
+    failAgent.run = mock(async () => ({
+      success: false,
+      error: "timeout exceeded",
+      llmCallCount: 1,
+      toolCallCount: 0,
+    }));
+    cleanupOrchestrator();
+    cleanupOrchestrator = _setOrchestratorFactoryForTest((deps) => {
+      lastOrchestratorDeps = deps;
+      return failAgent as any;
+    });
 
     await initSubAgent({
       input: "Task",
@@ -1228,10 +1271,8 @@ describe("initSubAgent", () => {
       settings,
     });
 
-    expect(lastOrchestratorDeps).not.toBeNull();
-
-    // Trigger failed notification
-    lastOrchestratorDeps!.orchestration!.onNotify({ type: "failed", error: "timeout exceeded" });
+    // Wait for async then to fire
+    await new Promise(resolve => setTimeout(resolve, 50));
 
     const failNotifies = (messages as any[]).filter(
       m => m.type === "notify" && (m.message as any)?.metadata?.subagentDone === "failed",
@@ -1287,7 +1328,7 @@ describe("initSubAgent", () => {
     expect(systemPrompt).not.toContain("A".repeat(201));
   }, 10_000);
 
-  it("should provide onSpawnExecution callback in deps", async () => {
+  it("should provide taskRegistry in toolContext deps", async () => {
     const subagentDir = `${TEST_DIR}/session-spawn`;
     mkdirSync(subagentDir, { recursive: true });
 
@@ -1303,10 +1344,11 @@ describe("initSubAgent", () => {
     });
 
     expect(lastOrchestratorDeps).not.toBeNull();
-    expect(typeof lastOrchestratorDeps!.orchestration!.onSpawnExecution).toBe("function");
+    expect(lastOrchestratorDeps!.toolContext).toBeDefined();
+    expect(lastOrchestratorDeps!.toolContext!.taskRegistry).toBeDefined();
   }, 10_000);
 
-  it("should create ExecutionAgent and return handle when onSpawnExecution is called", async () => {
+  it("should provide taskRegistry with submit method", async () => {
     const subagentDir = `${TEST_DIR}/session-spawn-exec`;
     mkdirSync(subagentDir, { recursive: true });
 
@@ -1322,31 +1364,9 @@ describe("initSubAgent", () => {
     });
 
     expect(lastOrchestratorDeps).not.toBeNull();
-    expect(lastOrchestratorDeps!.orchestration!.onSpawnExecution).toBeDefined();
-
-    // Invoke the onSpawnExecution callback — this exercises lines 318-343
-    const handle = lastOrchestratorDeps!.orchestration!.onSpawnExecution({
-      input: "Child task input",
-      description: "Analyze something",
-      mode: "worker",
-    });
-
-    // Verify the handle structure
-    expect(handle.id).toBeDefined();
-    expect(typeof handle.id).toBe("string");
-    expect(handle.id.length).toBeGreaterThan(0);
-    expect(handle.promise).toBeInstanceOf(Promise);
-
-    // The promise should eventually resolve (mock model returns text response)
-    const result = await Promise.race([
-      handle.promise,
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), 5_000)),
-    ]);
-    // Either resolved or timed out — either way, the callback was exercised
-    if (result !== null) {
-      expect(result).toHaveProperty("success");
-      expect(result).toHaveProperty("result");
-    }
+    const taskRunner = lastOrchestratorDeps!.toolContext!.taskRegistry as any;
+    expect(taskRunner).toBeDefined();
+    expect(typeof taskRunner.submit).toBe("function");
   }, 10_000);
 
   it("should send failed notification when run() rejects with error", async () => {
@@ -1505,7 +1525,7 @@ describe("initSubAgent", () => {
     expect(result!.mimeType).toBe("image/png");
   }, 10_000);
 
-  it("should create ExecutionAgent via onSpawnExecution and run it (lines 318-343)", async () => {
+  it("should provide onNotify in toolContext for progress notifications", async () => {
     const subagentDir = `${TEST_DIR}/session-spawn-real`;
     mkdirSync(subagentDir, { recursive: true });
 
@@ -1522,28 +1542,16 @@ describe("initSubAgent", () => {
 
     expect(lastOrchestratorDeps).not.toBeNull();
 
-    // Call onSpawnExecution — creates a real ExecutionAgent
-    const handle = lastOrchestratorDeps!.orchestration!.onSpawnExecution({
-      input: "Child task: analyze data",
-      description: "Data analysis subtask",
-      taskType: "analysis",
-      mode: "worker",
-    });
+    // Verify toolContext has both taskRegistry and onNotify
+    expect(lastOrchestratorDeps!.toolContext!.taskRegistry).toBeDefined();
+    expect(typeof lastOrchestratorDeps!.toolContext!.onNotify).toBe("function");
 
-    expect(handle.id).toBeDefined();
-    expect(handle.id.length).toBeGreaterThan(0);
-    expect(handle.promise).toBeInstanceOf(Promise);
-
-    // Wait for the child to complete (mock proxy model returns empty text → stop)
-    const result = await Promise.race([
-      handle.promise,
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), 5_000)),
-    ]);
-
-    if (result !== null) {
-      expect(result).toHaveProperty("success");
-      expect(result).toHaveProperty("result");
-    }
+    // Call onNotify — should forward to sendNotify
+    lastOrchestratorDeps!.toolContext!.onNotify!("Task progress: 75%");
+    const notifyMsgs = (messages as any[]).filter(
+      m => m.type === "notify" && (m.message as any)?.text === "Task progress: 75%",
+    );
+    expect(notifyMsgs.length).toBe(1);
   }, 10_000);
 });
 

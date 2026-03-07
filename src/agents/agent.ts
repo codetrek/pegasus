@@ -1,11 +1,9 @@
 /**
- * Agent — unified concrete agent class combining ConversationAgent + ExecutionAgent + OrchestratorAgent.
+ * Agent — unified concrete agent class combining ConversationAgent + ExecutionAgent.
  *
- * Supports three usage patterns:
+ * Supports two usage patterns:
  *   - send(message) — persistent conversation (queue-based, session persistence)
  *   - run(input)    — one-shot execution (returns Promise<AgentResult>)
- *   - run(input) with orchestration — orchestrator mode (spawn_task interception,
- *     child coordination, synthesis)
  *
  * Key design decisions:
  *   - systemPrompt is constructor-injected (string | (() => string)), NOT abstract
@@ -13,16 +11,14 @@
  *   - toolContext injection for pre-set ToolContext fields
  *   - Image ref collection and event emission from ExecutionAgent
  *   - Queue processing from ConversationAgent
- *   - Orchestration is optional config — when set, intercepts spawn_task,
- *     tracks children via EventBus, synthesizes results, notifies parent
+ *   - spawn_task is a self-executing tool using ToolContext.taskRegistry (TaskRunner)
  */
 
-import { BaseAgent, type BaseAgentDeps, type ToolCallInterceptResult } from "./base/base-agent.ts";
-import type { PendingWork, PendingWorkResult } from "./base/agent-state.ts";
+import { BaseAgent, type BaseAgentDeps } from "./base/base-agent.ts";
+import type { PendingWorkResult } from "./base/agent-state.ts";
 import type { Message } from "../infra/llm-types.ts";
 import type { Event } from "../events/types.ts";
 import { EventType, createEvent } from "../events/types.ts";
-import type { ToolCall } from "../models/tool.ts";
 import type { Persona } from "../identity/persona.ts";
 import type {
   ChannelInfo,
@@ -39,26 +35,6 @@ const logger = getLogger("agent");
 
 // ── Types ────────────────────────────────────────────
 
-/** Configuration for spawning a child ExecutionAgent. */
-export interface ExecutionSpawnConfig {
-  input: string;
-  description: string;
-  taskType?: string;
-  mode: "task" | "worker";
-}
-
-/** Handle to a spawned child ExecutionAgent. */
-export interface ExecutionHandle {
-  id: string;
-  promise: Promise<{ success: boolean; result?: unknown; error?: string }>;
-}
-
-/** Notifications sent to the parent agent from orchestration. */
-export type OrchestratorNotification =
-  | { type: "progress"; message: string }
-  | { type: "completed"; result: unknown; imageRefs?: Array<{ id: string; mimeType: string }> }
-  | { type: "failed"; error: string };
-
 export interface AgentDeps extends BaseAgentDeps {
   /** Agent persona (identity + personality). Optional for execution-only agents. */
   persona?: Persona;
@@ -68,11 +44,6 @@ export interface AgentDeps extends BaseAgentDeps {
   toolContext?: Partial<ToolContext>;
   /** Lifecycle callbacks (replaces subclass overrides). */
   callbacks?: AgentCallbacks;
-  /** Optional orchestration config — when set, enables spawn_task interception + child coordination. */
-  orchestration?: {
-    onSpawnExecution: (config: ExecutionSpawnConfig) => ExecutionHandle;
-    onNotify: (notification: OrchestratorNotification) => void;
-  };
 }
 
 /** Lifecycle callbacks — subclasses (MainAgent) provide these instead of overrides. */
@@ -142,18 +113,12 @@ export class Agent extends BaseAgent {
   /** Holds the last execution result for run() to resolve. */
   private _lastResult: AgentResult | null = null;
 
-  // Orchestration state (only active when orchestration config is set)
-  private _orchestration: AgentDeps["orchestration"];
-  private _childTaskIds = new Set<string>();
-  private _childResults = new Map<string, { success: boolean; result?: unknown; error?: string }>();
-
   constructor(deps: AgentDeps) {
     super(deps);
     this.persona = deps.persona;
     this._systemPromptSource = deps.systemPrompt;
     this._injectedToolContext = deps.toolContext;
     this._callbacks = deps.callbacks;
-    this._orchestration = deps.orchestration;
   }
 
   // ═══════════════════════════════════════════════════
@@ -204,14 +169,6 @@ export class Agent extends BaseAgent {
       messages.push({ role: "user", content: input });
       if (persistSession) {
         await this.sessionStore.append({ role: "user", content: input });
-      }
-    }
-
-    // Orchestration: subscribe events + start EventBus before processStep
-    if (this._orchestration) {
-      this.subscribeEvents();
-      if (!this.eventBus.isRunning) {
-        await this.eventBus.start();
       }
     }
 
@@ -277,68 +234,7 @@ export class Agent extends BaseAgent {
     if (this._onReply) {
       ctx.onReply = (msg: unknown) => this._onReply!(msg as OutboundMessage);
     }
-    // Orchestration: inject onNotify for progress notifications
-    if (this._orchestration) {
-      ctx.onNotify = (message: string) => {
-        this._orchestration!.onNotify({ type: "progress", message });
-      };
-    }
     return ctx;
-  }
-
-  // ═══════════════════════════════════════════════════
-  // Tool Call Interception (orchestration)
-  // ═══════════════════════════════════════════════════
-
-  protected override async onToolCall(tc: ToolCall): Promise<ToolCallInterceptResult> {
-    if (this._orchestration && tc.name === "spawn_task") {
-      return this._interceptSpawnTask(tc);
-    }
-    return { action: "execute" };
-  }
-
-  private _interceptSpawnTask(tc: ToolCall): ToolCallInterceptResult {
-    const args = tc.arguments as { description: string; input: string; type?: string };
-
-    const handle = this._orchestration!.onSpawnExecution({
-      input: args.input,
-      description: args.description,
-      taskType: args.type,
-      mode: "task",
-    });
-
-    // Track child task ID for event-driven completion
-    this._childTaskIds.add(handle.id);
-
-    // Track child result collection (backward-compat for handle.promise)
-    handle.promise.then((result) => {
-      this._childResults.set(handle.id, result);
-    }).catch((err) => {
-      this._childResults.set(handle.id, {
-        success: false,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
-
-    const pendingWork: PendingWork = {
-      id: handle.id,
-      kind: "child_agent",
-      description: args.description,
-      dispatchedAt: Date.now(),
-    };
-
-    return {
-      action: "intercept",
-      result: {
-        toolCallId: tc.id,
-        content: JSON.stringify({
-          taskId: handle.id,
-          status: "spawned",
-          description: args.description,
-        }),
-      },
-      pendingWork,
-    };
   }
 
   // ═══════════════════════════════════════════════════
@@ -566,21 +462,15 @@ export class Agent extends BaseAgent {
   // ═══════════════════════════════════════════════════
 
   protected override subscribeEvents(): void {
-    // Subscribe to child task completions (conversation-mode + orchestration-mode)
+    // Subscribe to child task completions (conversation-mode)
     this.eventBus.subscribe(EventType.TASK_COMPLETED, async (event) => {
-      if (event.taskId && (
-        this.stateManager.pendingWork.has(event.taskId) ||
-        (this._orchestration && this._childTaskIds.has(event.taskId))
-      )) {
+      if (event.taskId && this.stateManager.pendingWork.has(event.taskId)) {
         this.queueEvent(event);
       }
     });
 
     this.eventBus.subscribe(EventType.TASK_FAILED, async (event) => {
-      if (event.taskId && (
-        this.stateManager.pendingWork.has(event.taskId) ||
-        (this._orchestration && this._childTaskIds.has(event.taskId))
-      )) {
+      if (event.taskId && this.stateManager.pendingWork.has(event.taskId)) {
         this.queueEvent(event);
       }
     });
@@ -629,35 +519,6 @@ export class Agent extends BaseAgent {
       case EventType.TASK_FAILED: {
         const childId = event.taskId;
         if (!childId) break;
-
-        // Orchestration mode: collect results + synthesize when all done
-        if (this._orchestration && this._childTaskIds.has(childId)) {
-          const success = event.type === EventType.TASK_COMPLETED;
-          const payload = event.payload as { result?: unknown };
-          this._childResults.set(childId, {
-            success,
-            result: success ? payload.result : undefined,
-            error: !success ? String(payload.result ?? "child task failed") : undefined,
-          });
-
-          this._childTaskIds.delete(childId);
-          this.stateManager.removePendingWork(childId);
-
-          logger.info(
-            { childId, remaining: this._childTaskIds.size, success },
-            "child_task_completed",
-          );
-
-          if (this._childTaskIds.size === 0) {
-            await this._synthesize();
-          }
-          return;
-        }
-
-        // Orchestration mode but unknown child ID: ignore
-        if (this._orchestration) {
-          return;
-        }
 
         // Conversation mode: inject child result into session + trigger thinking
         if (childId) {
@@ -711,46 +572,6 @@ export class Agent extends BaseAgent {
   }
 
   // ═══════════════════════════════════════════════════
-  // Orchestration: Synthesis (from OrchestratorAgent)
-  // ═══════════════════════════════════════════════════
-
-  /**
-   * All children completed — inject results as user message and run
-   * one more processStep round for synthesis.
-   */
-  private async _synthesize(): Promise<void> {
-    const state = this.taskStates.get(this.agentId);
-    if (!state) return;
-
-    // Inject child results as a user message
-    const synthesisMsg: Message = {
-      role: "user",
-      content: this._formatChildResults(),
-    };
-    state.messages.push(synthesisMsg);
-
-    // Use limited iterations for synthesis (current + 5)
-    state.maxIterations = state.iteration + 5;
-
-    await this.processStep(this.agentId);
-  }
-
-  private _formatChildResults(): string {
-    const lines = ["All child tasks completed. Results:"];
-    for (const [id, result] of this._childResults) {
-      if (result.success) {
-        const resultStr = typeof result.result === "string"
-          ? result.result
-          : JSON.stringify(result.result);
-        lines.push(`\n[Task ${id}] Success:\n${resultStr}`);
-      } else {
-        lines.push(`\n[Task ${id}] Failed: ${result.error}`);
-      }
-    }
-    return lines.join("\n");
-  }
-
-  // ═══════════════════════════════════════════════════
   // Task Completion — merged from both agents
   // ═══════════════════════════════════════════════════
 
@@ -760,15 +581,6 @@ export class Agent extends BaseAgent {
     finishReason: "complete" | "max_iterations" | "interrupted" | "error",
   ): Promise<void> {
     const state = this.taskStates.get(taskId);
-
-    // Orchestration: wait for children before completing
-    if (this._orchestration && this._childTaskIds.size > 0 && finishReason === "complete") {
-      logger.info(
-        { taskId, childCount: this._childTaskIds.size },
-        "waiting_for_children",
-      );
-      return;
-    }
 
     // Collect unique image refs from tool result messages (from ExecutionAgent)
     const imageRefs: Array<{ id: string; mimeType: string }> = [];
@@ -783,13 +595,6 @@ export class Agent extends BaseAgent {
             }
           }
         }
-      }
-    }
-
-    // Orchestration: persist session (run() with persistSession handles this for non-orchestration)
-    if (this._orchestration && state) {
-      for (const msg of state.messages) {
-        await this.sessionStore.append(msg);
       }
     }
 
@@ -820,32 +625,11 @@ export class Agent extends BaseAgent {
       ),
     );
 
-    // Orchestration: notify parent
-    if (this._orchestration) {
-      if (success) {
-        this._orchestration.onNotify({
-          type: "completed",
-          result: this._lastResult.result,
-          ...(imageRefs.length > 0 ? { imageRefs } : {}),
-        });
-      } else {
-        this._orchestration.onNotify({
-          type: "failed",
-          error: this._lastResult.error ?? "unknown error",
-        });
-      }
-    }
-
     // Resolve completion promise (works for both _think and run)
     state?.onComplete?.();
 
     // Cleanup
     this.removeTaskState(taskId);
-
-    // Orchestration: mark idle after cleanup
-    if (this._orchestration) {
-      this.stateManager.markIdle();
-    }
   }
 }
 

@@ -362,20 +362,18 @@ describe("Agent Worker — subagent mode", () => {
     expect(msg.type).toBe("shutdown-complete");
   }, 15_000);
 
-  it("should only shutdown on initial task completion, not child task completion", async () => {
-    // This test verifies the fix for the premature shutdown bug:
-    // When SubAgent calls spawn_task, the child task completion should NOT
-    // trigger Worker shutdown. Only the initial (parent) task's completion
-    // should trigger shutdown.
+  it("should shutdown after initial task completion via agent.run()", async () => {
+    // With the new pattern (no orchestration config), spawn_task is a self-executing
+    // tool via TaskRunner. The parent agent's run() resolves when the agent stops,
+    // then the worker sends subagentDone notification and shuts down.
     //
     // Flow:
     // 1. Init subagent → auto-submit triggers llm_request (initial task reasoning)
-    // 2. Respond with spawn_task tool call → Agent intercepts, creates child task
-    // 3. Child task triggers its own llm_request → respond with text → child completes
-    //    → notifyCallback fires for child → should NOT shutdown
-    // 4. Parent task gets child result, triggers llm_request → respond with text
-    //    → parent completes → notifyCallback fires for initial task → SHOULD shutdown
-    // 5. Post-task reflection may trigger additional llm_request(s) — auto-respond to those
+    // 2. Respond with spawn_task tool call → tool executes via TaskRunner
+    //    → child task starts (may trigger its own llm_requests)
+    // 3. Respond to parent's next reasoning step with text → parent completes
+    // 4. agent.run() resolves → worker sends subagentDone → shutdown
+    // 5. Auto-respond to any child/reflection llm_requests
 
     worker = new Worker(WORKER_URL);
 
@@ -389,13 +387,10 @@ describe("Agent Worker — subagent mode", () => {
     const handledRequestIds = new Set<string>();
 
     // Auto-respond to any llm_request that we haven't explicitly handled
-    // (e.g., post-task reflection requests). This prevents agent.stop() from
-    // blocking indefinitely on pending LLM calls.
     worker.addEventListener("message", (event: MessageEvent) => {
       allMessages.push(event.data);
       if (event.data.type === "llm_request") {
         const reqId = event.data.requestId as string;
-        // If this is a request we haven't handled in the main flow, auto-respond
         if (!handledRequestIds.has(reqId)) {
           setTimeout(() => {
             if (!handledRequestIds.has(reqId)) {
@@ -437,7 +432,7 @@ describe("Agent Worker — subagent mode", () => {
     const requestId1 = llm1.requestId as string;
     handledRequestIds.add(requestId1);
 
-    // Reply with spawn_task tool call
+    // Reply with spawn_task tool call — now executed via TaskRunner (self-executing)
     const secondLLMRequest = waitForMessage(worker, "llm_request");
     worker.postMessage({
       type: "llm_response",
@@ -460,54 +455,17 @@ describe("Agent Worker — subagent mode", () => {
       },
     });
 
-    // Step 2: Child task is created by Agent.submit() (spawn_task interception).
-    // Child task triggers its own llm_request for reasoning.
+    // Step 2: After spawn_task executes, parent agent continues reasoning.
+    // It will issue another llm_request. Respond with final text to complete.
     const llm2 = await secondLLMRequest;
     const requestId2 = llm2.requestId as string;
     handledRequestIds.add(requestId2);
 
-    // Before responding to child, verify no shutdown-complete yet
-    const shutdownMessages = allMessages.filter((m) => m.type === "shutdown-complete");
-    expect(shutdownMessages.length).toBe(0);
-
-    // Step 3: Respond to child task with a direct text response (no tool calls).
-    // This should complete the child task but NOT trigger Worker shutdown.
-    const thirdLLMRequest = waitForMessage(worker, "llm_request");
-    worker.postMessage({
-      type: "llm_response",
-      requestId: requestId2,
-      result: {
-        text: "Analysis complete: data looks good.",
-        finishReason: "stop",
-        usage: { promptTokens: 80, completionTokens: 30 },
-      },
-    });
-
-    // Step 4: After child completes, parent task resumes.
-    // The parent task enters a new reasoning cycle with the child result.
-    const llm3 = await thirdLLMRequest;
-    const requestId3 = llm3.requestId as string;
-    handledRequestIds.add(requestId3);
-
-    // CRITICAL CHECK: After child task completed, the Worker should NOT have shutdown.
-    const shutdownAfterChild = allMessages.filter((m) => m.type === "shutdown-complete");
-    expect(shutdownAfterChild.length).toBe(0);
-
-    // Also verify that child task completion notify was sent WITHOUT subagentDone metadata
-    const notifyWithSubagentDone = allMessages.filter(
-      (m) => m.type === "notify" &&
-        ((m.message as Record<string, unknown>)?.metadata as Record<string, unknown>)?.subagentDone != null
-    );
-    expect(notifyWithSubagentDone.length).toBe(0);
-
-    // Step 5: Respond to parent task's resumed reasoning with a final text response.
-    // This should complete the INITIAL task and trigger Worker shutdown.
-    // Note: Post-task reflection may trigger additional llm_request(s) which are
-    // auto-responded to by the message handler above.
+    // Respond with text to complete the parent task
     const shutdownPromise = waitForMessage(worker, "shutdown-complete", 10_000);
     worker.postMessage({
       type: "llm_response",
-      requestId: requestId3,
+      requestId: requestId2,
       result: {
         text: "All analysis tasks completed successfully.",
         finishReason: "stop",
@@ -515,7 +473,7 @@ describe("Agent Worker — subagent mode", () => {
       },
     });
 
-    // Wait for shutdown — this should happen because the initial task completed
+    // Wait for shutdown — agent.run() resolves, then subagentDone notify + shutdown
     const shutdownMsg = await shutdownPromise;
     expect(shutdownMsg.type).toBe("shutdown-complete");
 
@@ -525,7 +483,6 @@ describe("Agent Worker — subagent mode", () => {
         ((m.message as Record<string, unknown>)?.metadata as Record<string, unknown>)?.subagentDone != null
     );
     expect(finalNotifiesWithDone.length).toBeGreaterThanOrEqual(1);
-    // The FIRST subagentDone notify should be for the initial task completion
     const doneMetadata = ((finalNotifiesWithDone[0]!.message as Record<string, unknown>)?.metadata as Record<string, unknown>);
     expect(doneMetadata?.subagentDone).toBe("completed");
   }, 30_000);
