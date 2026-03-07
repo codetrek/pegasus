@@ -116,3 +116,11 @@ Tracked features, improvements, and ideas — what's done and what's next.
 - [ ] Task execution dashboard
 - [ ] Memory usage visualization
 - [ ] Token cost tracking per task/session
+
+### SubAgent Ownership & Hierarchy
+- [ ] SubAgent should belong to its parent Agent, not be a global singleton on PegasusApp
+  - Current: SubAgentManager is a single instance owned by PegasusApp, only MainAgent can spawn subagents
+  - Problem: If Agent A spawns Agent B, B is tracked as MainAgent's subagent (flat), not A's child
+  - Target: Each Agent can own subagents. A spawns B → B is A's child. B spawns C → C is B's child.
+  - Involves: SubAgentManager per-Agent (or hierarchical tracking), Worker thread communication, spawn_subagent tool context scoping
+  - Related: TaskRunner already creates per-Agent child tasks, but SubAgent (Worker-based) doesn't follow same pattern
