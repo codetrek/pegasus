@@ -1,8 +1,11 @@
 /**
- * spawn_subagent tool — launch a SubAgent Worker.
+ * spawn_subagent tool — launch a sub-agent via TaskRunner.
  *
- * Self-executing: collects memory snapshot, calls subAgentManager.spawn(),
+ * Self-executing: collects memory snapshot, calls taskRegistry.submit(),
  * and starts tickManager directly, eliminating signal interception.
+ *
+ * Replaces both the old spawn_task and spawn_subagent (SubAgentManager)
+ * tools with a unified interface backed by TaskRunner.
  */
 
 import { z } from "zod";
@@ -12,9 +15,15 @@ import { getLogger } from "../../infra/logger.ts";
 
 const logger = getLogger("spawn_subagent");
 
-/** Loose interface for SubAgentManager methods used by this tool. */
-interface SubAgentManagerLike {
-  spawn(description: string, input: string, memorySnapshot?: string): string;
+/** Loose interface for TaskRunner methods used by this tool. */
+export interface TaskRegistryLike {
+  submit(
+    input: string,
+    source: string,
+    type: string,
+    description: string,
+    opts?: { memorySnapshot?: string; depth?: number },
+  ): string;
 }
 
 /** Loose interface for TickManager methods used by this tool. */
@@ -28,28 +37,35 @@ type GetMemorySnapshotFn = () => Promise<string | undefined>;
 export const spawn_subagent: Tool = {
   name: "spawn_subagent",
   description:
-    "Launch an autonomous SubAgent to handle complex multi-step work. " +
-    "The SubAgent can break down tasks, spawn its own AITasks, and coordinate results. " +
-    "Use for work requiring decomposition, parallel execution, or multi-step orchestration.",
+    "Launch a sub-agent to handle work in the background. " +
+    "Types: general (full access), explore (read-only), plan (analysis + memory). " +
+    "The sub-agent runs autonomously and results arrive via notification.",
   category: ToolCategory.SYSTEM,
   parameters: z.object({
     description: z
       .string()
-      .describe("Short label for this SubAgent's mission"),
+      .describe("Short label for this sub-agent's mission"),
     input: z.string().describe("Detailed instructions"),
+    type: z
+      .enum(["general", "explore", "plan"])
+      .default("general")
+      .describe(
+        "Task type: 'explore' for research (read-only), 'plan' for analysis/planning, 'general' for full capabilities",
+      ),
   }),
   async execute(params: unknown, context: ToolContext): Promise<ToolResult> {
     const startedAt = Date.now();
-    const { description, input } = params as {
+    const { description, input, type = "general" } = params as {
       description: string;
       input: string;
+      type?: string;
     };
 
-    const manager = context.subAgentManager as SubAgentManagerLike | undefined;
-    if (!manager) {
+    const registry = context.taskRegistry as TaskRegistryLike | undefined;
+    if (!registry) {
       return {
         success: false,
-        error: "SubAgentManager not available in this context",
+        error: "taskRegistry not available in this context",
         startedAt,
         completedAt: Date.now(),
         durationMs: Date.now() - startedAt,
@@ -57,21 +73,24 @@ export const spawn_subagent: Tool = {
     }
 
     try {
-      // Collect memory snapshot for SubAgent context
+      // Collect memory snapshot for sub-agent context
       const getSnapshot = context.getMemorySnapshot as GetMemorySnapshotFn | undefined;
       const memorySnapshot = getSnapshot ? await getSnapshot() : undefined;
 
-      const subagentId = manager.spawn(description, input, memorySnapshot);
+      const taskId = registry.submit(input, context.taskId, type ?? "general", description, {
+        memorySnapshot,
+        depth: 1,
+      });
 
-      // Start tick manager to poll for subagent completion
+      // Start tick manager to poll for task completion
       const tick = context.tickManager as TickManagerLike | undefined;
       if (tick) tick.start();
 
-      logger.info({ subagentId, description }, "subagent_spawned");
+      logger.info({ subagentId: taskId, description, type }, "subagent_spawned");
 
       return {
         success: true,
-        result: { subagentId, status: "spawned", description },
+        result: { subagentId: taskId, status: "spawned", type: type ?? "general", description },
         startedAt,
         completedAt: Date.now(),
         durationMs: Date.now() - startedAt,

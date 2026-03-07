@@ -7,8 +7,8 @@ describe("spawn_subagent tool", () => {
   function makeContext(overrides?: Partial<ToolContext>): ToolContext {
     return {
       taskId: "main-agent",
-      subAgentManager: {
-        spawn: (_desc: string, _input: string, _mem?: string) => "sa-001",
+      taskRegistry: {
+        submit: (_input: string, _source: string, _type: string, _desc: string, _opts?: unknown) => "sa-001",
       },
       tickManager: { start: () => {} },
       getMemorySnapshot: async () => undefined,
@@ -19,9 +19,9 @@ describe("spawn_subagent tool", () => {
   it("should spawn a subagent and return subagentId", async () => {
     let capturedArgs: unknown[] = [];
     const ctx = makeContext({
-      subAgentManager: {
-        spawn: (desc: string, input: string, mem?: string) => {
-          capturedArgs = [desc, input, mem];
+      taskRegistry: {
+        submit: (input: string, source: string, type: string, desc: string, opts?: { memorySnapshot?: string; depth?: number }) => {
+          capturedArgs = [input, source, type, desc, opts];
           return "sa-xyz";
         },
       },
@@ -34,13 +34,39 @@ describe("spawn_subagent tool", () => {
     );
 
     expect(result.success).toBe(true);
-    const data = result.result as { subagentId: string; status: string; description: string };
+    const data = result.result as { subagentId: string; status: string; type: string; description: string };
     expect(data.subagentId).toBe("sa-xyz");
     expect(data.status).toBe("spawned");
+    expect(data.type).toBe("general");
     expect(data.description).toBe("refactor module");
 
-    // Verify spawn was called with correct args including memory
-    expect(capturedArgs).toEqual(["refactor module", "Extract helpers", "memory content here"]);
+    // Verify submit was called with correct args including memory and depth
+    expect(capturedArgs[0]).toBe("Extract helpers"); // input
+    expect(capturedArgs[1]).toBe("main-agent"); // source (context.taskId)
+    expect(capturedArgs[2]).toBe("general"); // type
+    expect(capturedArgs[3]).toBe("refactor module"); // description
+    const opts = capturedArgs[4] as { memorySnapshot?: string; depth?: number };
+    expect(opts.memorySnapshot).toBe("memory content here");
+    expect(opts.depth).toBe(1);
+  });
+
+  it("should pass type parameter to taskRegistry.submit", async () => {
+    let capturedType: string | undefined;
+    const ctx = makeContext({
+      taskRegistry: {
+        submit: (_input: string, _source: string, type: string, _desc: string) => {
+          capturedType = type;
+          return "sa-typed";
+        },
+      },
+    });
+
+    await spawn_subagent.execute(
+      { description: "explore task", input: "research X", type: "explore" },
+      ctx,
+    );
+
+    expect(capturedType).toBe("explore");
   });
 
   it("should start tickManager after spawning", async () => {
@@ -57,19 +83,19 @@ describe("spawn_subagent tool", () => {
     expect(tickStarted).toBe(true);
   });
 
-  it("should return error when subAgentManager is not available", async () => {
+  it("should return error when taskRegistry is not available", async () => {
     const result = await spawn_subagent.execute(
       { description: "test", input: "test" },
       { taskId: "test" },
     );
     expect(result.success).toBe(false);
-    expect(result.error).toContain("SubAgentManager not available");
+    expect(result.error).toContain("taskRegistry not available");
   });
 
-  it("should handle spawn errors gracefully", async () => {
+  it("should handle submit errors gracefully", async () => {
     const ctx = makeContext({
-      subAgentManager: {
-        spawn: () => { throw new Error("worker limit reached"); },
+      taskRegistry: {
+        submit: () => { throw new Error("task limit reached"); },
       },
     });
 
@@ -78,16 +104,16 @@ describe("spawn_subagent tool", () => {
       ctx,
     );
     expect(result.success).toBe(false);
-    expect(result.error).toContain("worker limit reached");
+    expect(result.error).toContain("task limit reached");
   });
 
   it("should work without getMemorySnapshot", async () => {
-    let capturedMem: unknown = "NOT_SET";
+    let capturedOpts: unknown = "NOT_SET";
     const ctx = makeContext({
       getMemorySnapshot: undefined,
-      subAgentManager: {
-        spawn: (_desc: string, _input: string, mem?: string) => {
-          capturedMem = mem;
+      taskRegistry: {
+        submit: (_input: string, _source: string, _type: string, _desc: string, opts?: unknown) => {
+          capturedOpts = opts;
           return "sa-1";
         },
       },
@@ -98,7 +124,9 @@ describe("spawn_subagent tool", () => {
       ctx,
     );
     expect(result.success).toBe(true);
-    expect(capturedMem).toBeUndefined();
+    const opts = capturedOpts as { memorySnapshot?: string; depth?: number };
+    expect(opts.memorySnapshot).toBeUndefined();
+    expect(opts.depth).toBe(1);
   });
 
   it("should work without tickManager", async () => {
@@ -126,8 +154,8 @@ describe("spawn_subagent tool", () => {
 
   it("should have correct tool metadata", () => {
     expect(spawn_subagent.name).toBe("spawn_subagent");
-    expect(spawn_subagent.description).toContain("SubAgent");
-    expect(spawn_subagent.description).toContain("autonomous");
+    expect(spawn_subagent.description).toContain("sub-agent");
+    expect(spawn_subagent.description).toContain("background");
     expect(spawn_subagent.category).toBe(ToolCategory.SYSTEM);
   });
 
@@ -137,5 +165,7 @@ describe("spawn_subagent tool", () => {
     expect(schema.safeParse({ description: "only desc" }).success).toBe(false);
     expect(schema.safeParse({ input: "only input" }).success).toBe(false);
     expect(schema.safeParse({ description: "label", input: "instructions" }).success).toBe(true);
+    // type is optional with default
+    expect(schema.safeParse({ description: "label", input: "instructions", type: "explore" }).success).toBe(true);
   });
 });

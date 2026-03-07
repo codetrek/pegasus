@@ -35,7 +35,6 @@ import { TaskRunner } from "./agents/task-runner.ts";
 import type { TaskNotification } from "./agents/task-runner.ts";
 import { ProjectManager } from "./projects/manager.ts";
 import { ProjectAdapter } from "./projects/project-adapter.ts";
-import { SubAgentManager } from "./subagent/manager.ts";
 import { ImageManager } from "./media/image-manager.ts";
 import { TickManager } from "./agents/tick-manager.ts";
 import { ReflectionOrchestrator } from "./agents/reflection-orchestrator.ts";
@@ -77,7 +76,6 @@ export class PegasusApp {
   private taskRunner!: TaskRunner;
   private projectManager!: ProjectManager;
   private projectAdapter!: ProjectAdapter;
-  private subAgentManager: SubAgentManager | null = null;
   private imageManager: ImageManager | null = null;
   private tickManager!: TickManager;
   private reflectionOrchestrator!: ReflectionOrchestrator;
@@ -147,26 +145,11 @@ export class PegasusApp {
    *   - owner: forward to MainAgent.send() (trusted)
    *   - untrusted: route to per-channel Project for isolated processing
    *   - no_owner_configured: discard message, notify MainAgent
-   *
-   * Also detects SubAgent completion from tagged notify messages.
    */
   routeMessage(message: InboundMessage): void {
     if (!this._mainAgent) {
       logger.warn("route_message_before_start");
       return;
-    }
-
-    // SubAgent completion detection — do this before security check
-    // because subagent messages are always trusted (internal)
-    if (
-      message.channel.type === "subagent" &&
-      this.subAgentManager &&
-      message.metadata?.subagentDone
-    ) {
-      this.subAgentManager.markDone(
-        message.channel.channelId,
-        message.metadata.subagentDone as "completed" | "failed",
-      );
     }
 
     // Security classification
@@ -237,10 +220,9 @@ export class PegasusApp {
    *   6. AI Task Types
    *   7. TaskRunner
    *   8. Projects (ProjectManager + ProjectAdapter)
-   *   9. SubAgentManager
-   *  10. ImageManager (already created in constructor based on config)
-   *  11. TickManager
-   *  12. MainAgent (with injected deps)
+   *   9. ImageManager (already created in constructor based on config)
+   *  10. TickManager
+   *  11. MainAgent (with injected deps)
    */
   async start(): Promise<void> {
     if (this._started) {
@@ -386,7 +368,7 @@ export class PegasusApp {
     this.tickManager = new TickManager({
       getActiveWorkCount: () => ({
         tasks: this.taskRunner?.activeCount ?? 0,
-        subagents: this.subAgentManager?.activeCount ?? 0,
+        subagents: 0,  // SubAgentManager removed — all work tracked by TaskRunner
       }),
       hasPendingWork: () => false, // Conservative: let TickManager decide based on active work count
       onTick: (activeTasks, activeSubAgents) => {
@@ -408,7 +390,6 @@ export class PegasusApp {
       taskRunner: this.taskRunner,
       projectManager: this.projectManager,
       projectAdapter: this.projectAdapter,
-      subAgentManager: this.subAgentManager,
       imageManager: this.imageManager,
       tickManager: this.tickManager,
       reflectionOrchestrator: this.reflectionOrchestrator,
@@ -457,31 +438,7 @@ export class PegasusApp {
       }
     }
 
-    // 14. SubAgentManager
-    const workerAdapter = this.projectAdapter.getWorkerAdapter();
-    this.subAgentManager = new SubAgentManager(workerAdapter, this.settings.dataDir);
-
-    // SubAgentManager was null at injection time (chicken-and-egg: it needs
-    // ProjectAdapter's WorkerAdapter, which requires MainAgent to exist first).
-    // Use the type-safe setter to update MainAgent's reference.
-    this._mainAgent.setSubAgentManager(this.subAgentManager);
-
-    // Handle SubAgent Worker close events
-    workerAdapter.addOnWorkerClose((channelType, channelId) => {
-      if (channelType === "subagent" && this.subAgentManager) {
-        const entry = this.subAgentManager.get(channelId);
-        if (entry && entry.status === "active") {
-          this.subAgentManager.fail(channelId).catch((err) => {
-            logger.warn(
-              { subagentId: channelId, error: errorToString(err) },
-              "subagent_crash_fail_failed",
-            );
-          });
-        }
-      }
-    });
-
-    // 15. Telegram adapter (if configured)
+    // 14. Telegram adapter (if configured)
     const telegramConfig = this.settings.channels?.telegram;
     if (telegramConfig?.enabled && telegramConfig?.token) {
       const storeImageFn = this.getStoreImageFn();
@@ -511,38 +468,22 @@ export class PegasusApp {
     // even though MainAgent.onStop() also calls tickManager.stop() in injected mode.
     this.tickManager?.stop();
 
-    // 3. Stop active SubAgents
-    if (this.subAgentManager) {
-      const activeSubAgents = this.subAgentManager.list("active");
-      for (const entry of activeSubAgents) {
-        try {
-          await this.subAgentManager.complete(entry.id);
-        } catch (err) {
-          logger.warn(
-            { subagentId: entry.id, error: errorToString(err) },
-            "subagent_stop_failed",
-          );
-        }
-      }
-      this.subAgentManager = null;
-    }
-
-    // 4. Stop project Workers
+    // 3. Stop project Workers
     await this.projectAdapter.stop();
 
-    // 5. Stop token refresh monitor
+    // 4. Stop token refresh monitor
     if (this.tokenRefreshMonitor) {
       this.tokenRefreshMonitor.stop();
       this.tokenRefreshMonitor = null;
     }
 
-    // 6. Disconnect MCP servers
+    // 5. Disconnect MCP servers
     if (this.mcpManager) {
       await this.mcpManager.disconnectAll();
       this.mcpManager = null;
     }
 
-    // 7. Close ImageManager
+    // 6. Close ImageManager
     if (this.imageManager) {
       this.imageManager.close();
       this.imageManager = null;

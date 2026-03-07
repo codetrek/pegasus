@@ -15,7 +15,6 @@ import { AITaskTypeRegistry } from "@pegasus/aitask-types/index.ts";
 import { TaskRunner } from "@pegasus/agents/task-runner.ts";
 import { ProjectManager } from "@pegasus/projects/manager.ts";
 import { ProjectAdapter } from "@pegasus/projects/project-adapter.ts";
-import { SubAgentManager } from "@pegasus/subagent/manager.ts";
 import { ImageManager } from "@pegasus/media/image-manager.ts";
 import { TickManager } from "@pegasus/agents/tick-manager.ts";
 import { ReflectionOrchestrator } from "@pegasus/agents/reflection-orchestrator.ts";
@@ -89,10 +88,6 @@ export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubs
   const projectManager = new ProjectManager(projectsDir);
   const projectAdapter = opts.projectAdapter ?? new ProjectAdapter();
 
-  // SubAgentManager — uses the ProjectAdapter's WorkerAdapter
-  const workerAdapter = projectAdapter.getWorkerAdapter();
-  const subAgentManager = new SubAgentManager(workerAdapter, settings.dataDir);
-
   // Vision: ImageManager disabled by default in tests to avoid SQLite DB cleanup issues.
   // Tests that need vision should set settings.vision.enabled = true or inject imageManager.
   let imageManager: ImageManager | null = null;
@@ -111,7 +106,7 @@ export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubs
   const tickManager = new TickManager({
     getActiveWorkCount: () => ({
       tasks: taskRunner?.activeCount ?? 0,
-      subagents: subAgentManager?.activeCount ?? 0,
+      subagents: 0,  // SubAgentManager removed — all work tracked by TaskRunner
     }),
     hasPendingWork: () => false,
     onTick: (activeTasks, activeSubAgents) => {
@@ -147,7 +142,6 @@ export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubs
     taskRunner,
     projectManager,
     projectAdapter,
-    subAgentManager,
     imageManager,
     tickManager,
     reflectionOrchestrator,

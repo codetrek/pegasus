@@ -2,7 +2,7 @@
  * Workers module — generic Worker lifecycle management.
  *
  * Re-exports the WorkerAdapter and related types for use by
- * higher-level adapters (ProjectAdapter, SubAgentManager).
+ * higher-level adapters (ProjectAdapter).
  */
 export {
   WorkerAdapter,

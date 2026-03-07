@@ -240,11 +240,13 @@ describe("TaskRunner", () => {
       runner.submit("test", "user", "unknown_type", "Test");
 
       // Access the cached tool registry to verify tool count
-      const cachedRegistry = (runner as any).toolRegistryCache.get("unknown_type");
+      // Cache key is now "type:dDEPTH" — default depth is 0
+      const cachedRegistry = (runner as any).toolRegistryCache.get("unknown_type:d0");
       expect(cachedRegistry).toBeDefined();
 
       const registeredTools = cachedRegistry.list();
-      expect(registeredTools.length).toBe(allTaskTools.length);
+      // depth=0 adds spawn_subagent + resume_subagent to the base allTaskTools
+      expect(registeredTools.length).toBe(allTaskTools.length + 2);
     }, 5000);
 
     test("registered type with specific tools only gets those tools", () => {
@@ -263,14 +265,18 @@ describe("TaskRunner", () => {
       const runner = new TaskRunner(createDeps({ model, taskTypeRegistry: registry }));
       runner.submit("read something", "user", "readonly", "Read task");
 
-      const cachedRegistry = (runner as any).toolRegistryCache.get("readonly");
+      // Cache key is now "type:dDEPTH" — default depth is 0
+      const cachedRegistry = (runner as any).toolRegistryCache.get("readonly:d0");
       expect(cachedRegistry).toBeDefined();
 
       const registeredTools = cachedRegistry.list();
-      expect(registeredTools.length).toBe(2);
+      // depth=0 adds spawn_subagent + resume_subagent to the type-specific tools
+      expect(registeredTools.length).toBe(4); // read_file + list_files + spawn_subagent + resume_subagent
       const toolNames = registeredTools.map((t: any) => t.name);
       expect(toolNames).toContain("read_file");
       expect(toolNames).toContain("list_files");
+      expect(toolNames).toContain("spawn_subagent");
+      expect(toolNames).toContain("resume_subagent");
     }, 5000);
   });
 

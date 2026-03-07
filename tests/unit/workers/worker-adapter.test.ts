@@ -871,6 +871,78 @@ describe("WorkerAdapter — Worker lifecycle (mocked Worker)", () => {
   });
 });
 
+// ── WorkerAdapter — addOnWorkerClose ─────────────────────────────────
+
+describe("WorkerAdapter — addOnWorkerClose", () => {
+  const OriginalWorker = globalThis.Worker;
+
+  it("addOnWorkerClose should set callback when no existing callback", () => {
+    const { FakeWorker, instances } = createFakeWorkerClass();
+    globalThis.Worker = FakeWorker as any;
+
+    try {
+      const adapter = new WorkerAdapter("/fake-worker.ts");
+      adapter.setOnNotify(() => {});
+
+      const closedWorkers: Array<{ channelType: string; channelId: string }> = [];
+      adapter.addOnWorkerClose((channelType, channelId) => {
+        closedWorkers.push({ channelType, channelId });
+      });
+
+      adapter.startWorker("project", "proj-add-close", "project", {});
+      const fakeWorker = instances[0]!;
+
+      // Trigger close event
+      for (const listener of fakeWorker.closeListeners) {
+        listener();
+      }
+
+      expect(closedWorkers).toHaveLength(1);
+      expect(closedWorkers[0]).toEqual({ channelType: "project", channelId: "proj-add-close" });
+    } finally {
+      globalThis.Worker = OriginalWorker;
+    }
+  });
+
+  it("addOnWorkerClose should compose with existing callback", () => {
+    const { FakeWorker, instances } = createFakeWorkerClass();
+    globalThis.Worker = FakeWorker as any;
+
+    try {
+      const adapter = new WorkerAdapter("/fake-worker.ts");
+      adapter.setOnNotify(() => {});
+
+      const callOrder: string[] = [];
+
+      // Set existing callback first
+      adapter.setOnWorkerClose((channelType, channelId) => {
+        callOrder.push(`first:${channelType}:${channelId}`);
+      });
+
+      // Add a second callback — should compose with existing
+      adapter.addOnWorkerClose((channelType, channelId) => {
+        callOrder.push(`second:${channelType}:${channelId}`);
+      });
+
+      adapter.startWorker("project", "proj-compose", "project", {});
+      const fakeWorker = instances[0]!;
+
+      // Trigger close event
+      for (const listener of fakeWorker.closeListeners) {
+        listener();
+      }
+
+      // Both callbacks should have been invoked, in order
+      expect(callOrder).toEqual([
+        "first:project:proj-compose",
+        "second:project:proj-compose",
+      ]);
+    } finally {
+      globalThis.Worker = OriginalWorker;
+    }
+  });
+});
+
 // ── WorkerAdapter — broadcast ────────────────────────────────────────
 
 describe("WorkerAdapter — broadcast", () => {

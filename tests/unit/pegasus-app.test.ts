@@ -568,7 +568,7 @@ describe("PegasusApp", () => {
                 finishReason: "tool_calls",
                 toolCalls: [{
                   id: "tc-spawn",
-                  name: "spawn_task",
+                  name: "spawn_subagent",
                   arguments: { description: "App task test", input: "do something" },
                 }],
                 usage: { promptTokens: 10, completionTokens: 10 },
@@ -608,7 +608,7 @@ describe("PegasusApp", () => {
       );
       if (await sessionFile.exists()) {
         const content = await sessionFile.text();
-        expect(content).toContain("spawn_task");
+        expect(content).toContain("spawn_subagent");
       }
 
       await app.stop();

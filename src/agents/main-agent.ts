@@ -38,7 +38,6 @@ import { SkillRegistry } from "../skills/index.ts";
 import { AITaskTypeRegistry } from "../aitask-types/index.ts";
 import { ProjectManager } from "../projects/manager.ts";
 import { ProjectAdapter } from "../projects/project-adapter.ts";
-import { SubAgentManager } from "../subagent/manager.ts";
 import { OwnerStore } from "../security/owner-store.ts";
 import { TickManager } from "./tick-manager.ts";
 import { AuthManager } from "./auth-manager.ts";
@@ -71,7 +70,6 @@ export interface InjectedSubsystems {
   taskRunner: TaskRunner;
   projectManager: ProjectManager;
   projectAdapter: ProjectAdapter;
-  subAgentManager: SubAgentManager | null;
   imageManager: ImageManager | null;
   tickManager: TickManager;
   reflectionOrchestrator: ReflectionOrchestrator;
@@ -99,7 +97,6 @@ export class MainAgent extends Agent {
   private projectManager!: ProjectManager;
   private projectAdapter!: ProjectAdapter;
   private mainStorePaths: AgentStorePaths;
-  private subAgentManager: SubAgentManager | null = null;
   private ownerStore: OwnerStore;
   private _systemPrompt: string = "";
   private tickManager!: TickManager;
@@ -147,7 +144,6 @@ export class MainAgent extends Agent {
     this.taskRunner = inj.taskRunner;
     this.projectManager = inj.projectManager;
     this.projectAdapter = inj.projectAdapter;
-    this.subAgentManager = inj.subAgentManager;
     this.tickManager = inj.tickManager;
   }
 
@@ -241,7 +237,6 @@ export class MainAgent extends Agent {
       return { id: ref.id, mimeType: ref.mimeType };
     } : undefined;
     ctx.resolveImage = imgMgr ? (idOrPath: string) => imgMgr.resolve(idOrPath) : undefined;
-    ctx.subAgentManager = this.subAgentManager;
     ctx.skillRegistry = this.skillRegistry;
     ctx.tickManager = this.tickManager;
     ctx.onSkillsReloaded = () => {
@@ -379,11 +374,6 @@ export class MainAgent extends Agent {
     return this.projectManager;
   }
 
-  /** Expose SubAgentManager for testing. */
-  get subAgents(): SubAgentManager | null {
-    return this.subAgentManager;
-  }
-
   /** Expose owner store for testing. */
   get owner(): OwnerStore {
     return this.ownerStore;
@@ -427,12 +417,4 @@ export class MainAgent extends Agent {
     this._systemPrompt = this._buildSystemPrompt();
   }
 
-  /**
-   * Set SubAgentManager (called by PegasusApp after initialization order resolves).
-   * SubAgentManager depends on ProjectAdapter's WorkerAdapter, which requires
-   * MainAgent to exist first — so it's created after MainAgent and injected here.
-   */
-  setSubAgentManager(mgr: SubAgentManager): void {
-    this.subAgentManager = mgr;
-  }
 }

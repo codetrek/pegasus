@@ -203,7 +203,7 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("memory_write");
     expect(prompt).toContain("memory_patch");
     expect(prompt).toContain("memory_append");
-    expect(prompt).toContain("spawn_task");
+    expect(prompt).toContain("spawn_subagent");
     expect(prompt).toContain("spawn_subagent");
     expect(prompt).toContain("resume_subagent");
     expect(prompt).toContain("current_time");
@@ -223,12 +223,10 @@ describe("buildSystemPrompt", () => {
     // Verify delegation tools are under Delegation, not Communication
     const delegationIdx = prompt.indexOf("### Delegation");
     const projectsIdx = prompt.indexOf("### Projects");
-    const spawnTaskIdx = prompt.indexOf("spawn_task");
     const spawnSubagentIdx = prompt.indexOf("spawn_subagent");
     const resumeSubagentIdx = prompt.indexOf("resume_subagent");
 
-    expect(spawnTaskIdx).toBeGreaterThan(delegationIdx);
-    expect(spawnTaskIdx).toBeLessThan(projectsIdx);
+    // spawn_subagent and resume_subagent should be between Delegation and Projects headers
     expect(spawnSubagentIdx).toBeGreaterThan(delegationIdx);
     expect(spawnSubagentIdx).toBeLessThan(projectsIdx);
     expect(resumeSubagentIdx).toBeGreaterThan(delegationIdx);
@@ -259,8 +257,7 @@ describe("buildSystemPrompt", () => {
     const prompt = buildSystemPrompt({ mode: "main", persona });
     // Sub-section headers
     expect(prompt).toContain("### reply() — Handle It Yourself");
-    expect(prompt).toContain("### spawn_task() — Single Atomic Task");
-    expect(prompt).toContain("### spawn_subagent() — Complex Multi-Step Work");
+    expect(prompt).toContain("### spawn_subagent() — Delegated Work");
     expect(prompt).toContain("### create_project() — Long-Lived Effort");
     // Decision Flowchart
     expect(prompt).toContain("### Decision Flowchart");
@@ -269,8 +266,8 @@ describe("buildSystemPrompt", () => {
     // Concrete examples
     expect(prompt).toContain("Search the web for X");
     expect(prompt).toContain("Research top 5 frameworks");
-    // Key differences
-    expect(prompt).toContain('spawn_task = "do this one thing"');
+    // spawn_subagent is the unified delegation tool
+    expect(prompt).toContain("spawn_subagent(type=");
   });
 
   test("does NOT include Delegation in task mode", () => {
