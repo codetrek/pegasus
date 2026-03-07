@@ -415,7 +415,7 @@ describe("MainAgent", () => {
     await agent.stop();
   }, 10_000);
 
-  it("should handle spawn_task tool call and task completion", async () => {
+  it("should handle spawn_subagent tool call and task completion", async () => {
     let mainCallCount = 0;
     const model: LanguageModel = {
       provider: "test",
@@ -430,14 +430,14 @@ describe("MainAgent", () => {
         if (isMainAgent) {
           mainCallCount++;
           if (mainCallCount === 1) {
-            // First MainAgent call: LLM requests spawn_task
+            // First MainAgent call: LLM requests spawn_subagent
             return {
               text: "I need to spawn a task for this.",
               finishReason: "tool_calls",
               toolCalls: [
                 {
                   id: "tc-spawn",
-                  name: "spawn_task",
+                  name: "spawn_subagent",
                   arguments: {
                     description: "Do a complex search",
                     input: "search for weather",
@@ -487,7 +487,7 @@ describe("MainAgent", () => {
       channel: { type: "cli", channelId: "test" },
     });
 
-    // Wait for spawn_task to process — processStep is non-blocking,
+    // Wait for spawn_subagent to process — processStep is non-blocking,
     // so we need more time for the tool dispatch and follow-up think.
     await Bun.sleep(200);
 
@@ -689,7 +689,7 @@ describe("MainAgent", () => {
               toolCalls: [
                 {
                   id: "tc-spawn",
-                  name: "spawn_task",
+                  name: "spawn_subagent",
                   arguments: { description: "Do work", input: "initial work" },
                 },
               ],
@@ -2808,7 +2808,7 @@ describe("MainAgent", () => {
       await agent.stop();
     }, 10_000);
 
-    it("should use TaskRunner for spawn_task", async () => {
+    it("should use TaskRunner for spawn_subagent", async () => {
       let mainCallCount = 0;
       const model: LanguageModel = {
         provider: "test",
@@ -2828,7 +2828,7 @@ describe("MainAgent", () => {
                 toolCalls: [
                   {
                     id: "tc-spawn",
-                    name: "spawn_task",
+                    name: "spawn_subagent",
                     arguments: {
                       description: "TaskRunner test task",
                       input: "do the thing",
@@ -2865,7 +2865,7 @@ describe("MainAgent", () => {
         channel: { type: "cli", channelId: "test" },
       });
 
-      // Wait for spawn_task to be processed (processStep is non-blocking)
+      // Wait for spawn_subagent to be processed (processStep is non-blocking)
       await Bun.sleep(200);
 
       // Verify spawn tool result includes description in session messages
@@ -2874,7 +2874,7 @@ describe("MainAgent", () => {
         `${testDataDir}/agents/main/session/current.jsonl`,
       ).text();
       expect(sessionContent).toContain('"description":"TaskRunner test task"');
-      expect(sessionContent).toContain("spawn_task");
+      expect(sessionContent).toContain("spawn_subagent");
 
       // Wait for task completion
       await Bun.sleep(150);

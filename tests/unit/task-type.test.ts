@@ -299,7 +299,7 @@ describe("AITaskTypeRegistry", () => {
     const metadata = reg.getMetadataForPrompt();
     expect(metadata).toContain("general");
     expect(metadata).toContain("explore");
-    expect(metadata).toContain("spawn_task");
+    expect(metadata).toContain("spawn_subagent");
   });
 
   test("has returns true for registered types", () => {
