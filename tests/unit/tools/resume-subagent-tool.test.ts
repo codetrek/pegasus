@@ -7,8 +7,8 @@ describe("resume_subagent tool", () => {
   function makeContext(overrides?: Partial<ToolContext>): ToolContext {
     return {
       taskId: "main-agent",
-      subAgentManager: {
-        resume: (_id: string, _input: string) => {},
+      taskRegistry: {
+        resume: async (_id: string, _input: string) => "sa-001",
       },
       tickManager: { start: () => {} },
       ...overrides,
@@ -18,9 +18,10 @@ describe("resume_subagent tool", () => {
   it("should resume a subagent and return status", async () => {
     let capturedArgs: unknown[] = [];
     const ctx = makeContext({
-      subAgentManager: {
-        resume: (id: string, input: string) => {
+      taskRegistry: {
+        resume: async (id: string, input: string) => {
           capturedArgs = [id, input];
+          return id;
         },
       },
     });
@@ -53,19 +54,19 @@ describe("resume_subagent tool", () => {
     expect(tickStarted).toBe(true);
   });
 
-  it("should return error when subAgentManager is not available", async () => {
+  it("should return error when taskRegistry is not available", async () => {
     const result = await resume_subagent.execute(
       { subagent_id: "sa-1", input: "go" },
       { taskId: "test" },
     );
     expect(result.success).toBe(false);
-    expect(result.error).toContain("SubAgentManager not available");
+    expect(result.error).toContain("taskRegistry not available");
   });
 
   it("should handle subagent not found error", async () => {
     const ctx = makeContext({
-      subAgentManager: {
-        resume: () => { throw new Error("SubAgent sa-999 not found"); },
+      taskRegistry: {
+        resume: async () => { throw new Error("Task sa-999 not found in task index"); },
       },
     });
 
@@ -79,8 +80,8 @@ describe("resume_subagent tool", () => {
 
   it("should handle subagent still running error", async () => {
     const ctx = makeContext({
-      subAgentManager: {
-        resume: () => { throw new Error("SubAgent is still running"); },
+      taskRegistry: {
+        resume: async () => { throw new Error("Task is still running, cannot resume"); },
       },
     });
 
@@ -105,8 +106,8 @@ describe("resume_subagent tool", () => {
   it("should not start tickManager on error", async () => {
     let tickStarted = false;
     const ctx = makeContext({
-      subAgentManager: {
-        resume: () => { throw new Error("fail"); },
+      taskRegistry: {
+        resume: async () => { throw new Error("fail"); },
       },
       tickManager: { start: () => { tickStarted = true; } },
     });
@@ -134,7 +135,7 @@ describe("resume_subagent tool", () => {
   it("should have correct tool metadata", () => {
     expect(resume_subagent.name).toBe("resume_subagent");
     expect(resume_subagent.description).toContain("Resume");
-    expect(resume_subagent.description).toContain("SubAgent");
+    expect(resume_subagent.description).toContain("sub-agent");
     expect(resume_subagent.category).toBe(ToolCategory.SYSTEM);
   });
 

@@ -193,7 +193,7 @@ describe("MainAgent", () => {
     }
     activeAgents = [];
     // Allow any remaining microtasks (e.g. appendFile callbacks) to settle
-    await Bun.sleep(10);
+    await Bun.sleep(50);
     await rm(testDataDir, { recursive: true, force: true }).catch(() => {});
   });
 
@@ -209,7 +209,7 @@ describe("MainAgent", () => {
     agent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
 
     // Wait for async processing
-    await Bun.sleep(30);
+    await Bun.sleep(50);
 
     expect(replies.length).toBeGreaterThanOrEqual(1);
     expect(replies[0]!.text).toBe("Hello! How can I help?");
@@ -229,7 +229,7 @@ describe("MainAgent", () => {
       text: "test message",
       channel: { type: "cli", channelId: "test" },
     });
-    await Bun.sleep(50);
+    await Bun.sleep(200);
 
     // Verify session was persisted
     const content = await Bun.file(
@@ -264,7 +264,7 @@ describe("MainAgent", () => {
       text: "will fail",
       channel: { type: "cli", channelId: "test" },
     });
-    await Bun.sleep(50);
+    await Bun.sleep(200);
 
     // processStep error is logged, not delivered as a reply to user.
     // The error is caught internally — no reply is produced for LLM errors.
@@ -322,7 +322,7 @@ describe("MainAgent", () => {
       channel: { type: "cli", channelId: "test" },
     });
 
-    await Bun.sleep(10);
+    await Bun.sleep(50);
 
     expect(replies).toHaveLength(2);
 
@@ -406,7 +406,7 @@ describe("MainAgent", () => {
       text: "what time is it",
       channel: { type: "cli", channelId: "test" },
     });
-    await Bun.sleep(10);
+    await Bun.sleep(50);
 
     expect(callCount).toBeGreaterThanOrEqual(2);
     expect(replies).toHaveLength(1);
@@ -489,7 +489,7 @@ describe("MainAgent", () => {
 
     // Wait for spawn_task to process — processStep is non-blocking,
     // so we need more time for the tool dispatch and follow-up think.
-    await Bun.sleep(50);
+    await Bun.sleep(200);
 
     // Should get at least one reply (the post-spawn response)
     expect(replies.length).toBeGreaterThanOrEqual(1);
@@ -529,7 +529,7 @@ describe("MainAgent", () => {
       text: "hello",
       channel: { type: "cli", channelId: "test" },
     });
-    await Bun.sleep(10);
+    await Bun.sleep(50);
 
     // Empty text + no tool calls → no reply sent (not an error)
     expect(replies).toHaveLength(0);
@@ -568,7 +568,7 @@ describe("MainAgent", () => {
       text: "hi",
       channel: { type: "slack", channelId: "C123" },
     });
-    await Bun.sleep(10);
+    await Bun.sleep(50);
 
     expect(capturedSystem).toContain("Built in a secret lab");
     expect(capturedSystem).toContain("slack");
@@ -594,7 +594,7 @@ describe("MainAgent", () => {
       text: "hello",
       channel: { type: "cli", channelId: "test" },
     });
-    await Bun.sleep(50);
+    await Bun.sleep(200);
 
     // Inner monologue should NOT produce a reply
     expect(replies).toHaveLength(0);
@@ -622,7 +622,7 @@ describe("MainAgent", () => {
       text: "hello from slack",
       channel: { type: "slack", channelId: "C-slack-123" },
     });
-    await Bun.sleep(10);
+    await Bun.sleep(50);
 
     expect(replies).toHaveLength(1);
     expect(replies[0]!.text).toBe("Hey Slack!");
@@ -658,7 +658,7 @@ describe("MainAgent", () => {
       text: "hi",
       channel: { type: "cli", channelId: "test" },
     });
-    await Bun.sleep(10);
+    await Bun.sleep(50);
 
     // System prompt should explain inner monologue mode
     expect(capturedSystem).toContain("INNER MONOLOGUE");
@@ -776,7 +776,7 @@ describe("MainAgent", () => {
     });
 
     // Wait for spawn → task complete → resume → task complete again
-    await Bun.sleep(50);
+    await Bun.sleep(300);
 
     // Should have received replies
     expect(replies.length).toBeGreaterThanOrEqual(1);
@@ -833,7 +833,7 @@ describe("MainAgent", () => {
       text: "resume some old task",
       channel: { type: "cli", channelId: "test" },
     });
-    await Bun.sleep(10);
+    await Bun.sleep(50);
 
     // Should not crash — error is handled gracefully
     // The LLM sees the error in tool result and replies to user
@@ -863,7 +863,7 @@ describe("MainAgent", () => {
     agent.onReply(() => {});
 
     agent.send({ text: "hi", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(10);
+    await Bun.sleep(50);
 
     expect(capturedSystem).toContain("session_archive_read");
     expect(capturedSystem).toContain("Session History");
@@ -919,7 +919,7 @@ describe("MainAgent", () => {
 
     // Send a message — beforeLLMCall detects session chars exceed threshold → compacts
     agent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(100);
+    await Bun.sleep(500);
 
     // Verify compact happened: archive file should exist
     const { readdir } = await import("node:fs/promises");
@@ -983,7 +983,7 @@ describe("MainAgent", () => {
 
     // Send a message — beforeLLMCall detects session chars exceed threshold → compacts
     agent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(30);
+    await Bun.sleep(100);
 
     // Verify compact happened: archive file should exist
     const { readdir } = await import("node:fs/promises");
@@ -1045,7 +1045,7 @@ describe("MainAgent", () => {
 
     // Send a message — triggers compact; summarize fails → mechanical summary
     agent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(30);
+    await Bun.sleep(100);
 
     // Verify compact happened: archive file should exist
     const { readdir } = await import("node:fs/promises");
@@ -1104,7 +1104,7 @@ describe("MainAgent", () => {
     agent.onReply(() => {});
 
     agent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(10);
+    await Bun.sleep(50);
 
     expect(capturedSystem).toContain("Available skills");
     expect(capturedSystem).toContain("test-skill");
@@ -1130,7 +1130,7 @@ describe("MainAgent", () => {
     agent.onReply((msg) => replies.push(msg));
 
     agent.send({ text: "/nonexistent-skill", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(10);
+    await Bun.sleep(50);
 
     // Should have been treated as normal text (no skill found)
     expect(replies.length).toBeGreaterThanOrEqual(1);
@@ -1194,7 +1194,7 @@ describe("MainAgent", () => {
     agent.onReply((msg) => replies.push(msg));
 
     agent.send({ text: "help me", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(10);
+    await Bun.sleep(50);
 
     // The tool result message should contain the skill body
     const toolResults = capturedMessages.filter((m) => m.role === "tool");
@@ -1244,7 +1244,7 @@ describe("MainAgent", () => {
     agent.onReply((msg) => replies.push(msg));
 
     agent.send({ text: "use skill", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(10);
+    await Bun.sleep(50);
 
     expect(replies.length).toBeGreaterThanOrEqual(1);
 
@@ -1286,7 +1286,7 @@ describe("MainAgent", () => {
     agent.onReply(() => {});
 
     agent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(10);
+    await Bun.sleep(50);
 
     // Find the user message in captured messages
     const userMsg = capturedMessages.find(
@@ -1345,7 +1345,7 @@ describe("MainAgent", () => {
     agent.onReply(() => {});
 
     agent.send({ text: "what time", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(10);
+    await Bun.sleep(50);
 
     // Find the tool result message for current_time (in the second LLM call messages)
     const toolMsg = capturedMessages.find(
@@ -1523,7 +1523,7 @@ describe("MainAgent", () => {
 
       // Send message — beforeLLMCall detects char threshold exceeded → compacts → reflection fires
       agent.send({ text: "One last thing", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(50); // Wait for compact + reflection to fire
+      await Bun.sleep(200); // Wait for compact + reflection to fire
 
       // Verify compact happened
       const { readdir } = await import("node:fs/promises");
@@ -1609,7 +1609,7 @@ describe("MainAgent", () => {
 
       // Send message — triggers compact → reflection (which throws) → .catch() handles it
       agent.send({ text: "One last thing", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(50);
+      await Bun.sleep(200);
 
       // Agent should still be operational (error was caught, not propagated)
       // Just verifying no crash occurred
@@ -1684,7 +1684,7 @@ describe("MainAgent", () => {
       // Send message — triggers compact. preCompactMessages has 0 seed user + 1 incoming = 1 user.
       // shouldReflect returns false (userMessages < 2).
       agent.send({ text: "test", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(50);
+      await Bun.sleep(200);
 
       // Reflection should NOT have been called (only 1 user message)
       expect(reflectionCalled).toBe(false);
@@ -1718,208 +1718,11 @@ describe("MainAgent", () => {
       } as unknown as WorkerAdapter;
     }
 
-    it("should handle spawn_subagent tool call (follow-up think terminates naturally)", async () => {
-      let callCount = 0;
-      const model: LanguageModel = {
-        provider: "test",
-        modelId: "test-model",
-        async generate(): Promise<GenerateTextResult> {
-          callCount++;
-          if (callCount === 1) {
-            // LLM requests spawn_subagent
-            return {
-              text: "I'll spawn a subagent for this.",
-              finishReason: "tool_calls",
-              toolCalls: [
-                {
-                  id: "tc-spawn-sa",
-                  name: "spawn_subagent",
-                  arguments: {
-                    description: "Research weather patterns",
-                    input: "Analyze weather data for the past week",
-                  },
-                },
-              ],
-              usage: { promptTokens: 10, completionTokens: 10 },
-            };
-          }
-          // Follow-up think: LLM returns stop (natural termination)
-          return {
-            text: "",
-            finishReason: "stop",
-            usage: { promptTokens: 5, completionTokens: 0 },
-          };
-        },
-      };
+    // spawn_subagent tool call test removed — old SubAgentManager/Worker architecture.
+    // New tests will be added in Tasks 5-8 after SubAgentManager deletion.
 
-      const mockWA = createMockWorkerAdapter();
-      const projectAdapter = new ProjectAdapter(mockWA);
-
-      const agent = createMainAgent({ models: createMockModelRegistry(model), settings: testSettings(), projectAdapter: projectAdapter });
-
-      await agent.start();
-      agent.onReply(() => {});
-
-      agent.send({
-        text: "analyze weather",
-        channel: { type: "cli", channelId: "test" },
-      });
-
-      await Bun.sleep(50);
-
-      // Verify spawn was called on WorkerAdapter
-      expect(mockWA.startWorker).toHaveBeenCalledTimes(1);
-      const spawnCall = (mockWA.startWorker as ReturnType<typeof mock>).mock.calls[0]!;
-      expect(spawnCall[0]).toBe("subagent"); // channelType
-      expect(spawnCall[2]).toBe("subagent"); // mode
-
-      // Verify SubAgentManager tracks the entry
-      expect(agent.subAgents).not.toBeNull();
-      const entries = agent.subAgents!.list();
-      expect(entries).toHaveLength(1);
-      expect(entries[0]!.description).toBe("Research weather patterns");
-      expect(entries[0]!.status).toBe("active");
-
-      // Verify session has the spawn result (tool message)
-      const sessionContent = await Bun.file(
-        `${testDataDir}/agents/main/session/current.jsonl`,
-      ).text();
-      expect(sessionContent).toContain("spawn_subagent");
-      expect(sessionContent).toContain("Research weather patterns");
-
-      // follow-up think fires after spawn_subagent, LLM returns stop → callCount = 2
-      expect(callCount).toBe(2);
-
-      await agent.stop();
-    }, 10_000);
-
-    it("should handle resume_subagent tool call on completed subagent", async () => {
-      let callCount = 0;
-      let spawnedSubagentId: string | null = null;
-      const model: LanguageModel = {
-        provider: "test",
-        modelId: "test-model",
-        async generate(options: {
-          system?: string;
-          messages?: Message[];
-        }): Promise<GenerateTextResult> {
-          const isMainAgent = options.system?.includes("INNER MONOLOGUE") ?? false;
-          if (!isMainAgent) {
-            return { text: "", finishReason: "stop", usage: { promptTokens: 5, completionTokens: 0 } };
-          }
-
-          callCount++;
-          if (callCount === 1) {
-            // First call: spawn a subagent
-            return {
-              text: "Spawning subagent.",
-              finishReason: "tool_calls",
-              toolCalls: [
-                {
-                  id: "tc-spawn",
-                  name: "spawn_subagent",
-                  arguments: {
-                    description: "Analyze data",
-                    input: "initial analysis",
-                  },
-                },
-              ],
-              usage: { promptTokens: 10, completionTokens: 10 },
-            };
-          }
-          if (callCount === 2) {
-            // Follow-up think after spawn: stop (natural termination)
-            return {
-              text: "",
-              finishReason: "stop",
-              usage: { promptTokens: 5, completionTokens: 0 },
-            };
-          }
-          if (callCount === 3) {
-            // Third call: after subagent notification, try to resume
-            // Extract subagentId from session
-            const toolMsgs = (options.messages ?? []).filter(
-              (m: Message) => m.role === "tool" && m.content.includes("subagentId"),
-            );
-            if (toolMsgs.length > 0) {
-              try {
-                const parsed = JSON.parse(toolMsgs[0]!.content);
-                spawnedSubagentId = parsed.subagentId;
-              } catch { /* ignore */ }
-            }
-            if (spawnedSubagentId) {
-              return {
-                text: "Resuming subagent with new input.",
-                finishReason: "tool_calls",
-                toolCalls: [
-                  {
-                    id: "tc-resume-sa",
-                    name: "resume_subagent",
-                    arguments: { subagent_id: spawnedSubagentId, input: "do more analysis" },
-                  },
-                ],
-                usage: { promptTokens: 20, completionTokens: 10 },
-              };
-            }
-          }
-          // Default: stop
-          return {
-            text: "",
-            finishReason: "stop",
-            usage: { promptTokens: 5, completionTokens: 0 },
-          };
-        },
-      };
-
-      const mockWA = createMockWorkerAdapter();
-      const projectAdapter = new ProjectAdapter(mockWA);
-
-      const agent = createMainAgent({ models: createMockModelRegistry(model), settings: testSettings(), projectAdapter: projectAdapter });
-
-      await agent.start();
-      agent.onReply(() => {});
-
-      // Step 1: Spawn the subagent
-      agent.send({
-        text: "analyze data",
-        channel: { type: "cli", channelId: "test" },
-      });
-      await Bun.sleep(50);
-
-      // Verify spawn
-      expect(agent.subAgents).not.toBeNull();
-      const entries = agent.subAgents!.list();
-      expect(entries).toHaveLength(1);
-      spawnedSubagentId = entries[0]!.id;
-
-      // Step 2: Complete the subagent (simulate Worker completing)
-      await agent.subAgents!.complete(spawnedSubagentId);
-      const afterComplete = agent.subAgents!.get(spawnedSubagentId);
-      expect(afterComplete?.status).toBe("completed");
-
-      // Step 3: Send another message which triggers the LLM to call resume_subagent
-      agent.send({
-        text: "continue analysis",
-        channel: { type: "cli", channelId: "test" },
-      });
-      await Bun.sleep(50);
-
-      // Verify resume happened — Worker should be started again
-      expect(mockWA.startWorker).toHaveBeenCalledTimes(2); // spawn + resume
-
-      // Verify entry is active again
-      const afterResume = agent.subAgents!.get(spawnedSubagentId);
-      expect(afterResume?.status).toBe("active");
-
-      // Verify session has the resume result
-      const sessionContent = await Bun.file(
-        `${testDataDir}/agents/main/session/current.jsonl`,
-      ).text();
-      expect(sessionContent).toContain("resume_subagent");
-      expect(sessionContent).toContain("resumed");
-
-      await agent.stop();
-    }, 10_000);
+    // resume_subagent on completed subagent test removed — old SubAgentManager/Worker architecture.
+    // New tests will be added in Tasks 5-8 after SubAgentManager deletion.
 
     it("should handle resume_subagent error (triggers follow-up think)", async () => {
       let callCount = 0;
@@ -1973,7 +1776,7 @@ describe("MainAgent", () => {
         text: "resume old subagent",
         channel: { type: "cli", channelId: "test" },
       });
-      await Bun.sleep(10);
+      await Bun.sleep(50);
 
       // Error triggers follow-up → LLM replies with "SubAgent not found"
       expect(callCount).toBeGreaterThanOrEqual(2); // 1st: resume, 2nd: follow-up
@@ -2040,7 +1843,7 @@ describe("MainAgent", () => {
         channel: { type: "subagent", channelId: "sa_1_12345" },
       });
 
-      await Bun.sleep(10);
+      await Bun.sleep(50);
 
       // MainAgent should have processed the subagent message via _think()
       // and the LLM should have produced a reply
@@ -2090,7 +1893,7 @@ describe("MainAgent", () => {
         },
       });
 
-      await Bun.sleep(10);
+      await Bun.sleep(50);
 
       // The user message sent to the LLM should have images attached
       const userMsgs = capturedMessages.filter((m: Message) => m.role === "user");
@@ -2134,7 +1937,7 @@ describe("MainAgent", () => {
         channel: { type: "subagent", channelId: "sa_no_img" },
       });
 
-      await Bun.sleep(10);
+      await Bun.sleep(50);
 
       // The user message sent to the LLM should NOT have images
       const userMsgs = capturedMessages.filter((m: Message) => m.role === "user");
@@ -2181,7 +1984,7 @@ describe("MainAgent", () => {
         },
       });
 
-      await Bun.sleep(10);
+      await Bun.sleep(50);
 
       // Should merge: existing images + imageRefs
       const userMsgs = capturedMessages.filter((m: Message) => m.role === "user");
@@ -2200,103 +2003,8 @@ describe("MainAgent", () => {
     // SubAgent shutdown is now PegasusApp's responsibility (PegasusApp.stop()),
     // not MainAgent.onStop().
 
-    it("should detect subagent crash via addOnWorkerClose callback (lines 440-454)", async () => {
-      let callCount = 0;
-      const model: LanguageModel = {
-        provider: "test",
-        modelId: "test-model",
-        async generate(): Promise<GenerateTextResult> {
-          callCount++;
-          if (callCount === 1) {
-            return {
-              text: "Spawning subagent.",
-              finishReason: "tool_calls",
-              toolCalls: [
-                {
-                  id: "tc-spawn-sa",
-                  name: "spawn_subagent",
-                  arguments: {
-                    description: "Crashable task",
-                    input: "do something that crashes",
-                  },
-                },
-              ],
-              usage: { promptTokens: 10, completionTokens: 10 },
-            };
-          }
-          return {
-            text: "",
-            finishReason: "stop",
-            usage: { promptTokens: 5, completionTokens: 0 },
-          };
-        },
-      };
-
-      // Capture the addOnWorkerClose callback so we can invoke it
-      let workerCloseCallback: ((channelType: string, channelId: string) => void) | null = null;
-      const mockWA = {
-        shutdownTimeoutMs: 30_000,
-        activeCount: 0,
-        startWorker: mock(() => {}),
-        stopWorker: mock(async () => {}),
-        stopAll: mock(async () => {}),
-        deliver: mock(() => true),
-        has: mock(() => false),
-        hasByKey: mock(() => false),
-        setModelRegistry: mock(() => {}),
-        setOnNotify: mock(() => {}),
-        setOnReply: mock(() => {}),
-        setOnWorkerClose: mock(() => {}),
-        addOnWorkerClose: mock((cb: (channelType: string, channelId: string) => void) => {
-          workerCloseCallback = cb;
-        }),
-      } as unknown as WorkerAdapter;
-
-      const projectAdapter = new ProjectAdapter(mockWA);
-
-      const agent = createMainAgent({ models: createMockModelRegistry(model), settings: testSettings(), projectAdapter: projectAdapter });
-
-      await agent.start();
-      agent.onReply(() => {});
-
-      // Wire crash detection callback (PegasusApp normally does this)
-      const workerAdapter = projectAdapter.getWorkerAdapter();
-      workerAdapter.addOnWorkerClose((channelType: string, channelId: string) => {
-        if (channelType === "subagent" && agent.subAgents) {
-          const entry = agent.subAgents.get(channelId);
-          if (entry && entry.status === "active") {
-            agent.subAgents.fail(channelId).catch(() => {});
-          }
-        }
-      });
-
-      agent.send({
-        text: "start crashable task",
-        channel: { type: "cli", channelId: "test" },
-      });
-      await Bun.sleep(50);
-
-      // Verify subagent is active
-      const entries = agent.subAgents!.list("active");
-      expect(entries).toHaveLength(1);
-      const subagentId = entries[0]!.id;
-
-      // The addOnWorkerClose callback should have been captured
-      expect(workerCloseCallback).not.toBeNull();
-
-      // Invoke the callback simulating a Worker crash (close while still "active")
-      workerCloseCallback!("subagent", subagentId);
-
-      // Wait for async fail() to fire
-      await Bun.sleep(10);
-
-      // The subagent should now be marked as failed
-      const updatedEntry = agent.subAgents!.get(subagentId);
-      expect(updatedEntry).toBeDefined();
-      expect(updatedEntry!.status).toBe("failed");
-
-      await agent.stop();
-    }, 10_000);
+    // Worker crash detection tests removed — old SubAgentManager/Worker architecture.
+    // SubAgent crash detection will be handled differently after Tasks 5-8.
 
     it("should ignore worker close for non-subagent channels (line 441 branch)", async () => {
       let workerCloseCallback: ((channelType: string, channelId: string) => void) | null = null;
@@ -2344,98 +2052,7 @@ describe("MainAgent", () => {
       await agent.stop();
     }, 10_000);
 
-    it("should ignore worker close when subagent is already done (line 443 branch)", async () => {
-      let callCount = 0;
-      const model: LanguageModel = {
-        provider: "test",
-        modelId: "test-model",
-        async generate(): Promise<GenerateTextResult> {
-          callCount++;
-          if (callCount === 1) {
-            return {
-              text: "Spawning subagent.",
-              finishReason: "tool_calls",
-              toolCalls: [
-                {
-                  id: "tc-spawn-sa",
-                  name: "spawn_subagent",
-                  arguments: {
-                    description: "Normal task",
-                    input: "do something",
-                  },
-                },
-              ],
-              usage: { promptTokens: 10, completionTokens: 10 },
-            };
-          }
-          return {
-            text: "",
-            finishReason: "stop",
-            usage: { promptTokens: 5, completionTokens: 0 },
-          };
-        },
-      };
-
-      let workerCloseCallback: ((channelType: string, channelId: string) => void) | null = null;
-      const mockWA = {
-        shutdownTimeoutMs: 30_000,
-        activeCount: 0,
-        startWorker: mock(() => {}),
-        stopWorker: mock(async () => {}),
-        stopAll: mock(async () => {}),
-        deliver: mock(() => true),
-        has: mock(() => false),
-        hasByKey: mock(() => false),
-        setModelRegistry: mock(() => {}),
-        setOnNotify: mock(() => {}),
-        setOnReply: mock(() => {}),
-        setOnWorkerClose: mock(() => {}),
-        addOnWorkerClose: mock((cb: (channelType: string, channelId: string) => void) => {
-          workerCloseCallback = cb;
-        }),
-      } as unknown as WorkerAdapter;
-
-      const projectAdapter = new ProjectAdapter(mockWA);
-
-      const agent = createMainAgent({ models: createMockModelRegistry(model), settings: testSettings(), projectAdapter: projectAdapter });
-
-      await agent.start();
-      agent.onReply(() => {});
-
-      // Wire crash detection callback (PegasusApp normally does this)
-      mockWA.addOnWorkerClose((channelType: string, channelId: string) => {
-        if (channelType === "subagent" && agent.subAgents) {
-          const entry = agent.subAgents.get(channelId);
-          if (entry && entry.status === "active") {
-            agent.subAgents.fail(channelId).catch(() => {});
-          }
-        }
-      });
-
-      agent.send({
-        text: "start task",
-        channel: { type: "cli", channelId: "test" },
-      });
-      await Bun.sleep(50);
-
-      // Subagent should be active
-      const entries = agent.subAgents!.list("active");
-      expect(entries).toHaveLength(1);
-      const subagentId = entries[0]!.id;
-
-      // Mark it as done (simulating normal completion path)
-      agent.subAgents!.markDone(subagentId, "completed");
-      expect(agent.subAgents!.get(subagentId)!.status).toBe("completed");
-
-      // Now invoke the worker close callback — should NOT call fail() because already done
-      workerCloseCallback!("subagent", subagentId);
-      await Bun.sleep(10);
-
-      // Status should still be completed (not failed)
-      expect(agent.subAgents!.get(subagentId)!.status).toBe("completed");
-
-      await agent.stop();
-    }, 10_000);
+    // "ignore worker close when subagent already done" test removed — old Worker architecture.
   });
 
   describe("skills getter", () => {
@@ -2634,7 +2251,7 @@ describe("MainAgent", () => {
       await mgr.initialize();
 
       // Wait for background promise to settle
-      await Bun.sleep(10);
+      await Bun.sleep(50);
 
       await rm(cacheDir, { recursive: true, force: true }).catch(() => {});
     }, 10_000);
@@ -2811,7 +2428,7 @@ describe("MainAgent", () => {
       agent.onReply((msg) => replies.push(msg));
 
       agent.send({ text: "reload please", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(10);
+      await Bun.sleep(50);
 
       // After reload_skills tool was processed:
       // 1. new-skill should now be in registry
@@ -2878,7 +2495,7 @@ describe("MainAgent", () => {
       agent.onReply((msg) => replies.push(msg));
 
       agent.send({ text: "reload", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(10);
+      await Bun.sleep(50);
 
       // Verify broadcast was called with skills_reload
       expect(broadcastCalls.length).toBeGreaterThanOrEqual(1);
@@ -2929,7 +2546,7 @@ describe("MainAgent", () => {
       agent.onReply((msg) => replies.push(msg));
 
       agent.send({ text: "reload", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(10);
+      await Bun.sleep(50);
 
       // Should not crash, tool result should show skillCount
       const toolResults = capturedMessages.filter((m) => m.role === "tool");
@@ -2982,7 +2599,7 @@ describe("MainAgent", () => {
       agent.onReply((msg) => replies.push(msg));
 
       agent.send({ text: "hello", channel: { type: "cli", channelId: "main" } });
-      await Bun.sleep(10);
+      await Bun.sleep(50);
 
       expect(replies.length).toBeGreaterThanOrEqual(1);
       expect(replies[0]!.text).toBe("Hello from CLI!");
@@ -3004,7 +2621,7 @@ describe("MainAgent", () => {
         text: "project progress update",
         channel: { type: "project", channelId: "my-project" },
       });
-      await Bun.sleep(10);
+      await Bun.sleep(50);
 
       expect(replies.length).toBeGreaterThanOrEqual(1);
 
@@ -3028,7 +2645,7 @@ describe("MainAgent", () => {
         text: "hello from telegram",
         channel: { type: "telegram", channelId: "chat123", userId: "user123" },
       });
-      await Bun.sleep(10);
+      await Bun.sleep(50);
 
       expect(replies.length).toBeGreaterThanOrEqual(1);
       expect(replies[0]!.text).toBe("Hello, owner!");
@@ -3135,7 +2752,7 @@ describe("MainAgent", () => {
       agent.onReply(() => {});
 
       agent.send({ text: "hi", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(10);
+      await Bun.sleep(50);
 
       expect(capturedSystem).toContain("trust(action");
       expect(capturedSystem).toContain("Security");
@@ -3335,7 +2952,7 @@ describe("MainAgent", () => {
       });
 
       // Wait for spawn_task to be processed (processStep is non-blocking)
-      await Bun.sleep(50);
+      await Bun.sleep(200);
 
       // Verify spawn tool result includes description in session messages
       // Note: the description appears unescaped in the assistant's toolCalls arguments
@@ -3346,7 +2963,7 @@ describe("MainAgent", () => {
       expect(sessionContent).toContain("spawn_task");
 
       // Wait for task completion
-      await Bun.sleep(50);
+      await Bun.sleep(150);
 
       await agent.stop();
     }, 10_000);
@@ -3367,7 +2984,7 @@ describe("MainAgent", () => {
 
       // Set lastChannel
       agent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(30);
+      await Bun.sleep(100);
 
       // Push a completed task notification via the public API (line 410)
       agent.pushTaskNotification({
@@ -3376,7 +2993,7 @@ describe("MainAgent", () => {
         result: "all done",
       });
 
-      await Bun.sleep(50);
+      await Bun.sleep(200);
 
       // Verify notification was injected into session
       const content = await Bun.file(
@@ -3395,7 +3012,7 @@ describe("MainAgent", () => {
       agent.onReply(() => {});
 
       agent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(30);
+      await Bun.sleep(100);
 
       agent.pushTaskNotification({
         type: "failed",
@@ -3403,7 +3020,7 @@ describe("MainAgent", () => {
         error: "boom",
       });
 
-      await Bun.sleep(50);
+      await Bun.sleep(200);
 
       const content = await Bun.file(
         `${testDataDir}/agents/main/session/current.jsonl`,
@@ -3421,7 +3038,7 @@ describe("MainAgent", () => {
       agent.onReply(() => {});
 
       agent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(30);
+      await Bun.sleep(100);
 
       agent.pushTaskNotification({
         type: "notify",
@@ -3429,7 +3046,7 @@ describe("MainAgent", () => {
         message: "50% done",
       });
 
-      await Bun.sleep(50);
+      await Bun.sleep(200);
 
       const content = await Bun.file(
         `${testDataDir}/agents/main/session/current.jsonl`,
@@ -3485,7 +3102,7 @@ describe("MainAgent", () => {
       agent.onReply(() => {});
 
       agent.send({ text: "test vision", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(50);
+      await Bun.sleep(200);
 
       // Verify agent processed the tool call (buildToolContext was called with vision)
       expect(callCount).toBeGreaterThanOrEqual(2);

@@ -64,25 +64,13 @@ const task_replay = taskToolsModule.task_replay;
 
 export { task_list, task_replay };
 
-// Spawn task tool (for Main Agent)
-import * as spawnTaskModule from "./spawn-task-tool.ts";
-const spawn_task = spawnTaskModule.spawn_task;
-
-export { spawn_task };
-
-// Resume task tool (for Main Agent)
-import * as resumeTaskModule from "./resume-task-tool.ts";
-const resume_task = resumeTaskModule.resume_task;
-
-export { resume_task };
-
-// Spawn subagent tool (for Main Agent)
+// Spawn subagent tool (for L1 agents — added by TaskRunner based on depth)
 import * as spawnSubagentModule from "./spawn-subagent-tool.ts";
 const spawn_subagent = spawnSubagentModule.spawn_subagent;
 
 export { spawn_subagent };
 
-// Resume subagent tool (for Main Agent)
+// Resume subagent tool (for L1 agents — added by TaskRunner based on depth)
 import * as resumeSubagentModule from "./resume-subagent-tool.ts";
 const resume_subagent = resumeSubagentModule.resume_subagent;
 
@@ -223,7 +211,7 @@ export const backgroundTools: Tool[] = [
 
 export { _browserTools as browserTools };
 
-/** All tools for Task System (does NOT include spawn_task or reply — those are Main Agent only). */
+/** All tools for Task System (base set — does NOT include spawn_subagent or reply). */
 export const allTaskTools: Tool[] = [
   ...systemTools,
   ...fileTools,
@@ -237,14 +225,13 @@ export const allTaskTools: Tool[] = [
   notify,
 ];
 
-/** Tools for SubAgent Workers — task tools + spawn_task + task_status for orchestration. */
+/** Tools for SubAgent Workers — base task tools + task_status for monitoring. spawn_subagent is added by TaskRunner based on depth. */
 export const subAgentTools: Tool[] = [
   ...allTaskTools,
-  spawn_task,
   task_status,
 ];
 
-/** Tools for Main Agent (curated simple tools + spawn_task + resume_task + reply + project tools). */
+/** Tools for Main Agent (curated simple tools + spawn_subagent + resume_subagent + reply + project tools). */
 export const mainAgentTools: Tool[] = [
   current_time,
   memory_list,
@@ -257,8 +244,6 @@ export const mainAgentTools: Tool[] = [
   task_status,
   session_archive_read,
   image_read,
-  spawn_task,
-  resume_task,
   spawn_subagent,
   resume_subagent,
   reply,

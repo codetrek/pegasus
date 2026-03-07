@@ -13,6 +13,8 @@ import type { LanguageModel } from "../infra/llm-types.ts";
 import { ToolRegistry } from "../tools/registry.ts";
 import type { Tool, ToolContext } from "../tools/types.ts";
 import { allTaskTools } from "../tools/builtins/index.ts";
+import { spawn_subagent } from "../tools/builtins/spawn-subagent-tool.ts";
+import { resume_subagent } from "../tools/builtins/resume-subagent-tool.ts";
 import type { AITaskTypeRegistry } from "../aitask-types/registry.ts";
 import { shortId } from "../infra/id.ts";
 import { getLogger } from "../infra/logger.ts";
@@ -36,6 +38,13 @@ export interface TaskInfo {
   description: string;
   source: string;
   startedAt: number;
+  depth: number;
+}
+
+/** Options for submit(). */
+export interface SubmitOpts {
+  memorySnapshot?: string;
+  depth?: number;
 }
 
 export interface TaskRunnerDeps {
@@ -86,15 +95,27 @@ export class TaskRunner {
   /**
    * Submit a task for execution. Returns taskId immediately.
    * The ExecutionAgent runs fire-and-forget in the background.
+   *
+   * @param opts.memorySnapshot  If provided, prepended to input as [Available Memory].
+   * @param opts.depth           Nesting depth. 0 = L1 (can spawn_subagent), ≥1 = L2 (no spawning).
    */
   submit(
     input: string,
     source: string,
     taskType: string,
     description: string,
+    opts?: SubmitOpts,
   ): string {
     const taskId = shortId();
-    const toolRegistry = this.getToolRegistryForType(taskType);
+    const depth = opts?.depth ?? 0;
+
+    // Prepend memory snapshot to input when available
+    let effectiveInput = input;
+    if (opts?.memorySnapshot) {
+      effectiveInput = `[Available Memory]\n${opts.memorySnapshot}\n\n---\n\n${input}`;
+    }
+
+    const toolRegistry = this.getToolRegistryForType(taskType, depth);
     const dateStr = new Date().toISOString().slice(0, 10);
     const sessionDir = path.join(this.tasksDir, dateStr, taskId);
 
@@ -102,11 +123,12 @@ export class TaskRunner {
       agentId: taskId,
       model: this.model,
       toolRegistry,
-      systemPrompt: this._buildSystemPrompt(description, this.taskTypeRegistry.getPrompt(taskType)),
+      systemPrompt: this._buildSystemPrompt(description, this.taskTypeRegistry.getPrompt(taskType), depth),
       sessionDir,
       storeImage: this.storeImage,
       contextWindow: this.contextWindow,
       toolContext: {
+        taskRegistry: this,
         onNotify: (message: string) => {
           this.onNotification({ type: "notify", taskId, message });
         },
@@ -120,14 +142,15 @@ export class TaskRunner {
 
     const info: TaskInfo = {
       taskId,
-      input,
+      input: effectiveInput,
       taskType,
       description,
       source,
       startedAt: Date.now(),
+      depth,
     };
 
-    this._runAgent(agent, taskId, input, taskType, info);
+    this._runAgent(agent, taskId, effectiveInput, taskType, info);
 
     return taskId;
   }
@@ -171,6 +194,7 @@ export class TaskRunner {
       sessionDir,
       storeImage: this.storeImage,
       toolContext: {
+        taskRegistry: this,
         onNotify: (message: string) => {
           this.onNotification({ type: "notify", taskId, message });
         },
@@ -184,6 +208,7 @@ export class TaskRunner {
       description: resolvedDescription,
       source: "resume",
       startedAt: Date.now(),
+      depth: 0,
     };
 
     this._runAgent(agent, taskId, newInput, resolvedType, info);
@@ -289,12 +314,16 @@ export class TaskRunner {
   }
 
   /**
-   * Build or retrieve a cached ToolRegistry for a given task type.
+   * Build or retrieve a cached ToolRegistry for a given task type + depth.
    * Uses AITaskTypeRegistry.getToolNames() to resolve which tools
    * are available. Falls back to allTaskTools for unknown types.
+   *
+   * When depth === 0, spawn_subagent and resume_subagent are added
+   * (L1 agents can spawn L2 sub-agents). depth >= 1 agents cannot.
    */
-  private getToolRegistryForType(taskType: string): ToolRegistry {
-    const cached = this.toolRegistryCache.get(taskType);
+  private getToolRegistryForType(taskType: string, depth: number = 0): ToolRegistry {
+    const cacheKey = `${taskType}:d${depth}`;
+    const cached = this.toolRegistryCache.get(cacheKey);
     if (cached) return cached;
 
     const registry = new ToolRegistry();
@@ -312,15 +341,23 @@ export class TaskRunner {
       registry.register(tool);
     }
 
-    this.toolRegistryCache.set(taskType, registry);
+    // L1 agents (depth === 0) can spawn sub-agents; L2+ cannot
+    if (depth === 0) {
+      registry.register(spawn_subagent);
+      registry.register(resume_subagent);
+    }
+
+    this.toolRegistryCache.set(cacheKey, registry);
     return registry;
   }
 
   /**
    * Build a system prompt for task execution agents.
    * Mirrors the old ExecutionAgent.buildSystemPrompt() logic.
+   *
+   * When depth === 0, the prompt mentions spawn_subagent capability.
    */
-  private _buildSystemPrompt(description: string, contextPrompt?: string): string {
+  private _buildSystemPrompt(description: string, contextPrompt?: string, depth: number = 0): string {
     const lines = [
       "You are an execution agent working on a specific task.",
       `Task: ${description}`,
@@ -330,6 +367,17 @@ export class TaskRunner {
       "",
       "Use notify(message) to report significant progress to your coordinator.",
     ];
+
+    if (depth === 0) {
+      lines.push(
+        "",
+        "## Sub-task Delegation",
+        "You can delegate sub-tasks using spawn_subagent(description, input, type).",
+        "Types: general (full access), explore (read-only), plan (analysis).",
+        "Use resume_subagent(subagent_id, input) to continue a completed sub-agent.",
+        "Sub-agents run in the background — results arrive automatically via notification.",
+      );
+    }
 
     if (contextPrompt) {
       lines.push("", "## Context", contextPrompt);

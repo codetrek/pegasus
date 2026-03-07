@@ -1,8 +1,10 @@
 /**
- * resume_subagent tool — resume a completed SubAgent with new input.
+ * resume_subagent tool — resume a completed sub-agent with new input.
  *
- * Self-executing: calls subAgentManager.resume() and tickManager.start()
+ * Self-executing: calls taskRegistry.resume() and tickManager.start()
  * directly, eliminating the need for MainAgent signal interception.
+ *
+ * Now backed by TaskRunner.resume() instead of SubAgentManager.
  */
 
 import { z } from "zod";
@@ -12,9 +14,9 @@ import { getLogger } from "../../infra/logger.ts";
 
 const logger = getLogger("resume_subagent");
 
-/** Loose interface for SubAgentManager methods used by this tool. */
-interface SubAgentManagerLike {
-  resume(subagentId: string, input: string): void;
+/** Loose interface for TaskRunner methods used by this tool. */
+export interface TaskRegistryLike {
+  resume(taskId: string, input: string): Promise<string>;
 }
 
 /** Loose interface for TickManager methods used by this tool. */
@@ -25,11 +27,11 @@ interface TickManagerLike {
 export const resume_subagent: Tool = {
   name: "resume_subagent",
   description:
-    "Resume a completed SubAgent with new input. " +
+    "Resume a completed sub-agent with new input. " +
     "Restores its full session history.",
   category: ToolCategory.SYSTEM,
   parameters: z.object({
-    subagent_id: z.string().describe("The SubAgent ID to resume"),
+    subagent_id: z.string().describe("The sub-agent ID to resume"),
     input: z.string().describe("New instructions"),
   }),
   async execute(params: unknown, context: ToolContext): Promise<ToolResult> {
@@ -39,11 +41,11 @@ export const resume_subagent: Tool = {
       input: string;
     };
 
-    const manager = context.subAgentManager as SubAgentManagerLike | undefined;
-    if (!manager) {
+    const registry = context.taskRegistry as TaskRegistryLike | undefined;
+    if (!registry) {
       return {
         success: false,
-        error: "SubAgentManager not available in this context",
+        error: "taskRegistry not available in this context",
         startedAt,
         completedAt: Date.now(),
         durationMs: Date.now() - startedAt,
@@ -51,9 +53,9 @@ export const resume_subagent: Tool = {
     }
 
     try {
-      manager.resume(subagent_id, input);
+      await registry.resume(subagent_id, input);
 
-      // Start tick manager to poll for subagent completion
+      // Start tick manager to poll for task completion
       const tick = context.tickManager as TickManagerLike | undefined;
       if (tick) tick.start();
 
