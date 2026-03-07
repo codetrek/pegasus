@@ -1,9 +1,23 @@
 /**
- * InputBar — bottom input prompt + keyboard shortcut hints.
+ * InputBar — bottom input prompt with real text input.
+ *
+ * Uses opentui's <input> component. On Enter, sends text via store bridge
+ * to TuiAdapter. Always focused (v1 has no panel switching).
  */
+import { createSignal } from "solid-js"
 import { THEME } from "../theme.tsx"
+import { sendInput } from "../store.ts"
 
 export function InputBar() {
+  const [value, setValue] = createSignal("")
+
+  const handleSubmit = () => {
+    const text = value()
+    if (!text.trim()) return
+    sendInput(text)
+    setValue("")
+  }
+
   return (
     <box
       flexShrink={0}
@@ -15,11 +29,20 @@ export function InputBar() {
       border={["top"]}
       borderColor={THEME.border}
     >
-      <text fg={THEME.text}>
-        <span style={{ fg: THEME.accent }}>{">"}</span> _
-      </text>
+      <input
+        value={value()}
+        onChange={setValue}
+        onSubmit={handleSubmit}
+        placeholder="Type a message... (/help for commands)"
+        focused={true}
+        backgroundColor={THEME.bgPanel}
+        focusedBackgroundColor={THEME.bgPanel}
+        textColor={THEME.text}
+        focusedTextColor={THEME.text}
+        placeholderColor={THEME.textMuted}
+      />
       <text fg={THEME.textMuted}>
-        [Tab] 面板  [Ctrl+T] 任务  [Ctrl+K] 取消  [?] 帮助
+        [Ctrl+C] 退出
       </text>
     </box>
   )

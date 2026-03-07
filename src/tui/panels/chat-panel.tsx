@@ -1,21 +1,28 @@
 /**
- * ChatPanel — scrollable conversation history with inline tool calls.
+ * ChatPanel — scrollable conversation history.
+ *
+ * Reads from chatStore (real messages via TuiAdapter) when available,
+ * falls back to mockData for standalone UI development mode.
  */
-import { For, Show } from "solid-js"
+import { For, Show, createMemo } from "solid-js"
 import { THEME } from "../theme.tsx"
+import { chatStore } from "../store.ts"
 import { mockData } from "../mock-data.tsx"
 import { SectionHeader } from "../components/section-header.tsx"
 
 export function ChatPanel() {
-  const d = mockData()
+  // Use real messages when available, fallback to mock for standalone dev
+  const messages = createMemo(() =>
+    chatStore.messages.length > 0 ? chatStore.messages : mockData().messages
+  )
 
   return (
     <box flexDirection="column" flexGrow={1} paddingLeft={1} paddingRight={1}>
-      <SectionHeader icon="💬" title="Conversation" info={`${d.messages.length} msgs`} />
+      <SectionHeader icon="💬" title="Conversation" info={`${messages().length} msgs`} />
 
       <scrollbox flexGrow={1} paddingTop={1}>
         <box flexDirection="column" gap={1}>
-          <For each={d.messages}>
+          <For each={messages()}>
             {(msg) => (
               <box flexDirection="column">
                 {/* Role + timestamp */}
@@ -25,25 +32,8 @@ export function ChatPanel() {
 
                 {/* Message text */}
                 <Show when={msg.text}>
-                  <text fg={THEME.text} paddingLeft={0}>
+                  <text fg={THEME.text}>
                     {msg.text}
-                  </text>
-                </Show>
-
-                {/* Inline tool call */}
-                <Show when={msg.tool}>
-                  <text fg={THEME.textMuted} paddingLeft={2}>
-                    <span style={{ fg: THEME.warning }}>⚙</span>
-                    {" "}{msg.tool!.name}("{msg.tool!.args}")
-                    {" "}
-                    <span style={{
-                      fg: msg.tool!.status === "done" ? THEME.success
-                        : msg.tool!.status === "running" ? THEME.warning
-                        : THEME.error
-                    }}>
-                      {msg.tool!.status === "done" ? "✓" : msg.tool!.status === "running" ? "▶" : "✗"}
-                    </span>
-                    {" "}{msg.tool!.duration}
                   </text>
                 </Show>
               </box>

@@ -7,7 +7,8 @@
   "private": true,
   "scripts": {
     "dev": "bun run src/cli.ts",
-    "tui": "bun --preload @opentui/solid/preload src/tui/main.tsx",
+    "tui": "bun --preload @opentui/solid/preload src/tui.ts",
+    "tui:dev": "bun --preload @opentui/solid/preload src/tui/main.tsx",
     "test": "PEGASUS_LOG_LEVEL=silent bun test tests/",
     "test:watch": "PEGASUS_LOG_LEVEL=silent bun test --watch tests/",
     "coverage": "PEGASUS_LOG_LEVEL=silent bun test --coverage tests/",
