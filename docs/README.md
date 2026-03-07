@@ -122,6 +122,9 @@ pegasus/
 - [Security](./security.md) — trust-based channel routing, owner identity, prompt injection resistance
 - [MCP Auth](./mcp-auth.md) — MCP server authentication
 
+### Observability
+- [AppStats](./app-stats.md) — runtime statistics for TUI dashboard (counters, snapshots, polling)
+
 ### Operations
 - [Running Guide](./running.md) — setup, usage, deployment
 - [Logging](./logging.md) — log format, output, rotation
