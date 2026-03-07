@@ -124,3 +124,14 @@ Tracked features, improvements, and ideas — what's done and what's next.
   - Target: Each Agent can own subagents. A spawns B → B is A's child. B spawns C → C is B's child.
   - Involves: SubAgentManager per-Agent (or hierarchical tracking), Worker thread communication, spawn_subagent tool context scoping
   - Related: TaskRunner already creates per-Agent child tasks, but SubAgent (Worker-based) doesn't follow same pattern
+
+### ToolContext Redesign
+- [ ] ToolContext is a god bag — 17 optional fields, 11 typed as `unknown`
+  - Current: flat interface with all fields optional, tools do `as SomeLike` type assertions internally
+  - Problem: no type safety, every field is MainAgent-specific coupling, `Object.assign` on every tool call
+  - Options:
+    - A) Simplify to `Record<string, unknown>` (honest bag, tools declare what they need)
+    - B) Typed per-tool context via generics or intersection types
+  - Also: `userId`, `allowedPaths` fields are never set — dead fields
+  - Also: `storeImage` callback should move to ImageManager (already has `store()`)
+  - Related: Agent.buildToolContext() and MainAgent.buildToolContext() can be simplified once ToolContext is cleaner
