@@ -7,7 +7,7 @@
  *
  * Key design decisions:
  *   - systemPrompt is constructor-injected (string | (() => string)), NOT abstract
- *   - AgentCallbacks for lifecycle hooks (onStart, onStop, etc.)
+ *   - Subclass overrides for lifecycle hooks (onStart, onStop, computeBudgetOptions, etc.)
  *   - toolContext injection for pre-set ToolContext fields
  *   - Image ref collection and event emission from ExecutionAgent
  *   - Queue processing from ConversationAgent
@@ -23,7 +23,6 @@
  */
 
 import { BaseAgent, type BaseAgentDeps } from "./base/base-agent.ts";
-import type { PendingWorkResult } from "./base/agent-state.ts";
 import type { Message } from "../infra/llm-types.ts";
 import type { Event } from "../events/types.ts";
 import { EventType, createEvent } from "../events/types.ts";
@@ -34,7 +33,6 @@ import type {
   OutboundMessage,
 } from "../channels/types.ts";
 import type { ToolContext } from "../tools/types.ts";
-import type { BudgetOptions } from "../context/index.ts";
 import { formatTimestamp } from "../infra/time.ts";
 import { sanitizeForPrompt } from "../infra/sanitize.ts";
 import { formatSize } from "../prompts/index.ts";
@@ -52,18 +50,8 @@ export interface AgentDeps extends BaseAgentDeps {
   systemPrompt: string | (() => string);
   /** Pre-set ToolContext fields merged into every buildToolContext() call. */
   toolContext?: Partial<ToolContext>;
-  /** Lifecycle callbacks (replaces subclass overrides). */
-  callbacks?: AgentCallbacks;
   /** ReflectionOrchestrator for post-compaction reflection. Optional. */
   reflectionOrchestrator?: ReflectionOrchestrator;
-}
-
-/** Lifecycle callbacks — subclasses (MainAgent) provide these instead of overrides. */
-export interface AgentCallbacks {
-  onStart?: () => Promise<void>;
-  onStop?: () => Promise<void>;
-  computeBudgetOptions?: () => BudgetOptions;
-  onTaskNotificationHandled?: (notification: TaskNotificationPayload) => Promise<void>;
 }
 
 /** Result of a one-shot run() execution. */
@@ -97,10 +85,9 @@ export type TaskNotificationPayload =
   | { type: "failed"; taskId: string; error: string }
   | { type: "notify"; taskId: string; message: string; imageRefs?: Array<{ id: string; mimeType: string }> };
 
-/** Queue item — what arrives from the outside world. Subclasses extend via onCustomQueueItem. */
+/** Queue item — what arrives from the outside world. */
 export type QueueItem =
   | { kind: "message"; message: InboundMessage }
-  | { kind: "child_complete"; childId: string; result: PendingWorkResult }
   | { kind: "think"; channel: ChannelInfo }
   | { kind: "task_notify"; notification: TaskNotificationPayload }
   | CustomQueueItem;
@@ -119,7 +106,6 @@ export class Agent extends BaseAgent {
 
   private _systemPromptSource: string | (() => string);
   private _injectedToolContext?: Partial<ToolContext>;
-  private _callbacks?: AgentCallbacks;
 
   /** Memory directory path — enables auto memory injection on start/compact. */
   private _memoryDir?: string;
@@ -134,7 +120,6 @@ export class Agent extends BaseAgent {
     this.persona = deps.persona;
     this._systemPromptSource = deps.systemPrompt;
     this._injectedToolContext = deps.toolContext;
-    this._callbacks = deps.callbacks;
     this._memoryDir = deps.toolContext?.memoryDir;
     this._reflectionOrchestrator = deps.reflectionOrchestrator;
   }
@@ -151,12 +136,6 @@ export class Agent extends BaseAgent {
   /** Send an inbound message to this conversation agent. */
   send(message: InboundMessage): void {
     this.queue.push({ kind: "message", message });
-    this._processQueue();
-  }
-
-  /** Notify that a child agent completed. */
-  childComplete(childId: string, result: PendingWorkResult): void {
-    this.queue.push({ kind: "child_complete", childId, result });
     this._processQueue();
   }
 
@@ -225,13 +204,9 @@ export class Agent extends BaseAgent {
     if (this._memoryDir && this.sessionMessages.length === 0) {
       await this._injectMemoryIndex();
     }
-
-    await this._callbacks?.onStart?.();
   }
 
-  protected override async onStop(): Promise<void> {
-    await this._callbacks?.onStop?.();
-  }
+  protected override async onStop(): Promise<void> {}
 
   // ═══════════════════════════════════════════════════
   // System Prompt
@@ -269,9 +244,7 @@ export class Agent extends BaseAgent {
   // Compaction hooks
   // ═══════════════════════════════════════════════════
 
-  protected override computeBudgetOptions(): BudgetOptions {
-    return this._callbacks?.computeBudgetOptions?.() ?? super.computeBudgetOptions();
-  }
+  // (computeBudgetOptions is inherited from BaseAgent — subclasses override directly)
 
   protected override async onCompacted(preCompactMessages: Message[]): Promise<void> {
     // Auto-inject memory index after compaction
@@ -322,11 +295,6 @@ export class Agent extends BaseAgent {
             await this._handleMessage(mi.message);
             break;
           }
-          case "child_complete": {
-            const ci = item as { kind: "child_complete"; childId: string; result: PendingWorkResult };
-            await this._handleChildComplete(ci.childId, ci.result);
-            break;
-          }
           case "think": {
             const ti = item as { kind: "think"; channel: ChannelInfo };
             await this._think(ti.channel);
@@ -338,7 +306,7 @@ export class Agent extends BaseAgent {
             break;
           }
           default:
-            await this.onCustomQueueItem(item);
+            logger.warn({ kind: item.kind, agentId: this.agentId }, "unknown_queue_item");
             break;
         }
       } catch (err) {
@@ -358,9 +326,6 @@ export class Agent extends BaseAgent {
   // ═══════════════════════════════════════════════════
   // Message Handling (from ConversationAgent)
   // ═══════════════════════════════════════════════════
-
-  /** Hook for subclass-specific queue items. Default: no-op. */
-  protected async onCustomQueueItem(_item: QueueItem): Promise<void> {}
 
   protected async _handleMessage(message: InboundMessage): Promise<void> {
     this.lastChannel = message.channel;
@@ -391,35 +356,10 @@ export class Agent extends BaseAgent {
     await this._think(message.channel);
   }
 
-  private async _handleChildComplete(
-    childId: string,
-    result: PendingWorkResult,
-  ): Promise<void> {
-    // Remove from pending work tracking
-    await this.completePendingWork(result);
-
-    // Inject child result as a system message into session
-    const resultText = result.success
-      ? typeof result.result === "string"
-        ? result.result
-        : JSON.stringify(result.result)
-      : `Error: ${result.error}`;
-
-    const systemMsg: Message = {
-      role: "user",
-      content: `[Child agent ${childId} ${result.success ? "completed" : "failed"}]\n${resultText}`,
-    };
-    this.sessionMessages.push(systemMsg);
-    await this.sessionStore.append(systemMsg);
-
-    // Trigger thinking to process the result
-    await this._think(this.lastChannel);
-  }
-
   /**
    * Handle a task notification (completed, failed, or progress update).
    * Formats the notification text, injects into session, and triggers thinking.
-   * Uses callbacks.onTaskNotificationHandled for tick management.
+   * Calls onTaskNotificationHandled hook for subclass-specific behavior.
    */
   protected async _handleTaskNotify(notification: TaskNotificationPayload): Promise<void> {
     let resultText: string;
@@ -459,11 +399,8 @@ export class Agent extends BaseAgent {
   /**
    * Hook called after task notification is handled.
    * Subclasses override for tick management (e.g. checkShouldStop).
-   * Also calls callbacks.onTaskNotificationHandled if provided.
    */
-  protected async onTaskNotificationHandled(notification: TaskNotificationPayload): Promise<void> {
-    await this._callbacks?.onTaskNotificationHandled?.(notification);
-  }
+  protected async onTaskNotificationHandled(_notification: TaskNotificationPayload): Promise<void> {}
 
   /**
    * Run thinking via processStep with a completion Promise.
@@ -512,46 +449,10 @@ export class Agent extends BaseAgent {
         this.queueEvent(event);
       }
     });
-
-    // Execution-mode events: TASK_CREATED, TASK_SUSPENDED, TASK_RESUMED
-    this.eventBus.subscribe(EventType.TASK_CREATED, async (event: Event) => {
-      if (event.taskId === this.agentId || event.source === this.agentId) {
-        await this.handleEvent(event);
-      }
-    });
-
-    this.eventBus.subscribe(EventType.TASK_SUSPENDED, async (event: Event) => {
-      if (event.taskId === this.agentId || event.source === this.agentId) {
-        await this.handleEvent(event);
-      }
-    });
-
-    this.eventBus.subscribe(EventType.TASK_RESUMED, async (event: Event) => {
-      if (event.taskId === this.agentId || event.source === this.agentId) {
-        await this.handleEvent(event);
-      }
-    });
   }
 
   protected override async handleEvent(event: Event): Promise<void> {
     switch (event.type) {
-      // Execution-mode events
-      case EventType.TASK_CREATED:
-        await this._startExecution();
-        break;
-
-      case EventType.TASK_SUSPENDED: {
-        const state = this.taskStates.get(this.agentId);
-        if (state) {
-          state.aborted = true;
-        }
-        break;
-      }
-
-      case EventType.TASK_RESUMED:
-        await this._startExecution();
-        break;
-
       // Child completion events
       case EventType.TASK_COMPLETED:
       case EventType.TASK_FAILED: {
@@ -559,54 +460,30 @@ export class Agent extends BaseAgent {
         if (!childId) break;
 
         // Conversation mode: inject child result into session + trigger thinking
-        if (childId) {
-          await this.completePendingWork({
-            id: childId,
-            success: event.type === EventType.TASK_COMPLETED,
-            result: event.payload["result"],
-            error: event.payload["error"] as string | undefined,
-          });
+        await this.completePendingWork({
+          id: childId,
+          success: event.type === EventType.TASK_COMPLETED,
+          result: event.payload["result"],
+          error: event.payload["error"] as string | undefined,
+        });
 
-          const resultText = event.type === EventType.TASK_COMPLETED
-            ? typeof event.payload["result"] === "string"
-              ? event.payload["result"]
-              : JSON.stringify(event.payload["result"])
-            : `Error: ${event.payload["error"]}`;
+        const resultText = event.type === EventType.TASK_COMPLETED
+          ? typeof event.payload["result"] === "string"
+            ? event.payload["result"]
+            : JSON.stringify(event.payload["result"])
+          : `Error: ${event.payload["error"]}`;
 
-          const systemMsg: Message = {
-            role: "user",
-            content: `[Child agent ${childId} ${event.type === EventType.TASK_COMPLETED ? "completed" : "failed"}]\n${resultText}`,
-          };
-          this.sessionMessages.push(systemMsg);
-          await this.sessionStore.append(systemMsg);
+        const systemMsg: Message = {
+          role: "user",
+          content: `[Child agent ${childId} ${event.type === EventType.TASK_COMPLETED ? "completed" : "failed"}]\n${resultText}`,
+        };
+        this.sessionMessages.push(systemMsg);
+        await this.sessionStore.append(systemMsg);
 
-          await this._think(this.lastChannel);
-        }
+        await this._think(this.lastChannel);
         break;
       }
     }
-  }
-
-  // ═══════════════════════════════════════════════════
-  // Execution-mode helpers (from ExecutionAgent)
-  // ═══════════════════════════════════════════════════
-
-  /**
-   * Start execution from an event trigger (TASK_CREATED / TASK_RESUMED).
-   * Creates TaskExecutionState, loads session, kicks off processStep.
-   */
-  private async _startExecution(): Promise<void> {
-    let messages: Message[] = await this.sessionStore.load();
-    if (messages.length === 0) {
-      // No persisted session; we don't have an input field, so use empty messages
-      // (event-driven path is used by TaskRunner which provides input via session)
-    }
-
-    this.createTaskExecutionState(this.agentId, messages, {
-      maxIterations: this.maxIterations,
-    });
-
-    await this.processStep(this.agentId);
   }
 
   // ═══════════════════════════════════════════════════
@@ -675,37 +552,66 @@ export class Agent extends BaseAgent {
   // ═══════════════════════════════════════════════════
 
   /**
-   * Inject available memory files into the session so the LLM knows what
-   * long-term knowledge is available without needing to call memory_list first.
-   * Called automatically on fresh session start and after compaction when _memoryDir is set.
+   * Load memory entries: list all, then read fact contents.
+   * Returns null if memory is empty or unavailable.
+   * Shared by _injectMemoryIndex and _getMemorySnapshot to avoid duplication.
    */
-  private async _injectMemoryIndex(): Promise<void> {
+  private async _loadMemoryEntries(): Promise<Array<{ path: string; summary: string; size: number; content?: string }> | null> {
     const memoryDir = this._memoryDir;
-    if (!memoryDir) return;
+    if (!memoryDir) return null;
 
-    try {
-      const listResult = await this.toolExecutor.execute(
-        "memory_list",
-        {},
-        { taskId: this.agentId, memoryDir },
-      );
-      if (!listResult.success || !Array.isArray(listResult.result) || listResult.result.length === 0) return;
+    const listResult = await this.toolExecutor.execute(
+      "memory_list",
+      {},
+      { taskId: this.agentId, memoryDir },
+    );
+    if (!listResult.success || !Array.isArray(listResult.result) || listResult.result.length === 0) return null;
 
-      const entries = listResult.result as Array<{ path: string; summary: string; size: number }>;
-      const lines: string[] = ["[Available memory]", ""];
+    const entries = listResult.result as Array<{ path: string; summary: string; size: number }>;
+    const loaded: Array<{ path: string; summary: string; size: number; content?: string }> = [];
 
-      // Facts: load full content
-      for (const e of entries.filter(e => e.path.startsWith("facts/"))) {
+    for (const e of entries) {
+      if (e.path.startsWith("facts/")) {
         try {
           const readResult = await this.toolExecutor.execute(
             "memory_read",
             { path: e.path },
             { taskId: this.agentId, memoryDir },
           );
-          if (readResult.success && typeof readResult.result === "string") {
-            lines.push(`### ${e.path} (${formatSize(e.size)})`, "", readResult.result as string, "");
-          }
+          loaded.push({
+            ...e,
+            content: readResult.success && typeof readResult.result === "string"
+              ? readResult.result as string
+              : undefined,
+          });
         } catch {
+          loaded.push({ ...e, content: undefined });
+        }
+      } else {
+        loaded.push(e);
+      }
+    }
+
+    return loaded;
+  }
+
+  /**
+   * Inject available memory files into the session so the LLM knows what
+   * long-term knowledge is available without needing to call memory_list first.
+   * Called automatically on fresh session start and after compaction when _memoryDir is set.
+   */
+  private async _injectMemoryIndex(): Promise<void> {
+    try {
+      const entries = await this._loadMemoryEntries();
+      if (!entries) return;
+
+      const lines: string[] = ["[Available memory]", ""];
+
+      // Facts: full content
+      for (const e of entries.filter(e => e.path.startsWith("facts/"))) {
+        if (e.content) {
+          lines.push(`### ${e.path} (${formatSize(e.size)})`, "", e.content, "");
+        } else {
           lines.push(`- ${e.path} (${formatSize(e.size)}): [failed to load]`);
         }
       }
@@ -735,35 +641,16 @@ export class Agent extends BaseAgent {
    * Returns undefined if memory is empty or unavailable.
    */
   private async _getMemorySnapshot(): Promise<string | undefined> {
-    const memoryDir = this._memoryDir;
-    if (!memoryDir) return undefined;
-
     try {
-      const listResult = await this.toolExecutor.execute(
-        "memory_list",
-        {},
-        { taskId: this.agentId, memoryDir },
-      );
-      if (!listResult.success || !Array.isArray(listResult.result) || listResult.result.length === 0) {
-        return undefined;
-      }
+      const entries = await this._loadMemoryEntries();
+      if (!entries) return undefined;
 
-      const entries = listResult.result as Array<{ path: string; summary: string; size: number }>;
       const lines: string[] = ["[Memory snapshot from MainAgent]", ""];
 
-      // Facts: load full content
+      // Facts: full content
       for (const e of entries.filter(e => e.path.startsWith("facts/"))) {
-        try {
-          const readResult = await this.toolExecutor.execute(
-            "memory_read",
-            { path: e.path },
-            { taskId: this.agentId, memoryDir },
-          );
-          if (readResult.success && typeof readResult.result === "string") {
-            lines.push(`### ${e.path}`, "", readResult.result as string, "");
-          }
-        } catch {
-          // Skip unreadable facts
+        if (e.content) {
+          lines.push(`### ${e.path}`, "", e.content, "");
         }
       }
 

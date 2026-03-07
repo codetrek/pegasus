@@ -42,7 +42,6 @@ export {
 export {
   Agent,
   type AgentDeps,
-  type AgentCallbacks,
   type AgentResult,
   type ReplyCallback,
   type QueueItem,

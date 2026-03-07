@@ -14,14 +14,11 @@
  * by PegasusApp — MainAgent never self-initializes them.
  *
  * Key overrides:
- *   - buildToolContext()      → rich ToolContext with all dependencies
+ *   - buildToolContext()      → calls super() + overrides MainAgent-specific fields
  *   - onStart()/onStop()      → session lifecycle (MCP tools, prompt; tick + drain)
  *   - getMaxToolResultChars() → truncation budget from model context window
- *
- * Uses AgentCallbacks (constructor-injected) for:
- *   - computeBudgetOptions    → ModelRegistry-aware compaction budget
- *   - onTaskNotificationHandled → tick management (checkShouldStop)
- *   - systemPrompt            → lazy builder function returning cached prompt
+ *   - computeBudgetOptions()  → ModelRegistry-aware compaction budget
+ *   - onTaskNotificationHandled() → tick management (checkShouldStop)
  */
 
 import type { Message } from "../infra/llm-types.ts";
@@ -31,7 +28,6 @@ import type { Settings } from "../infra/config.ts";
 import { getSettings } from "../infra/config.ts";
 import { getLogger } from "../infra/logger.ts";
 import { ToolRegistry } from "../tools/registry.ts";
-import type { OutboundMessage } from "../channels/types.ts";
 import { ImageManager } from "../media/image-manager.ts";
 import { TaskRunner } from "./task-runner.ts";
 import type { TaskNotification } from "./task-runner.ts";
@@ -47,7 +43,7 @@ import { OwnerStore } from "../security/owner-store.ts";
 import { TickManager } from "./tick-manager.ts";
 import { AuthManager } from "./auth-manager.ts";
 import { ReflectionOrchestrator } from "./reflection-orchestrator.ts";
-import { Agent, type QueueItem } from "./agent.ts";
+import { Agent, type QueueItem, type TaskNotificationPayload } from "./agent.ts";
 import { EventBus } from "../events/bus.ts";
 
 // Main Agent's curated tool set
@@ -134,26 +130,6 @@ export class MainAgent extends Agent {
       visionKeepLastNTurns: settings.vision?.keepLastNTurns,
       toolContext: { memoryDir: mainStorePaths.memory! },
       reflectionOrchestrator: deps.injected.reflectionOrchestrator,
-      callbacks: {
-        computeBudgetOptions: () => {
-          const dm = this.models.getDefault();
-          return {
-            modelId: dm.modelId,
-            provider: dm.provider,
-            configContextWindow:
-              this.models.getDefaultContextWindow() ??
-              this.settings.llm.contextWindow,
-            compactThreshold: this.settings.session?.compactThreshold,
-            modelLimitsCache: this.modelLimitsCache,
-          };
-        },
-        onTaskNotificationHandled: async (notification) => {
-          // Stop tick if no more active work (completed/failed, not progress updates)
-          if (notification.type !== "notify") {
-            this.tickManager.checkShouldStop();
-          }
-        },
-      },
     });
 
     this.models = deps.models;
@@ -214,48 +190,67 @@ export class MainAgent extends Agent {
     logger.info("main_agent_stopped");
   }
 
+  /**
+   * Override compaction budget to use ModelRegistry for dynamic model resolution.
+   * Provides provider-aware caching and configurable thresholds.
+   */
+  protected override computeBudgetOptions() {
+    const dm = this.models.getDefault();
+    return {
+      modelId: dm.modelId,
+      provider: dm.provider,
+      configContextWindow:
+        this.models.getDefaultContextWindow() ??
+        this.settings.llm.contextWindow,
+      compactThreshold: this.settings.session?.compactThreshold,
+      modelLimitsCache: this.modelLimitsCache,
+    };
+  }
+
+  /**
+   * Override task notification handler for tick management.
+   * Stops tick timer when no more active work (completed/failed, not progress updates).
+   */
+  protected override async onTaskNotificationHandled(notification: TaskNotificationPayload): Promise<void> {
+    if (notification.type !== "notify") {
+      this.tickManager.checkShouldStop();
+    }
+  }
+
   // ═══════════════════════════════════════════════════
   // Tool context — rich ToolContext for processStep
   // ═══════════════════════════════════════════════════
 
   /**
-   * Build a full ToolContext with all dependencies for tool execution.
-   * Called by BaseAgent._executeToolAsync() via the buildToolContext() hook.
+   * Build ToolContext by extending the base context with MainAgent-specific fields.
+   * Inherits auto-injected fields (memoryDir, onReply, getMemorySnapshot) from Agent.
    */
   protected override buildToolContext(taskId: string): ToolContext {
+    const ctx = super.buildToolContext(taskId);
     const imgMgr = this.imageManager;
-    return {
-      taskId,
-      memoryDir: this.mainStorePaths.memory!,
-      sessionDir: this.mainStorePaths.session,
-      tasksDir: this.mainStorePaths.tasks,
-      taskRegistry: this.taskRunner,
-      projectManager: this.projectManager,
-      ownerStore: this.ownerStore,
-      mediaDir: imgMgr
-        ? path.join(this.settings.dataDir, "media")
-        : undefined,
-      storeImage: imgMgr
-        ? async (buffer: Buffer, mimeType: string, source: string) => {
-            const ref = await imgMgr.store(buffer, mimeType, source);
-            return { id: ref.id, mimeType: ref.mimeType };
-          }
-        : undefined,
-      onReply: this._onReply
-        ? (msg: unknown) => this._onReply!(msg as OutboundMessage)
-        : undefined,
-      resolveImage: imgMgr
-        ? (idOrPath: string) => imgMgr.resolve(idOrPath)
-        : undefined,
-      subAgentManager: this.subAgentManager,
-      skillRegistry: this.skillRegistry,
-      tickManager: this.tickManager,
-      onSkillsReloaded: () => {
-        this._reloadSkills();
-        return this.skillRegistry.listAll().length;
-      },
-      projectAdapter: this.projectAdapter,
+
+    // MainAgent-specific fields (override/extend base context)
+    ctx.sessionDir = this.mainStorePaths.session;
+    ctx.tasksDir = this.mainStorePaths.tasks;
+    ctx.taskRegistry = this.taskRunner;
+    ctx.projectManager = this.projectManager;
+    ctx.ownerStore = this.ownerStore;
+    ctx.mediaDir = imgMgr ? path.join(this.settings.dataDir, "media") : undefined;
+    ctx.storeImage = imgMgr ? async (buffer: Buffer, mimeType: string, source: string) => {
+      const ref = await imgMgr.store(buffer, mimeType, source);
+      return { id: ref.id, mimeType: ref.mimeType };
+    } : undefined;
+    ctx.resolveImage = imgMgr ? (idOrPath: string) => imgMgr.resolve(idOrPath) : undefined;
+    ctx.subAgentManager = this.subAgentManager;
+    ctx.skillRegistry = this.skillRegistry;
+    ctx.tickManager = this.tickManager;
+    ctx.onSkillsReloaded = () => {
+      this._reloadSkills();
+      return this.skillRegistry.listAll().length;
     };
+    ctx.projectAdapter = this.projectAdapter;
+
+    return ctx;
   }
 
   /**
