@@ -225,6 +225,9 @@ export class Agent {
   /** Holds the last execution result for run() to resolve. */
   private _lastResult: AgentResult | null = null;
 
+  /** Task IDs that should persist messages incrementally (run with persistSession=true). */
+  private _persistingTasks = new Set<string>();
+
   constructor(deps: AgentDeps) {
     this.agentId = deps.agentId;
     this.model = deps.model;
@@ -327,9 +330,15 @@ export class Agent {
       const state = this.createTaskExecutionState(this.agentId, messages, {
         maxIterations: opts?.maxIterations ?? this.maxIterations,
         onComplete: () => {
+          this._persistingTasks.delete(this.agentId);
           resolve(this._lastResult!);
         },
       });
+
+      // Enable incremental session persistence during processStep
+      if (persistSession) {
+        this._persistingTasks.add(this.agentId);
+      }
 
       this.processStep(this.agentId).catch((err) => {
         resolve({
@@ -417,10 +426,15 @@ export class Agent {
 
   /**
    * Hook called when new messages are added to task state during processStep.
-   * Subclasses can override for immediate per-message persistence.
-   * Default: no-op (ConversationAgent persists in batch after _think completes).
+   * Persists messages incrementally for run(persistSession:true) tasks.
    */
-  protected async onMessagesAppended(_taskId: string, _newMessages: Message[]): Promise<void> {}
+  protected async onMessagesAppended(taskId: string, newMessages: Message[]): Promise<void> {
+    if (this._persistingTasks.has(taskId)) {
+      for (const msg of newMessages) {
+        await this.sessionStore.append(msg);
+      }
+    }
+  }
 
   // ═══════════════════════════════════════════════════
   // System Prompt
