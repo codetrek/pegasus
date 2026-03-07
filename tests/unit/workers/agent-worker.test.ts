@@ -537,6 +537,18 @@ describe("dispatchMessage", () => {
     expect(messages).toContainEqual({ type: "shutdown-complete" });
   }, 5_000);
 
+  it("should dispatch 'init' type to handleInit", async () => {
+    const settings = makeTestSettings(TEST_DIR);
+    // Use a nonexistent project so handleInit produces an error (verifies the path was taken)
+    await dispatchMessage({
+      type: "init",
+      mode: "project",
+      config: { settings, projectPath: `${TEST_DIR}/nonexistent-project` },
+    });
+    const errorMsgs = (messages as any[]).filter(m => m.type === "error");
+    expect(errorMsgs.length).toBeGreaterThanOrEqual(1);
+  }, 10_000);
+
   it("should handle unknown message types gracefully", async () => {
     await dispatchMessage({ type: "unknown_type" });
   }, 5_000);
