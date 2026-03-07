@@ -118,27 +118,28 @@ Tracked features, improvements, and ideas — what's done and what's next.
 - [ ] Token cost tracking per task/session
 
 ### SubAgent Ownership & Hierarchy
-- [ ] SubAgent should belong to its parent Agent, not be a global singleton on PegasusApp
-  - Current: SubAgentManager is a single instance owned by PegasusApp, only MainAgent can spawn subagents
-  - Problem: If Agent A spawns Agent B, B is tracked as MainAgent's subagent (flat), not A's child
-  - Target: Each Agent can own subagents. A spawns B → B is A's child. B spawns C → C is B's child.
-  - Involves: SubAgentManager per-Agent (or hierarchical tracking), Worker thread communication, spawn_subagent tool context scoping
-  - Related: TaskRunner already creates per-Agent child tasks, but SubAgent (Worker-based) doesn't follow same pattern
+- [x] SubAgent now belongs to its parent Agent via TaskRunner (not a global singleton)
+  - Done: SubAgentManager deleted, all subagents managed by TaskRunner
+  - Done: Two-level nesting — L1 can spawn L2, L2 cannot spawn further (depth-based)
+  - Remaining: TaskRunner is still a flat tracker (not hierarchical tree). If needed later, can add parent-child tracking.
 
 ### ToolContext Redesign
-- [ ] ToolContext is a god bag — 17 optional fields, 11 typed as `unknown`
+- [ ] ToolContext is a god bag — 16 optional fields, 10 typed as `unknown`
   - Current: flat interface with all fields optional, tools do `as SomeLike` type assertions internally
   - Problem: no type safety, every field is MainAgent-specific coupling, `Object.assign` on every tool call
   - Options:
     - A) Simplify to `Record<string, unknown>` (honest bag, tools declare what they need)
     - B) Typed per-tool context via generics or intersection types
+  - Done: `subAgentManager` field removed (SubAgentManager deleted)
   - Also: `userId`, `allowedPaths` fields are never set — dead fields
   - Also: `storeImage` callback should move to ImageManager (already has `store()`)
   - Related: Agent.buildToolContext() and MainAgent.buildToolContext() can be simplified once ToolContext is cleaner
 
-### Merge spawn_task and spawn_subagent
-- [ ] spawn_task (inline, via TaskRunner) and spawn_subagent (Worker thread, via SubAgentManager) are redundant
-  - Only real difference: inline vs Worker thread execution
-  - Should be a single `spawn` tool with an `isolated: boolean` parameter
-  - Involves: merge TaskRunner + SubAgentManager, or make one manager support both modes
-  - Also: unify result notification path (TaskNotification vs Worker notify message)
+### Unified spawn_subagent
+- [x] spawn_task and spawn_subagent merged into single `spawn_subagent` tool
+  - Done: spawn_task + resume_task deleted
+  - Done: SubAgentManager + Worker subagent mode deleted (~2,500 lines)
+  - Done: TaskRunner gains depth + memorySnapshot for nesting control
+  - Done: All subagents run inline via Agent.run() (no Worker threads)
+  - Done: Two-level nesting limit enforced via depth parameter
+  - Done: resume preserves original task depth (prevents L2→L1 escalation)
