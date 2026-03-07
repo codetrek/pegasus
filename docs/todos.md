@@ -135,3 +135,10 @@ Tracked features, improvements, and ideas — what's done and what's next.
   - Also: `userId`, `allowedPaths` fields are never set — dead fields
   - Also: `storeImage` callback should move to ImageManager (already has `store()`)
   - Related: Agent.buildToolContext() and MainAgent.buildToolContext() can be simplified once ToolContext is cleaner
+
+### Merge spawn_task and spawn_subagent
+- [ ] spawn_task (inline, via TaskRunner) and spawn_subagent (Worker thread, via SubAgentManager) are redundant
+  - Only real difference: inline vs Worker thread execution
+  - Should be a single `spawn` tool with an `isolated: boolean` parameter
+  - Involves: merge TaskRunner + SubAgentManager, or make one manager support both modes
+  - Also: unify result notification path (TaskNotification vs Worker notify message)
