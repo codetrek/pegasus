@@ -1,9 +1,22 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, mock } from "bun:test";
 import { notify } from "@pegasus/tools/builtins/notify-tool.ts";
 import { ToolCategory } from "@pegasus/tools/types.ts";
 
 describe("notify tool", () => {
-  test("returns signal with action and message", async () => {
+  test("self-executes via onNotify callback when available", async () => {
+    const onNotify = mock((_msg: string) => {});
+    const result = await notify.execute(
+      { message: "Found 3 results, analyzing..." },
+      { taskId: "task-123", onNotify },
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.result).toEqual({ notified: true });
+    expect(onNotify).toHaveBeenCalledTimes(1);
+    expect(onNotify).toHaveBeenCalledWith("Found 3 results, analyzing...");
+  });
+
+  test("falls back to signal result when onNotify is not set", async () => {
     const result = await notify.execute(
       { message: "Found 3 results, analyzing..." },
       { taskId: "task-123" },

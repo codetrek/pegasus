@@ -99,6 +99,8 @@ export interface ToolContext {
   onSkillsReloaded?: unknown;
   /** ProjectAdapter for starting/stopping project Workers (loosely typed). */
   projectAdapter?: unknown;
+  /** Notify callback — used by notify tool for self-executing behavior. */
+  onNotify?: (message: string) => void;
 }
 
 // ── ToolStats ─────────────────────────────────

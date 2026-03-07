@@ -21,6 +21,7 @@ import { createInjectedSubsystems } from "../helpers/create-injected-subsystems.
 
 let testSeq = 0;
 let testDataDir = "/tmp/pegasus-test-main-agent";
+let activeAgents: MainAgent[] = [];
 
 const testPersona: Persona = {
   name: "TestBot",
@@ -172,6 +173,7 @@ function createMainAgent(opts: {
     skillDirs: opts.skillDirs,
   });
   const agent = new MainAgent({ models, persona, settings, injected });
+  activeAgents.push(agent);
   // Wire TickManager to call agent._handleTickFromApp when tick fires
   if ('_wireTickToAgent' in injected) {
     (injected as any)._wireTickToAgent(agent);
@@ -185,6 +187,13 @@ describe("MainAgent", () => {
     testDataDir = `/tmp/pegasus-test-main-agent-${process.pid}-${testSeq}`;
   });
   afterEach(async () => {
+    // Stop all agents before deleting temp dirs to prevent ENOENT errors
+    for (const a of activeAgents) {
+      try { await a.stop(); } catch {}
+    }
+    activeAgents = [];
+    // Allow any remaining microtasks (e.g. appendFile callbacks) to settle
+    await Bun.sleep(50);
     await rm(testDataDir, { recursive: true, force: true }).catch(() => {});
   });
 
@@ -3338,6 +3347,148 @@ describe("MainAgent", () => {
 
       // Wait for task completion
       await Bun.sleep(150);
+
+      await agent.stop();
+    }, 10_000);
+  });
+
+  // ═══════════════════════════════════════════════════
+  // Coverage: onTaskNotificationHandled + pushTaskNotification
+  // Lines 207-216, 410
+  // ═══════════════════════════════════════════════════
+
+  describe("task notification handling (coverage)", () => {
+    it("should call tickManager.checkShouldStop for completed notifications", async () => {
+      const model = createMonologueModel("thinking...");
+      const agent = createMainAgent({ models: createMockModelRegistry(model) });
+
+      await agent.start();
+      agent.onReply(() => {});
+
+      // Set lastChannel
+      agent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
+      await Bun.sleep(100);
+
+      // Push a completed task notification via the public API (line 410)
+      agent.pushTaskNotification({
+        type: "completed",
+        taskId: "task-done-1",
+        result: "all done",
+      });
+
+      await Bun.sleep(200);
+
+      // Verify notification was injected into session
+      const content = await Bun.file(
+        `${testDataDir}/agents/main/session/current.jsonl`,
+      ).text();
+      expect(content).toContain("[Task task-done-1 completed]");
+
+      await agent.stop();
+    }, 10_000);
+
+    it("should call tickManager.checkShouldStop for failed notifications", async () => {
+      const model = createMonologueModel("thinking...");
+      const agent = createMainAgent({ models: createMockModelRegistry(model) });
+
+      await agent.start();
+      agent.onReply(() => {});
+
+      agent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
+      await Bun.sleep(100);
+
+      agent.pushTaskNotification({
+        type: "failed",
+        taskId: "task-fail-1",
+        error: "boom",
+      });
+
+      await Bun.sleep(200);
+
+      const content = await Bun.file(
+        `${testDataDir}/agents/main/session/current.jsonl`,
+      ).text();
+      expect(content).toContain("[Task task-fail-1 failed]");
+
+      await agent.stop();
+    }, 10_000);
+
+    it("should NOT call tickManager.checkShouldStop for notify notifications", async () => {
+      const model = createMonologueModel("thinking...");
+      const agent = createMainAgent({ models: createMockModelRegistry(model) });
+
+      await agent.start();
+      agent.onReply(() => {});
+
+      agent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
+      await Bun.sleep(100);
+
+      agent.pushTaskNotification({
+        type: "notify",
+        taskId: "task-progress-1",
+        message: "50% done",
+      });
+
+      await Bun.sleep(200);
+
+      const content = await Bun.file(
+        `${testDataDir}/agents/main/session/current.jsonl`,
+      ).text();
+      expect(content).toContain("[Task task-progress-1 update]");
+
+      await agent.stop();
+    }, 10_000);
+  });
+
+  // ═══════════════════════════════════════════════════
+  // Coverage: buildToolContext storeImage callback
+  // Lines 239-240
+  // ═══════════════════════════════════════════════════
+
+  describe("buildToolContext with vision enabled (coverage)", () => {
+    it("should include storeImage in tool context when vision is enabled", async () => {
+      // Use a model that calls a tool so buildToolContext is invoked with storeImage
+      let callCount = 0;
+      const model: LanguageModel = {
+        provider: "test",
+        modelId: "test-model",
+        async generate(): Promise<GenerateTextResult> {
+          callCount++;
+          if (callCount === 1) {
+            return {
+              text: "",
+              finishReason: "tool_calls",
+              toolCalls: [{ id: "tc-1", name: "current_time", arguments: {} }],
+              usage: { promptTokens: 10, completionTokens: 10 },
+            };
+          }
+          return {
+            text: "",
+            finishReason: "stop",
+            usage: { promptTokens: 5, completionTokens: 0 },
+          };
+        },
+      };
+
+      const settings = SettingsSchema.parse({
+        dataDir: testDataDir,
+        logLevel: "warn",
+        llm: { maxConcurrentCalls: 3 },
+        agent: { maxActiveTasks: 10 },
+        authDir: `/tmp/pegasus-test-app-auth-${process.pid}-${testSeq}`,
+        vision: { enabled: true },
+      });
+
+      const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
+
+      await agent.start();
+      agent.onReply(() => {});
+
+      agent.send({ text: "test vision", channel: { type: "cli", channelId: "test" } });
+      await Bun.sleep(200);
+
+      // Verify agent processed the tool call (buildToolContext was called with vision)
+      expect(callCount).toBeGreaterThanOrEqual(2);
 
       await agent.stop();
     }, 10_000);

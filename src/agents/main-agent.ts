@@ -1,30 +1,33 @@
 /**
  * MainAgent — persistent LLM conversation partner.
  *
- * Extends ConversationAgent to inherit queue processing, session management,
+ * Extends Agent to inherit queue processing, session management,
  * reply routing, and the processStep-based thinking engine. Adds task/subagent
- * delegation, skills, MCP integration, memory, vision, and compaction.
+ * delegation, skills, MCP integration, vision, and compaction.
+ *
+ * Memory injection and reflection are handled by Agent (built-in capabilities):
+ *   - Agent auto-injects memory index on fresh session start and after compaction
+ *   - Agent auto-runs reflection after compaction via injected ReflectionOrchestrator
+ *   - Agent auto-injects getMemorySnapshot into ToolContext when memoryDir is set
  *
  * All infrastructure subsystems (auth, MCP, skills, tasks, etc.) are injected
  * by PegasusApp — MainAgent never self-initializes them.
  *
  * Key overrides:
- *   - buildToolContext()      → rich ToolContext with all dependencies
- *   - compactIfNeeded()       → session compaction using ModelRegistry
- *   - onLLMError()            → overflow recovery with session reload
- *   - onStart()/onStop()      → session lifecycle (load, memory, prompt; tick + drain)
- *   - buildSystemPrompt()     → cached system prompt with skills/projects/etc.
+ *   - buildToolContext()      → calls super() + overrides MainAgent-specific fields
+ *   - onStart()/onStop()      → session lifecycle (MCP tools, prompt; tick + drain)
  *   - getMaxToolResultChars() → truncation budget from model context window
+ *   - computeBudgetOptions()  → ModelRegistry-aware compaction budget
+ *   - onTaskNotificationHandled() → tick management (checkShouldStop)
  */
 
 import type { Message } from "../infra/llm-types.ts";
 import type { Persona } from "../identity/persona.ts";
-import { buildSystemPrompt, formatSize } from "../prompts/index.ts";
+import { buildSystemPrompt } from "../prompts/index.ts";
 import type { Settings } from "../infra/config.ts";
 import { getSettings } from "../infra/config.ts";
 import { getLogger } from "../infra/logger.ts";
 import { ToolRegistry } from "../tools/registry.ts";
-import type { OutboundMessage } from "../channels/types.ts";
 import { ImageManager } from "../media/image-manager.ts";
 import { TaskRunner } from "./task-runner.ts";
 import type { TaskNotification } from "./task-runner.ts";
@@ -40,7 +43,7 @@ import { OwnerStore } from "../security/owner-store.ts";
 import { TickManager } from "./tick-manager.ts";
 import { AuthManager } from "./auth-manager.ts";
 import { ReflectionOrchestrator } from "./reflection-orchestrator.ts";
-import { ConversationAgent, type QueueItem } from "./base/conversation-agent.ts";
+import { Agent, type QueueItem, type TaskNotificationPayload } from "./agent.ts";
 import { EventBus } from "../events/bus.ts";
 
 // Main Agent's curated tool set
@@ -86,7 +89,7 @@ export interface MainAgentDeps {
   injected: InjectedSubsystems;
 }
 
-export class MainAgent extends ConversationAgent {
+export class MainAgent extends Agent {
   private models: ModelRegistry;
   private settings: Settings;
   private taskRunner!: TaskRunner;
@@ -99,7 +102,6 @@ export class MainAgent extends ConversationAgent {
   private subAgentManager: SubAgentManager | null = null;
   private ownerStore: OwnerStore;
   private _systemPrompt: string = "";
-  private reflectionOrchestrator!: ReflectionOrchestrator;
   private tickManager!: TickManager;
 
   /** Injected subsystems from PegasusApp (stored for onStart MCP tool registration). */
@@ -111,7 +113,7 @@ export class MainAgent extends ConversationAgent {
     const toolRegistry = new ToolRegistry();
     toolRegistry.registerMany(mainAgentTools);
 
-    // Use real model — processStep uses BaseAgent.model.
+    // Use real model — processStep uses Agent.model.
     // Auth is initialized before MainAgent creation (PegasusApp step 3 vs step 11).
     const defaultModel = deps.models.getDefault();
 
@@ -120,11 +122,14 @@ export class MainAgent extends ConversationAgent {
       model: defaultModel,
       toolRegistry,
       persona: deps.persona,
+      systemPrompt: () => this._systemPrompt,
       sessionDir: mainStorePaths.session,
       eventBus: new EventBus({ keepHistory: true }),
       contextWindow: settings.llm.contextWindow,
       imageManager: deps.injected.imageManager,
       visionKeepLastNTurns: settings.vision?.keepLastNTurns,
+      toolContext: { memoryDir: mainStorePaths.memory! },
+      reflectionOrchestrator: deps.injected.reflectionOrchestrator,
     });
 
     this.models = deps.models;
@@ -144,7 +149,6 @@ export class MainAgent extends ConversationAgent {
     this.projectAdapter = inj.projectAdapter;
     this.subAgentManager = inj.subAgentManager;
     this.tickManager = inj.tickManager;
-    this.reflectionOrchestrator = inj.reflectionOrchestrator;
   }
 
   // ═══════════════════════════════════════════════════
@@ -153,14 +157,8 @@ export class MainAgent extends ConversationAgent {
 
   /** Start the Main Agent and underlying Task System. */
   protected override async onStart(): Promise<void> {
-    // Load session history from disk (parent does this)
+    // Load session history + auto-inject memory for fresh sessions (parent does this)
     await super.onStart();
-
-    // Inject memory index only for fresh sessions (empty = new, or compact summary only)
-    // On restart with existing messages, the memory index is already persisted in JSONL
-    if (this.sessionMessages.length === 0) {
-      await this._injectMemoryIndex();
-    }
 
     // Register pre-wrapped MCP tools in MainAgent's own tool registry (for conversation).
     // PegasusApp already wrapped them once — no need to re-call listTools/wrapMCPTools.
@@ -183,7 +181,7 @@ export class MainAgent extends ConversationAgent {
     this.tickManager.stop();
 
     // Wait for queue to finish processing the current item.
-    // isRunning is already false (set by BaseAgent.stop()), so _drainQueue
+    // isRunning is already false (set by Agent.stop()), so _drainQueue
     // will exit after the current item — no risk of hanging.
     await this.waitForQueueDrain();
 
@@ -192,87 +190,15 @@ export class MainAgent extends ConversationAgent {
     logger.info("main_agent_stopped");
   }
 
-  // ═══════════════════════════════════════════════════
-  // System prompt
-  // ═══════════════════════════════════════════════════
-
-  protected override buildSystemPrompt(): string {
-    // Return cached system prompt (built once in start for prefix caching)
-    return this._systemPrompt;
-  }
-
-  // ═══════════════════════════════════════════════════
-  // Tool context — rich ToolContext for processStep
-  // ═══════════════════════════════════════════════════
-
   /**
-   * Build a full ToolContext with all dependencies for tool execution.
-   * Called by BaseAgent._executeToolAsync() via the buildToolContext() hook.
+   * Override compaction budget to use ModelRegistry for dynamic model resolution.
+   * Provides provider-aware caching and configurable thresholds.
    */
-  protected override buildToolContext(taskId: string): ToolContext {
-    const imgMgr = this.imageManager;
+  protected override computeBudgetOptions() {
+    const dm = this.models.getDefault();
     return {
-      taskId,
-      memoryDir: this.mainStorePaths.memory!,
-      sessionDir: this.mainStorePaths.session,
-      tasksDir: this.mainStorePaths.tasks,
-      taskRegistry: this.taskRunner,
-      projectManager: this.projectManager,
-      ownerStore: this.ownerStore,
-      mediaDir: imgMgr
-        ? path.join(this.settings.dataDir, "media")
-        : undefined,
-      storeImage: imgMgr
-        ? async (buffer: Buffer, mimeType: string, source: string) => {
-            const ref = await imgMgr.store(buffer, mimeType, source);
-            return { id: ref.id, mimeType: ref.mimeType };
-          }
-        : undefined,
-      onReply: this._onReply
-        ? (msg: unknown) => this._onReply!(msg as OutboundMessage)
-        : undefined,
-      resolveImage: imgMgr
-        ? (idOrPath: string) => imgMgr.resolve(idOrPath)
-        : undefined,
-      subAgentManager: this.subAgentManager,
-      skillRegistry: this.skillRegistry,
-      tickManager: this.tickManager,
-      getMemorySnapshot: () => this._getMemorySnapshot(),
-      onSkillsReloaded: () => {
-        this._reloadSkills();
-        return this.skillRegistry.listAll().length;
-      },
-      projectAdapter: this.projectAdapter,
-    };
-  }
-
-  /**
-   * Compute max tool result chars from the model's context window.
-   * Used by BaseAgent._executeToolAsync() for result truncation.
-   */
-  protected override getMaxToolResultChars(): number {
-    const budget = computeTokenBudget({
-      modelId: this.models.getDefaultModelId(),
-      provider: this.models.getDefaultProvider(),
-      configContextWindow: this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
-      modelLimitsCache: this.modelLimitsCache,
-    });
-    return calculateMaxToolResultChars(budget.contextWindow, this.settings.context?.maxToolResultShare);
-  }
-
-  // ═══════════════════════════════════════════════════
-  // Compaction — custom budget + post-compact hooks
-  // ═══════════════════════════════════════════════════
-
-  /**
-   * Budget options using ModelRegistry for dynamic model resolution,
-   * provider-aware caching, and configurable threshold.
-   */
-  protected override computeBudgetOptions(): import("../context/index.ts").BudgetOptions {
-    const defaultModel = this.models.getDefault();
-    return {
-      modelId: defaultModel.modelId,
-      provider: defaultModel.provider,
+      modelId: dm.modelId,
+      provider: dm.provider,
       configContextWindow:
         this.models.getDefaultContextWindow() ??
         this.settings.llm.contextWindow,
@@ -282,29 +208,63 @@ export class MainAgent extends ConversationAgent {
   }
 
   /**
-   * Post-compact hook: re-inject memory index and fire-and-forget reflection.
-   * Image cache clearing is handled by BaseAgent._compactState().
+   * Override task notification handler for tick management.
+   * Stops tick timer when no more active work (completed/failed, not progress updates).
    */
-  protected override async onCompacted(preCompactMessages: Message[]): Promise<void> {
-    await this._injectMemoryIndex();
-
-    // Fire-and-forget reflection on the archived session
-    if (this.reflectionOrchestrator.shouldReflect(preCompactMessages)) {
-      this.reflectionOrchestrator.runReflection(preCompactMessages).catch((err) => {
-        logger.warn({ error: err instanceof Error ? err.message : String(err) }, "main_reflection_failed");
-      });
+  protected override async onTaskNotificationHandled(notification: TaskNotificationPayload): Promise<void> {
+    if (notification.type !== "notify") {
+      this.tickManager.checkShouldStop();
     }
   }
 
   // ═══════════════════════════════════════════════════
-  // Task notification tick management
+  // Tool context — rich ToolContext for processStep
   // ═══════════════════════════════════════════════════
 
-  protected override async onTaskNotificationHandled(notification: import("./base/conversation-agent.ts").TaskNotificationPayload): Promise<void> {
-    // Stop tick if no more active work (completed/failed, not progress updates)
-    if (notification.type !== "notify") {
-      this.tickManager.checkShouldStop();
-    }
+  /**
+   * Build ToolContext by extending the base context with MainAgent-specific fields.
+   * Inherits auto-injected fields (memoryDir, onReply, getMemorySnapshot) from Agent.
+   */
+  protected override buildToolContext(taskId: string): ToolContext {
+    const ctx = super.buildToolContext(taskId);
+    const imgMgr = this.imageManager;
+
+    // MainAgent-specific fields (override/extend base context)
+    ctx.sessionDir = this.mainStorePaths.session;
+    ctx.tasksDir = this.mainStorePaths.tasks;
+    ctx.taskRegistry = this.taskRunner;
+    ctx.projectManager = this.projectManager;
+    ctx.ownerStore = this.ownerStore;
+    ctx.mediaDir = imgMgr ? path.join(this.settings.dataDir, "media") : undefined;
+    ctx.storeImage = imgMgr ? async (buffer: Buffer, mimeType: string, source: string) => {
+      const ref = await imgMgr.store(buffer, mimeType, source);
+      return { id: ref.id, mimeType: ref.mimeType };
+    } : undefined;
+    ctx.resolveImage = imgMgr ? (idOrPath: string) => imgMgr.resolve(idOrPath) : undefined;
+    ctx.subAgentManager = this.subAgentManager;
+    ctx.skillRegistry = this.skillRegistry;
+    ctx.tickManager = this.tickManager;
+    ctx.onSkillsReloaded = () => {
+      this._reloadSkills();
+      return this.skillRegistry.listAll().length;
+    };
+    ctx.projectAdapter = this.projectAdapter;
+
+    return ctx;
+  }
+
+  /**
+   * Compute max tool result chars from the model's context window.
+   * Used by Agent._executeToolAsync() for result truncation.
+   */
+  protected override getMaxToolResultChars(): number {
+    const budget = computeTokenBudget({
+      modelId: this.models.getDefaultModelId(),
+      provider: this.models.getDefaultProvider(),
+      configContextWindow: this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
+      modelLimitsCache: this.modelLimitsCache,
+    });
+    return calculateMaxToolResultChars(budget.contextWindow, this.settings.context?.maxToolResultShare);
   }
 
   // ═══════════════════════════════════════════════════
@@ -332,115 +292,6 @@ export class MainAgent extends ConversationAgent {
   }
 
   // ═══════════════════════════════════════════════════
-  // Memory index injection
-  // ═══════════════════════════════════════════════════
-
-  /**
-   * Build a text snapshot of the memory index (facts + episode summaries)
-   * to pass to SubAgents so they have context from long-term memory.
-   * Returns undefined if memory is empty or unavailable.
-   */
-  private async _getMemorySnapshot(): Promise<string | undefined> {
-    try {
-      const memoryDir = this.mainStorePaths.memory!;
-      const listResult = await this.toolExecutor.execute(
-        "memory_list",
-        {},
-        { taskId: "main-agent", memoryDir },
-      );
-      if (!listResult.success || !Array.isArray(listResult.result) || listResult.result.length === 0) {
-        return undefined;
-      }
-
-      const entries = listResult.result as Array<{ path: string; summary: string; size: number }>;
-      const lines: string[] = ["[Memory snapshot from MainAgent]", ""];
-
-      // Facts: load full content
-      for (const e of entries.filter(e => e.path.startsWith("facts/"))) {
-        try {
-          const readResult = await this.toolExecutor.execute(
-            "memory_read",
-            { path: e.path },
-            { taskId: "main-agent", memoryDir },
-          );
-          if (readResult.success && typeof readResult.result === "string") {
-            lines.push(`### ${e.path}`, "", readResult.result as string, "");
-          }
-        } catch {
-          // Skip unreadable facts
-        }
-      }
-
-      // Episodes: summary only
-      const episodes = entries.filter(e => e.path.startsWith("episodes/"));
-      if (episodes.length > 0) {
-        lines.push("### Episodes", "");
-        for (const e of episodes) {
-          lines.push(`- ${e.path}: ${e.summary}`);
-        }
-        lines.push("");
-      }
-
-      const snapshot = lines.join("\n").trim();
-      return snapshot.length > 0 ? snapshot : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
-  /**
-   * Inject available memory files into the session so the LLM knows what
-   * long-term knowledge is available without needing to call memory_list first.
-   */
-  private async _injectMemoryIndex(): Promise<void> {
-    try {
-      const memoryDir = this.mainStorePaths.memory!;
-      const listResult = await this.toolExecutor.execute(
-        "memory_list",
-        {},
-        { taskId: "main-agent", memoryDir },
-      );
-      if (!listResult.success || !Array.isArray(listResult.result) || listResult.result.length === 0) return;
-
-      const entries = listResult.result as Array<{ path: string; summary: string; size: number }>;
-      const lines: string[] = ["[Available memory]", ""];
-
-      // Facts: load full content
-      for (const e of entries.filter(e => e.path.startsWith("facts/"))) {
-        try {
-          const readResult = await this.toolExecutor.execute(
-            "memory_read",
-            { path: e.path },
-            { taskId: "main-agent", memoryDir },
-          );
-          if (readResult.success && typeof readResult.result === "string") {
-            lines.push(`### ${e.path} (${formatSize(e.size)})`, "", readResult.result as string, "");
-          }
-        } catch {
-          lines.push(`- ${e.path} (${formatSize(e.size)}): [failed to load]`);
-        }
-      }
-
-      // Episodes: summary only
-      const episodes = entries.filter(e => e.path.startsWith("episodes/"));
-      if (episodes.length > 0) {
-        lines.push("### Episodes (use memory_read to load details)", "");
-        for (const e of episodes) {
-          lines.push(`- ${e.path} (${formatSize(e.size)}): ${e.summary}`);
-        }
-        lines.push("");
-      }
-
-      const msg: Message = { role: "user", content: lines.join("\n") };
-      this.sessionMessages.push(msg);
-      await this.sessionStore.append(msg);
-      logger.debug({ count: entries.length }, "memory_index_injected");
-    } catch {
-      // Memory unavailable — continue without it
-    }
-  }
-
-  // ═══════════════════════════════════════════════════
   // System prompt
   // ═══════════════════════════════════════════════════
 
@@ -463,7 +314,7 @@ export class MainAgent extends ConversationAgent {
 
     return buildSystemPrompt({
       mode: "main",
-      persona: this.persona,
+      persona: this.persona!,
       aiTaskMetadata: aiTaskMetadata || undefined,
       skillMetadata: skillMetadata || undefined,
       projectMetadata: projectMetadata || undefined,

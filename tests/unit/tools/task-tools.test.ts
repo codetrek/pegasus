@@ -124,6 +124,19 @@ describe("task tools", () => {
       expect(tasks).toHaveLength(1);
       expect(tasks[0]!.taskId).toBe("t1");
     }, 5000);
+
+    it("should return error when index contains corrupted entries", async () => {
+      // Write a JSON-valid null line — loadIndex parses it as [null],
+      // then filter(e => e.date === ...) throws TypeError on null
+      await mkdir(tasksDir, { recursive: true });
+      await appendFile(`${tasksDir}/index.jsonl`, "null\n", "utf-8");
+
+      const context = { taskId: "test", tasksDir };
+      const result = await task_list.execute({ date: "2026-02-25" }, context);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBeTruthy();
+    }, 5000);
   });
 
   // ── task_replay ─────────────────────────────────
@@ -193,6 +206,19 @@ describe("task tools", () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("tasksDir is required but missing");
+    }, 5000);
+
+    it("should return error when index contains corrupted entries", async () => {
+      // Write a JSON-valid null line — loadIndex parses it as [null],
+      // then find(e => e.taskId === ...) throws TypeError on null
+      await mkdir(tasksDir, { recursive: true });
+      await appendFile(`${tasksDir}/index.jsonl`, "null\n", "utf-8");
+
+      const context = { taskId: "test", tasksDir };
+      const result = await task_replay.execute({ taskId: "some-id" }, context);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBeTruthy();
     }, 5000);
   });
 });

@@ -1,14 +1,11 @@
 /**
- * Base agent module — new agent hierarchy for Pegasus.
+ * Base agent module — shared infrastructure for Pegasus agents.
  *
  * Exports:
  *   - AgentState, AgentStateManager — 3-state model (IDLE/BUSY/WAITING)
  *   - ToolCallCollector — parallel tool execution coordinator
  *   - TaskExecutionState — per-task state tracking
- *   - BaseAgent — abstract base class for all agents
- *   - ConversationAgent — persistent conversation management
- *   - OrchestratorAgent — complex task decomposition and coordination
- *   - ExecutionAgent — direct task execution (task/worker modes)
+ *   - Agent — unified concrete agent (conversation + execution)
  */
 
 // State model
@@ -32,36 +29,16 @@ export {
   type CreateTaskStateOptions,
 } from "./task-execution-state.ts";
 
-// Base class
+// Unified Agent
 export {
-  BaseAgent,
-  type BaseAgentDeps,
-  formatToolResult,
-  type ToolCallInterceptResult,
-} from "./base-agent.ts";
-
-// Agent types
-export {
-  ConversationAgent,
-  type ConversationAgentDeps,
+  Agent,
+  type AgentDeps,
+  type AgentResult,
   type ReplyCallback,
-  type SpawnAgentCallback,
   type QueueItem,
   type CustomQueueItem,
-} from "./conversation-agent.ts";
-
-export {
-  OrchestratorAgent,
-  type OrchestratorAgentDeps,
-  type ExecutionSpawnConfig,
-  type ExecutionHandle,
-  type OrchestratorNotification,
-  type OrchestratorResult,
-} from "./orchestrator-agent.ts";
-
-export {
-  ExecutionAgent,
-  type ExecutionAgentDeps,
-  type ExecutionMode,
-  type ExecutionResult,
-} from "./execution-agent.ts";
+  type TaskNotificationPayload,
+  formatChannelMeta,
+  formatToolResult,
+  mechanicalSummary,
+} from "../agent.ts";

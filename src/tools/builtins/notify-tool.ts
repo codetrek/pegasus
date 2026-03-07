@@ -4,8 +4,9 @@
  * Allows a running task to send messages back to the MainAgent:
  * progress updates, interim results, clarification requests, warnings, etc.
  *
- * Signal tool: Agent intercepts the result, emits TASK_NOTIFY event,
- * and calls notifyCallback so MainAgent receives the message.
+ * Self-executing: if context.onNotify is set, calls it directly and returns { notified: true }.
+ * Fallback: if context.onNotify is not set, returns a signal result for the agent to intercept
+ * (backward compatibility).
  */
 
 import { z } from "zod";
@@ -26,7 +27,19 @@ export const notify: Tool = {
     const startedAt = Date.now();
     const { message } = params as { message: string };
 
-    // Signal tool: Agent intercepts this result and routes to MainAgent
+    // Self-executing: call onNotify directly if available
+    if (context.onNotify) {
+      context.onNotify(message);
+      return {
+        success: true,
+        result: { notified: true },
+        startedAt,
+        completedAt: Date.now(),
+        durationMs: Date.now() - startedAt,
+      };
+    }
+
+    // Fallback: signal tool behavior (agent intercepts this result)
     return {
       success: true,
       result: { action: "notify", message, taskId: context.taskId },

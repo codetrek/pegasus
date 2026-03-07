@@ -51,7 +51,7 @@ import { TelegramAdapter } from "./channels/telegram.ts";
 import { buildTelegramCommands } from "./channels/telegram-commands.ts";
 import { OwnerStore } from "./security/owner-store.ts";
 import { classifyMessage } from "./security/message-classifier.ts";
-import { formatChannelMeta } from "./agents/base/conversation-agent.ts";
+import { formatChannelMeta } from "./agents/agent.ts";
 
 const logger = getLogger("pegasus_app");
 
