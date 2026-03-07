@@ -4,7 +4,7 @@
  * Exercises:
  *   - run() in task mode returns result (no session persistence)
  *   - run() in worker mode persists session
- *   - notify() tool is intercepted and calls onNotify callback
+ *   - notify() tool self-executes via ToolContext.onNotify callback
  *   - mode getter returns correct mode
  *   - buildSystemPrompt includes task description
  *   - onTaskComplete emits TASK_COMPLETED / TASK_FAILED events
@@ -25,6 +25,7 @@ import { ToolRegistry } from "../../../../src/tools/registry.ts";
 import { EventBus } from "../../../../src/events/bus.ts";
 import { EventType, createEvent } from "../../../../src/events/types.ts";
 import type { Event } from "../../../../src/events/types.ts";
+import { notify } from "../../../../src/tools/builtins/notify-tool.ts";
 import { mkdtemp, readFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -189,7 +190,7 @@ describe("ExecutionAgent", () => {
     });
   });
 
-  describe("notify() tool is intercepted and calls onNotify callback", () => {
+  describe("notify() tool self-executes via onNotify callback", () => {
     test("notify tool triggers onNotify callback with message", async () => {
       let callIndex = 0;
       const model = createMockModel(
@@ -218,8 +219,10 @@ describe("ExecutionAgent", () => {
       );
 
       const notifyCb = mock((_msg: string) => {});
+      const registry = new ToolRegistry();
+      registry.register(notify);
       const agent = new ExecutionAgent(
-        createTaskDeps({ model, onNotify: notifyCb }),
+        createTaskDeps({ model, onNotify: notifyCb, toolRegistry: registry }),
       );
 
       const result = await agent.run();
@@ -229,7 +232,7 @@ describe("ExecutionAgent", () => {
       expect(notifyCb).toHaveBeenCalledWith("progress: 50%");
     });
 
-    test("notify tool without callback executes normally (no intercept)", async () => {
+    test("notify tool without callback falls back to signal result", async () => {
       let callIndex = 0;
       const model = createMockModel(
         mock(async () => {
@@ -256,8 +259,10 @@ describe("ExecutionAgent", () => {
         }),
       );
 
-      // No onNotify callback — notify tool should fall through to execute
-      const agent = new ExecutionAgent(createTaskDeps({ model }));
+      // No onNotify callback — notify tool should fall back to signal result
+      const registry = new ToolRegistry();
+      registry.register(notify);
+      const agent = new ExecutionAgent(createTaskDeps({ model, toolRegistry: registry }));
 
       // This will try to execute the "notify" tool via ToolExecutor.
       // Since no such tool is registered, it will fail gracefully.

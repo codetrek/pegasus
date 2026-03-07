@@ -272,7 +272,6 @@ export abstract class BaseAgent {
    * Subclasses override this to handle special tools:
    *   - ConversationAgent: intercept "reply" → emit reply, return skip
    *   - OrchestratorAgent: intercept "spawn_task" → create child agent
-   *   - ExecutionAgent: intercept "notify" → send progress to parent
    *
    * Default: execute all tools normally.
    */

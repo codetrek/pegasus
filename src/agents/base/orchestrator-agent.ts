@@ -20,6 +20,7 @@ import type { Message } from "../../infra/llm-types.ts";
 import type { Event } from "../../events/types.ts";
 import { EventType, createEvent } from "../../events/types.ts";
 import type { ToolCall } from "../../models/tool.ts";
+import type { ToolContext } from "../../tools/types.ts";
 import { getLogger } from "../../infra/logger.ts";
 
 const logger = getLogger("orchestrator_agent");
@@ -209,9 +210,6 @@ export class OrchestratorAgent extends BaseAgent {
     if (tc.name === "spawn_task") {
       return this._interceptSpawnTask(tc);
     }
-    if (tc.name === "notify") {
-      return this._interceptNotify(tc);
-    }
     return { action: "execute" };
   }
 
@@ -259,17 +257,16 @@ export class OrchestratorAgent extends BaseAgent {
     };
   }
 
-  private _interceptNotify(tc: ToolCall): ToolCallInterceptResult {
-    const args = tc.arguments as { message: string };
-    this.onNotifyParent({ type: "progress", message: args.message });
+  // ═══════════════════════════════════════════════════
+  // ToolContext Injection
+  // ═══════════════════════════════════════════════════
 
-    return {
-      action: "skip",
-      result: {
-        toolCallId: tc.id,
-        content: JSON.stringify({ notified: true }),
-      },
+  protected override buildToolContext(taskId: string): ToolContext {
+    const ctx = super.buildToolContext(taskId);
+    ctx.onNotify = (message: string) => {
+      this.onNotifyParent({ type: "progress", message });
     };
+    return ctx;
   }
 
   // ═══════════════════════════════════════════════════

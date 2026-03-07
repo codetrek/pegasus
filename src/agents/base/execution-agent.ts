@@ -27,11 +27,11 @@
  *   New: ExecutionAgent.run() → processStep() → done.
  */
 
-import { BaseAgent, type BaseAgentDeps, type ToolCallInterceptResult } from "./base-agent.ts";
+import { BaseAgent, type BaseAgentDeps } from "./base-agent.ts";
 import type { Message } from "../../infra/llm-types.ts";
 import type { Event } from "../../events/types.ts";
 import { EventType, createEvent } from "../../events/types.ts";
-import type { ToolCall } from "../../models/tool.ts";
+import type { ToolContext } from "../../tools/types.ts";
 
 // ── Types ────────────────────────────────────────────
 
@@ -175,24 +175,15 @@ export class ExecutionAgent extends BaseAgent {
   }
 
   // ═══════════════════════════════════════════════════
-  // Tool Call Interception
+  // ToolContext Injection
   // ═══════════════════════════════════════════════════
 
-  protected override async onToolCall(tc: ToolCall): Promise<ToolCallInterceptResult> {
-    // Intercept notify() to send progress to parent
-    if (tc.name === "notify" && this.onNotifyParent) {
-      const args = tc.arguments as { message: string };
-      this.onNotifyParent(args.message);
-      return {
-        action: "skip",
-        result: {
-          toolCallId: tc.id,
-          content: JSON.stringify({ notified: true }),
-        },
-      };
+  protected override buildToolContext(taskId: string): ToolContext {
+    const ctx = super.buildToolContext(taskId);
+    if (this.onNotifyParent) {
+      ctx.onNotify = this.onNotifyParent;
     }
-    // Everything else: normal execution
-    return { action: "execute" };
+    return ctx;
   }
 
   // ═══════════════════════════════════════════════════

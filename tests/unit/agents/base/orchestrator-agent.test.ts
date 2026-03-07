@@ -6,7 +6,7 @@
  *   - spawn_task interception adds to childTaskIds
  *   - handleEvent processes child completion
  *   - all children done triggers synthesis
- *   - notify interception works
+ *   - notify self-executes via ToolContext.onNotify
  *   - subscribeEvents registers correct events
  *   - handleEvent TASK_SUSPENDED sets abort flag
  */
@@ -22,6 +22,7 @@ import type { LanguageModel } from "../../../../src/infra/llm-types.ts";
 import { ToolRegistry } from "../../../../src/tools/registry.ts";
 import { EventBus } from "../../../../src/events/bus.ts";
 import { EventType, createEvent } from "../../../../src/events/types.ts";
+import { notify } from "../../../../src/tools/builtins/notify-tool.ts";
 import { mkdtemp } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -390,7 +391,7 @@ describe("OrchestratorAgent", () => {
     }, 5000);
   });
 
-  describe("notify interception works", () => {
+  describe("notify self-executes via ToolContext.onNotify", () => {
     test("notify tool triggers onNotify callback with progress", async () => {
       let callIndex = 0;
       const model = createMockModel(
@@ -419,8 +420,10 @@ describe("OrchestratorAgent", () => {
       );
 
       const notifyCb = mock((_n: OrchestratorNotification) => {});
+      const registry = new ToolRegistry();
+      registry.register(notify);
       const agent = new OrchestratorAgent(
-        createOrchestratorDeps({ model, onNotify: notifyCb }),
+        createOrchestratorDeps({ model, onNotify: notifyCb, toolRegistry: registry }),
       );
 
       const result = await agent.run();
