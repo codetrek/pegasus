@@ -3,8 +3,8 @@
  *
  * Supports two modes:
  *   - "project" — loads PROJECT.md, builds project persona, persistent session
- *   - "subagent" — runs OrchestratorAgent with Worker-local EventBus,
- *     input provided at init, fire-and-forget via run()
+ *   - "subagent" — runs Agent with orchestration config (Worker-local EventBus,
+ *     input provided at init, fire-and-forget via run())
  *
  * Communicates with the main thread via postMessage/onmessage:
  *   Receives: init, message, llm_response, llm_error, shutdown
@@ -19,9 +19,8 @@ import { TaskRunner } from "../agents/task-runner.ts";
 import type { TaskNotification } from "../agents/task-runner.ts";
 import { AITaskTypeRegistry } from "../aitask-types/registry.ts";
 import { loadAITaskTypeDefinitions } from "../aitask-types/loader.ts";
-import { OrchestratorAgent } from "../agents/base/orchestrator-agent.ts";
-import type { OrchestratorAgentDeps, ExecutionSpawnConfig, ExecutionHandle, OrchestratorNotification } from "../agents/base/orchestrator-agent.ts";
 import { Agent } from "../agents/agent.ts";
+import type { AgentDeps, ExecutionSpawnConfig, ExecutionHandle, OrchestratorNotification } from "../agents/agent.ts";
 import { EventBus } from "../events/bus.ts";
 import { ToolRegistry } from "../tools/registry.ts";
 import { subAgentTools, allTaskTools } from "../tools/builtins/index.ts";
@@ -65,7 +64,7 @@ export interface SubAgentConfig extends BaseConfig {
 // ── Module-level state (initialized on "init") ──────
 
 let projectTaskRunner: TaskRunner | null = null;
-let orchestratorAgent: OrchestratorAgent | null = null;
+let orchestratorAgent: Agent | null = null;
 let proxyModel: ProxyLanguageModel | null = null;
 
 // Skill registry for project Workers (null for subagent mode)
@@ -86,7 +85,7 @@ export const _testState = {
   getProjectAgent: () => projectTaskRunner,
   setProjectAgent: (a: TaskRunner | null) => { projectTaskRunner = a; },
   getOrchestratorAgent: () => orchestratorAgent,
-  setOrchestratorAgent: (a: OrchestratorAgent | null) => { orchestratorAgent = a; },
+  setOrchestratorAgent: (a: Agent | null) => { orchestratorAgent = a; },
   getProxyModel: () => proxyModel,
   setProxyModel: (m: ProxyLanguageModel | null) => { proxyModel = m; },
   getChannelType: () => workerChannelType,
@@ -373,32 +372,57 @@ export async function initSubAgent(config: SubAgentConfig): Promise<void> {
     }
   };
 
-  // 11. Create OrchestratorAgent
-  const orchestrator = _createOrchestrator({
+  // 11. Build system prompt (formerly built by OrchestratorAgent.buildSystemPrompt)
+  const contextPrompt = SUBAGENT_SYSTEM_PROMPT;
+  const systemPromptSections = [
+    "## Your Role",
+    "You are an Orchestrator Agent — an autonomous coordinator working on behalf of the main agent.",
+    `Task: ${input.slice(0, 200)}`,
+    "",
+    "## How You Work",
+    "- Break down complex work into sub-tasks using spawn_task()",
+    "- Use notify() to report progress to the main agent",
+    "- Coordinate results from child tasks and synthesize a final answer",
+    "- You can also execute work directly with your own tools",
+    "",
+    "## Rules",
+    "1. FOCUS: Stay strictly on the task you were given.",
+    "2. DECOMPOSE: Break complex work into parallel sub-tasks when possible.",
+    "3. COORDINATE: Wait for sub-task results before synthesizing.",
+    "4. PROGRESS: Use notify() for major milestones.",
+    "5. EFFICIENT: Don't over-decompose. If you can do it directly, do it.",
+  ];
+  if (contextPrompt) {
+    systemPromptSections.push("", "## Context", contextPrompt);
+  }
+  const systemPrompt = systemPromptSections.join("\n");
+
+  // 12. Create Agent with orchestration config (replaces OrchestratorAgent)
+  const agent = _createOrchestrator({
     agentId: channelId,
     model: proxyModel,
     toolRegistry,
     eventBus,
-    taskDescription: input.slice(0, 200),
-    input: fullInput,
-    contextPrompt: SUBAGENT_SYSTEM_PROMPT,
+    systemPrompt,
     sessionDir: storePaths.session,
-    onSpawnExecution,
-    onNotify,
     storeImage,
     contextWindow: settings.llm.contextWindow,
+    orchestration: {
+      onSpawnExecution,
+      onNotify,
+    },
   });
 
-  // 12. Store module-level ref for handleShutdown()
-  orchestratorAgent = orchestrator;
+  // 13. Store module-level ref for handleShutdown()
+  orchestratorAgent = agent;
 
-  // 13. Signal ready
+  // 14. Signal ready
   postToParent({ type: "ready" });
 
-  // 14. Fire-and-forget: run() blocks until completion,
+  // 15. Fire-and-forget: run() blocks until completion,
   //     but JS event loop still processes llm_response messages
   if (input) {
-    orchestrator.run().catch((err) => {
+    agent.run(fullInput, { persistSession: true }).catch((err) => {
       sendNotify(
         `[SubAgent error: ${err instanceof Error ? err.message : String(err)}]`,
         { subagentDone: "failed" },
@@ -568,7 +592,7 @@ export function _setExitProcessForTest(fn: (code: number) => void): () => void {
 
 type TaskRunnerFactory = (deps: import("../agents/task-runner.ts").TaskRunnerDeps) => TaskRunner;
 type ProxyModelFactory = (provider: string, modelId: string, send: (msg: unknown) => void) => ProxyLanguageModel;
-type OrchestratorFactory = (deps: OrchestratorAgentDeps) => OrchestratorAgent;
+type OrchestratorFactory = (deps: AgentDeps) => Agent;
 
 let _taskRunnerFactory: TaskRunnerFactory | null = null;
 let _proxyModelFactory: ProxyModelFactory | null = null;
@@ -608,7 +632,7 @@ function _createProxyModel(provider: string, modelId: string, send: (msg: unknow
   return new ProxyLanguageModel(provider, modelId, send);
 }
 
-function _createOrchestrator(deps: OrchestratorAgentDeps): OrchestratorAgent {
+function _createOrchestrator(deps: AgentDeps): Agent {
   if (_orchestratorFactory) return _orchestratorFactory(deps);
-  return new OrchestratorAgent(deps);
+  return new Agent(deps);
 }

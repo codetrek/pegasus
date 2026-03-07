@@ -51,6 +51,9 @@ export {
   type QueueItem,
   type CustomQueueItem,
   type TaskNotificationPayload,
+  type ExecutionSpawnConfig,
+  type ExecutionHandle,
+  type OrchestratorNotification,
   formatChannelMeta,
 } from "../agent.ts";
 
@@ -64,12 +67,13 @@ export {
   type CustomQueueItem as ConversationCustomQueueItem,
 } from "./conversation-agent.ts";
 
+// OrchestratorAgent — DEPRECATED: use Agent with orchestration config instead
 export {
   OrchestratorAgent,
   type OrchestratorAgentDeps,
-  type ExecutionSpawnConfig,
-  type ExecutionHandle,
-  type OrchestratorNotification,
+  type ExecutionSpawnConfig as OrchestratorExecutionSpawnConfig,
+  type ExecutionHandle as OrchestratorExecutionHandle,
+  type OrchestratorNotification as OrchestratorAgentNotification,
   type OrchestratorResult,
 } from "./orchestrator-agent.ts";
 
