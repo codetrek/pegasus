@@ -899,6 +899,11 @@ describe("initSubAgent", () => {
   });
 
   afterEach(async () => {
+    // Wait for any fire-and-forget operations to complete before cleaning up.
+    // initSubAgent() fires agent.run().then(() => setTimeout(handleShutdown, 100))
+    // — if we restore factory overrides before that timer fires, handleShutdown
+    // runs with real process.exit / self.postMessage, which hangs the test suite.
+    await Bun.sleep(200);
     try { _testState.getProxyModel()?.cancelAll("test cleanup"); } catch { /* ignore */ }
     try { await _testState.getOrchestratorAgent()?.stop(); } catch { /* ignore */ }
     _testState.setAgent(null);
