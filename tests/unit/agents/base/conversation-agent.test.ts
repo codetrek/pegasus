@@ -22,6 +22,8 @@ import type {
 import type { InboundMessage, ChannelInfo } from "../../../../src/channels/types.ts";
 import type { Persona } from "../../../../src/identity/persona.ts";
 import { ToolRegistry } from "../../../../src/tools/registry.ts";
+import { reply } from "../../../../src/tools/builtins/reply-tool.ts";
+import type { ToolContext } from "../../../../src/tools/types.ts";
 import { EventBus } from "../../../../src/events/bus.ts";
 import { EventType, createEvent } from "../../../../src/events/types.ts";
 import { mkdtemp } from "node:fs/promises";
@@ -63,6 +65,15 @@ class TestConversationAgent extends ConversationAgent {
     return "test conversation prompt";
   }
 
+  /** Inject onReply into ToolContext so reply-tool.ts can deliver messages. */
+  protected override buildToolContext(taskId: string): ToolContext {
+    const ctx = super.buildToolContext(taskId);
+    if (this._onReply) {
+      ctx.onReply = this._onReply;
+    }
+    return ctx;
+  }
+
   /** Expose session messages for assertions. */
   getSessionMessages(): Message[] {
     return this.sessionMessages;
@@ -88,10 +99,12 @@ async function createTempDir(): Promise<string> {
 function createTestDeps(
   overrides?: Partial<ConversationAgentDeps>,
 ): ConversationAgentDeps {
+  const toolRegistry = new ToolRegistry();
+  toolRegistry.register(reply);
   return {
     agentId: "conv-agent-1",
     model: createMockModel(),
-    toolRegistry: new ToolRegistry(),
+    toolRegistry,
     persona: TEST_PERSONA,
     sessionDir: tempDir,
     ...overrides,
@@ -172,7 +185,7 @@ describe("ConversationAgent", () => {
                 {
                   id: "tc-reply-1",
                   name: "reply",
-                  arguments: { text: "Hello user!" },
+                  arguments: { text: "Hello user!", channelType: "cli", channelId: "test-ch" },
                 },
               ],
               usage: { promptTokens: 10, completionTokens: 5 },
@@ -217,7 +230,7 @@ describe("ConversationAgent", () => {
                 {
                   id: "tc-reply-2",
                   name: "reply",
-                  arguments: { text: "Hello!" },
+                  arguments: { text: "Hello!", channelType: "cli", channelId: "test-ch" },
                 },
               ],
               usage: { promptTokens: 10, completionTokens: 5 },
@@ -371,7 +384,7 @@ describe("ConversationAgent", () => {
               {
                 id: "tc-proc-1",
                 name: "reply",
-                arguments: { text: "Step result!" },
+                arguments: { text: "Step result!", channelType: "cli", channelId: "test-ch" },
               },
             ],
             usage: { promptTokens: 10, completionTokens: 5 },

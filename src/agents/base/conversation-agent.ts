@@ -15,12 +15,11 @@
  *   - MCP servers
  */
 
-import { BaseAgent, type BaseAgentDeps, type ToolCallInterceptResult } from "./base-agent.ts";
+import { BaseAgent, type BaseAgentDeps } from "./base-agent.ts";
 import type { PendingWorkResult } from "./agent-state.ts";
 import type { Message } from "../../infra/llm-types.ts";
 import type { Event } from "../../events/types.ts";
 import { EventType } from "../../events/types.ts";
-import type { ToolCall } from "../../models/tool.ts";
 import type { Persona } from "../../identity/persona.ts";
 import type {
   ChannelInfo,
@@ -336,51 +335,6 @@ export abstract class ConversationAgent extends BaseAgent {
     for (let i = previousLength; i < this.sessionMessages.length; i++) {
       await this.sessionStore.append(this.sessionMessages[i]!);
     }
-  }
-
-  // ═══════════════════════════════════════════════════
-  // Tool Call Interception
-  // ═══════════════════════════════════════════════════
-
-  protected override async onToolCall(tc: ToolCall): Promise<ToolCallInterceptResult> {
-    if (tc.name === "reply") {
-      return this._interceptReply(tc);
-    }
-    // spawn_task and spawn_subagent go through the tool executor
-    // (they use ToolContext.taskRegistry and SubAgentManager respectively).
-    // Everything else: normal execution
-    return { action: "execute" };
-  }
-
-  private _interceptReply(tc: ToolCall): ToolCallInterceptResult {
-    if (!this._onReply) {
-      return {
-        action: "skip",
-        result: {
-          toolCallId: tc.id,
-          content: JSON.stringify({ error: "No reply callback configured" }),
-        },
-      };
-    }
-
-    const args = tc.arguments as Record<string, unknown>;
-    const text = (args.text as string) ?? "";
-    const channelId = (args.channelId as string) ?? this.lastChannel.channelId;
-    const channelType = (args.channelType as string) ?? this.lastChannel.type;
-    const replyTo = args.replyTo as string | undefined;
-
-    this._onReply({
-      text,
-      channel: { type: channelType, channelId, replyTo },
-    });
-
-    return {
-      action: "skip",
-      result: {
-        toolCallId: tc.id,
-        content: JSON.stringify({ delivered: true }),
-      },
-    };
   }
 
   // ═══════════════════════════════════════════════════
