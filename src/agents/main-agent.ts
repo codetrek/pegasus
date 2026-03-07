@@ -13,7 +13,11 @@
  *   - onStart()/onStop()      → session lifecycle (load, memory, prompt; tick + drain)
  *   - getMaxToolResultChars() → truncation budget from model context window
  *
- * Uses AgentCallbacks for: computeBudgetOptions, onCompacted, onTaskNotificationHandled.
+ * Uses AgentCallbacks (constructor-injected) for:
+ *   - computeBudgetOptions    → ModelRegistry-aware compaction budget
+ *   - onCompacted             → memory re-injection + fire-and-forget reflection
+ *   - onTaskNotificationHandled → tick management (checkShouldStop)
+ *   - systemPrompt            → lazy builder function returning cached prompt
  */
 
 import type { Message } from "../infra/llm-types.ts";
@@ -39,7 +43,7 @@ import { OwnerStore } from "../security/owner-store.ts";
 import { TickManager } from "./tick-manager.ts";
 import { AuthManager } from "./auth-manager.ts";
 import { ReflectionOrchestrator } from "./reflection-orchestrator.ts";
-import { Agent, type QueueItem, type TaskNotificationPayload } from "./agent.ts";
+import { Agent, type QueueItem } from "./agent.ts";
 import { EventBus } from "../events/bus.ts";
 
 // Main Agent's curated tool set
@@ -119,12 +123,41 @@ export class MainAgent extends Agent {
       model: defaultModel,
       toolRegistry,
       persona: deps.persona,
-      systemPrompt: "", // overridden by buildSystemPrompt()
+      systemPrompt: () => this._systemPrompt,
       sessionDir: mainStorePaths.session,
       eventBus: new EventBus({ keepHistory: true }),
       contextWindow: settings.llm.contextWindow,
       imageManager: deps.injected.imageManager,
       visionKeepLastNTurns: settings.vision?.keepLastNTurns,
+      callbacks: {
+        computeBudgetOptions: () => {
+          const dm = this.models.getDefault();
+          return {
+            modelId: dm.modelId,
+            provider: dm.provider,
+            configContextWindow:
+              this.models.getDefaultContextWindow() ??
+              this.settings.llm.contextWindow,
+            compactThreshold: this.settings.session?.compactThreshold,
+            modelLimitsCache: this.modelLimitsCache,
+          };
+        },
+        onCompacted: async (preCompactMessages: Message[]) => {
+          await this._injectMemoryIndex();
+          // Fire-and-forget reflection on the archived session
+          if (this.reflectionOrchestrator.shouldReflect(preCompactMessages)) {
+            this.reflectionOrchestrator.runReflection(preCompactMessages).catch((err) => {
+              logger.warn({ error: err instanceof Error ? err.message : String(err) }, "main_reflection_failed");
+            });
+          }
+        },
+        onTaskNotificationHandled: async (notification) => {
+          // Stop tick if no more active work (completed/failed, not progress updates)
+          if (notification.type !== "notify") {
+            this.tickManager.checkShouldStop();
+          }
+        },
+      },
     });
 
     this.models = deps.models;
@@ -193,15 +226,6 @@ export class MainAgent extends Agent {
   }
 
   // ═══════════════════════════════════════════════════
-  // System prompt
-  // ═══════════════════════════════════════════════════
-
-  protected override buildSystemPrompt(): string {
-    // Return cached system prompt (built once in start for prefix caching)
-    return this._systemPrompt;
-  }
-
-  // ═══════════════════════════════════════════════════
   // Tool context — rich ToolContext for processStep
   // ═══════════════════════════════════════════════════
 
@@ -258,53 +282,6 @@ export class MainAgent extends Agent {
       modelLimitsCache: this.modelLimitsCache,
     });
     return calculateMaxToolResultChars(budget.contextWindow, this.settings.context?.maxToolResultShare);
-  }
-
-  // ═══════════════════════════════════════════════════
-  // Compaction — custom budget + post-compact hooks
-  // ═══════════════════════════════════════════════════
-
-  /**
-   * Budget options using ModelRegistry for dynamic model resolution,
-   * provider-aware caching, and configurable threshold.
-   */
-  protected override computeBudgetOptions(): import("../context/index.ts").BudgetOptions {
-    const defaultModel = this.models.getDefault();
-    return {
-      modelId: defaultModel.modelId,
-      provider: defaultModel.provider,
-      configContextWindow:
-        this.models.getDefaultContextWindow() ??
-        this.settings.llm.contextWindow,
-      compactThreshold: this.settings.session?.compactThreshold,
-      modelLimitsCache: this.modelLimitsCache,
-    };
-  }
-
-  /**
-   * Post-compact hook: re-inject memory index and fire-and-forget reflection.
-   * Image cache clearing is handled by BaseAgent._compactState().
-   */
-  protected override async onCompacted(preCompactMessages: Message[]): Promise<void> {
-    await this._injectMemoryIndex();
-
-    // Fire-and-forget reflection on the archived session
-    if (this.reflectionOrchestrator.shouldReflect(preCompactMessages)) {
-      this.reflectionOrchestrator.runReflection(preCompactMessages).catch((err) => {
-        logger.warn({ error: err instanceof Error ? err.message : String(err) }, "main_reflection_failed");
-      });
-    }
-  }
-
-  // ═══════════════════════════════════════════════════
-  // Task notification tick management
-  // ═══════════════════════════════════════════════════
-
-  protected override async onTaskNotificationHandled(notification: TaskNotificationPayload): Promise<void> {
-    // Stop tick if no more active work (completed/failed, not progress updates)
-    if (notification.type !== "notify") {
-      this.tickManager.checkShouldStop();
-    }
   }
 
   // ═══════════════════════════════════════════════════
