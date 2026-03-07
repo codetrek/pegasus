@@ -21,6 +21,7 @@ import { createInjectedSubsystems } from "../helpers/create-injected-subsystems.
 
 let testSeq = 0;
 let testDataDir = "/tmp/pegasus-test-main-agent";
+let activeAgents: MainAgent[] = [];
 
 const testPersona: Persona = {
   name: "TestBot",
@@ -172,6 +173,7 @@ function createMainAgent(opts: {
     skillDirs: opts.skillDirs,
   });
   const agent = new MainAgent({ models, persona, settings, injected });
+  activeAgents.push(agent);
   // Wire TickManager to call agent._handleTickFromApp when tick fires
   if ('_wireTickToAgent' in injected) {
     (injected as any)._wireTickToAgent(agent);
@@ -185,6 +187,13 @@ describe("MainAgent", () => {
     testDataDir = `/tmp/pegasus-test-main-agent-${process.pid}-${testSeq}`;
   });
   afterEach(async () => {
+    // Stop all agents before deleting temp dirs to prevent ENOENT errors
+    for (const a of activeAgents) {
+      try { await a.stop(); } catch {}
+    }
+    activeAgents = [];
+    // Allow any remaining microtasks (e.g. appendFile callbacks) to settle
+    await Bun.sleep(50);
     await rm(testDataDir, { recursive: true, force: true }).catch(() => {});
   });
 

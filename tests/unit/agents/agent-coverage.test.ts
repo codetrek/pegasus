@@ -19,6 +19,7 @@ import { mainAgentTools } from "@pegasus/tools/builtins/index.ts";
 
 let testSeq = 0;
 let testDataDir = "/tmp/pegasus-test-agent-coverage";
+let activeAgents: Agent[] = [];
 
 function createStopModel(): LanguageModel {
   return {
@@ -70,7 +71,7 @@ function createAgent(opts: {
   const toolRegistry = createToolRegistry();
   const eventBus = opts.eventBus ?? new EventBus({ keepHistory: true });
 
-  return new Agent({
+  const agent = new Agent({
     agentId: "test-agent",
     model,
     toolRegistry,
@@ -79,6 +80,8 @@ function createAgent(opts: {
     eventBus,
     toolContext: opts.memoryDir ? { memoryDir: opts.memoryDir } : undefined,
   });
+  activeAgents.push(agent);
+  return agent;
 }
 
 describe("Agent coverage", () => {
@@ -87,6 +90,19 @@ describe("Agent coverage", () => {
     testDataDir = `/tmp/pegasus-test-agent-coverage-${process.pid}-${testSeq}`;
   });
   afterEach(async () => {
+    // Stop all agents and wait for queue drain before deleting temp dirs
+    // to prevent ENOENT errors from async session writes.
+    // Agent.onStop() doesn't call waitForQueueDrain() (only MainAgent does),
+    // so we must explicitly drain + allow microtasks to flush.
+    for (const a of activeAgents) {
+      try {
+        await a.stop();
+        await (a as any).waitForQueueDrain?.();
+      } catch {}
+    }
+    activeAgents = [];
+    // Allow any remaining microtasks (e.g. appendFile callbacks) to settle
+    await Bun.sleep(50);
     await rm(testDataDir, { recursive: true, force: true }).catch(() => {});
   });
 
@@ -107,6 +123,7 @@ describe("Agent coverage", () => {
         sessionDir: `${testDataDir}/session`,
         eventBus: new EventBus({ keepHistory: true }),
       });
+      activeAgents.push(agent);
 
       const result: AgentResult = await agent.run("hello");
 
