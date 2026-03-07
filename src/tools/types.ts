@@ -87,8 +87,6 @@ export interface ToolContext {
   onReply?: unknown;
   /** Resolve an image by ID or file path. Returns base64 data or null (loosely typed). */
   resolveImage?: unknown;
-  /** SubAgentManager for spawn/resume operations (loosely typed). */
-  subAgentManager?: unknown;
   /** SkillRegistry for skill lookup and body loading (loosely typed). */
   skillRegistry?: unknown;
   /** TickManager for starting periodic status checks after spawning work (loosely typed). */

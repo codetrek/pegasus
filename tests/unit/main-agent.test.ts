@@ -2006,53 +2006,9 @@ describe("MainAgent", () => {
     // Worker crash detection tests removed — old SubAgentManager/Worker architecture.
     // SubAgent crash detection will be handled differently after Tasks 5-8.
 
-    it("should ignore worker close for non-subagent channels (line 441 branch)", async () => {
-      let workerCloseCallback: ((channelType: string, channelId: string) => void) | null = null;
-      const mockWA = {
-        shutdownTimeoutMs: 30_000,
-        activeCount: 0,
-        startWorker: mock(() => {}),
-        stopWorker: mock(async () => {}),
-        stopAll: mock(async () => {}),
-        deliver: mock(() => true),
-        has: mock(() => false),
-        hasByKey: mock(() => false),
-        setModelRegistry: mock(() => {}),
-        setOnNotify: mock(() => {}),
-        setOnReply: mock(() => {}),
-        setOnWorkerClose: mock(() => {}),
-        addOnWorkerClose: mock((cb: (channelType: string, channelId: string) => void) => {
-          workerCloseCallback = cb;
-        }),
-      } as unknown as WorkerAdapter;
+    // "ignore worker close for non-subagent channels" test removed —
+    // SubAgentManager no longer exists; all work tracked by TaskRunner.
 
-      const projectAdapter = new ProjectAdapter(mockWA);
-      const model = createReplyModel("ok");
-
-      const agent = createMainAgent({ models: createMockModelRegistry(model), settings: testSettings(), projectAdapter: projectAdapter });
-
-      await agent.start();
-      agent.onReply(() => {});
-
-      // Wire crash detection callback (PegasusApp normally does this)
-      mockWA.addOnWorkerClose((channelType: string, channelId: string) => {
-        if (channelType === "subagent" && agent.subAgents) {
-          const entry = agent.subAgents.get(channelId);
-          if (entry && entry.status === "active") {
-            agent.subAgents.fail(channelId).catch(() => {});
-          }
-        }
-      });
-
-      // Invoke the callback with a non-subagent channel — should be a no-op
-      expect(workerCloseCallback).not.toBeNull();
-      workerCloseCallback!("project", "some-project");
-
-      // No crash, no errors
-      await agent.stop();
-    }, 10_000);
-
-    // "ignore worker close when subagent already done" test removed — old Worker architecture.
   });
 
   describe("skills getter", () => {
@@ -2812,50 +2768,8 @@ describe("MainAgent", () => {
       await agent.stop();
     }, 10_000);
 
-    it("should include subagent count in tick status", async () => {
-      const model = createMonologueModel("noted");
-      const agent = createMainAgent({ models: createMockModelRegistry(model) });
-      await agent.start();
-      agent.onReply(() => {});
-
-      // Set lastChannel directly — avoids triggering _think via send()
-      (agent as any).lastChannel = { type: "cli", channelId: "test" };
-      // Stub _think to prevent async side effects (we only test tick message injection)
-      (agent as any)._think = async () => {};
-
-      // Mock subAgentManager.activeCount to return > 0
-      const subMgr = (agent as any).subAgentManager;
-      const origSubActive = Object.getOwnPropertyDescriptor(subMgr, "activeCount");
-      Object.defineProperty(subMgr, "activeCount", {
-        get: () => 2,
-        configurable: true,
-      });
-
-      const tick = agent._tick;
-      const msgsBefore = tick.sessionMessages.length;
-
-      tick.start();
-      tick.fire();
-
-      // tick.fire() adds a system message synchronously — check immediately
-      const tickMsgs = tick.sessionMessages.slice(msgsBefore).filter(
-        (m: any) => typeof m.content === "string" && m.content.includes("[System:"),
-      );
-      expect(tickMsgs.length).toBeGreaterThanOrEqual(1);
-      expect(tickMsgs[0]!.content).toContain("2 subagent(s) running");
-
-      if (origSubActive) {
-        Object.defineProperty(subMgr, "activeCount", origSubActive);
-      } else {
-        Object.defineProperty(subMgr, "activeCount", {
-          get: () => 0,
-          configurable: true,
-        });
-      }
-
-      tick.stop();
-      await agent.stop();
-    }, 10_000);
+    // "should include subagent count in tick status" — removed (SubAgentManager deleted,
+    // all work tracked by TaskRunner; TickManager subagent count is always 0).
   });
 
   // ── buildSystemPrompt override ──

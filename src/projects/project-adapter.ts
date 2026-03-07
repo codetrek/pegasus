@@ -9,7 +9,7 @@
  *
  * Why delegate instead of managing Workers directly?
  *   WorkerAdapter centralizes Worker lifecycle, LLM proxying, and error handling.
- *   Both ProjectAdapter and SubAgentManager share the same WorkerAdapter instance,
+ *   Both ProjectAdapter and other subsystems share the same WorkerAdapter instance,
  *   so LLM proxy logic and shutdown coordination live in one place.
  */
 import { getLogger } from "../infra/logger.ts";
@@ -175,7 +175,7 @@ export class ProjectAdapter implements ChannelAdapter {
     logger.info("project_adapter_stopped");
   }
 
-  /** Expose the underlying WorkerAdapter (for shared use by SubAgentManager). */
+  /** Expose the underlying WorkerAdapter. */
   getWorkerAdapter(): WorkerAdapter {
     return this.workerAdapter;
   }

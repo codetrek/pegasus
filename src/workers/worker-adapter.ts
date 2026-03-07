@@ -7,8 +7,8 @@
  *   - LLM proxying (intercept llm_request from Workers, delegate to ModelRegistry)
  *   - Worker close event handling (cleanup + notify callback)
  *
- * This is a transport layer — it doesn't know about Project or SubAgent
- * semantics. Higher-level adapters (ProjectAdapter, SubAgentManager) use
+ * This is a transport layer — it doesn't know about Project
+ * semantics. Higher-level adapters (ProjectAdapter) use
  * WorkerAdapter and implement ChannelAdapter or other interfaces themselves.
  */
 import { getLogger } from "../infra/logger.ts";
@@ -178,7 +178,7 @@ export class WorkerAdapter {
           logger.error({ key, message: data.message }, "worker_init_error");
           // Terminate the Worker — it failed to initialize.
           // worker.terminate() triggers the "close" event, which cleans up
-          // the workers Map and calls onWorkerClose (-> SubAgentManager.fail()).
+          // the workers Map and calls onWorkerClose.
           worker.terminate();
           break;
         default:
