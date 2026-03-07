@@ -1,49 +1,99 @@
 /**
- * Agent — unified concrete agent class combining ConversationAgent + ExecutionAgent.
+ * Agent — unified concrete agent class for Pegasus.
  *
- * Supports two usage patterns:
- *   - send(message) — persistent conversation (queue-based, session persistence)
- *   - run(input)    — one-shot execution (returns Promise<AgentResult>)
+ * Merges the former BaseAgent (abstract) and Agent (concrete) into a single
+ * concrete class. There is no abstract base — Agent is the root of the
+ * agent hierarchy.
  *
- * Key design decisions:
- *   - systemPrompt is constructor-injected (string | (() => string)), NOT abstract
- *   - Subclass overrides for lifecycle hooks (onStart, onStop, computeBudgetOptions, etc.)
- *   - toolContext injection for pre-set ToolContext fields
- *   - Image ref collection and event emission from ExecutionAgent
- *   - Queue processing from ConversationAgent
- *   - spawn_task is a self-executing tool using ToolContext.taskRegistry (TaskRunner)
+ * Provides:
+ *   1. EventBus integration (subscribe/emit events)
+ *   2. 3-state model (IDLE/BUSY/WAITING) via AgentStateManager
+ *   3. Event-driven processStep engine (non-blocking tool dispatch)
+ *   4. Concurrency control (event queue for BUSY state)
+ *   5. Session persistence (SessionStore + sessionMessages)
+ *   6. Context compaction (beforeLLMCall + onLLMError overflow recovery)
+ *   7. Queue processing from ConversationAgent pattern
+ *   8. One-shot run() execution (returns Promise<AgentResult>)
+ *   9. Memory injection: auto-injects memory index on fresh start + after compaction
+ *  10. Reflection: auto-runs ReflectionOrchestrator after compaction
+ *  11. Memory snapshot: auto-injects getMemorySnapshot into ToolContext
  *
- * Built-in capabilities (controlled by configuration):
- *   - Memory injection: auto-injects memory index on fresh start + after compaction
- *     (enabled when toolContext.memoryDir is set)
- *   - Reflection: auto-runs ReflectionOrchestrator after compaction
- *     (enabled when reflectionOrchestrator is provided in deps)
- *   - Memory snapshot: auto-injects getMemorySnapshot into ToolContext
- *     (enabled when toolContext.memoryDir is set)
+ * Subclass overrides for customization (e.g. MainAgent):
+ *   - buildToolContext()      → inject rich ToolContext
+ *   - onStart()/onStop()      → lifecycle hooks
+ *   - computeBudgetOptions()  → compaction budget
+ *   - getMaxToolResultChars() → result truncation
+ *   - getTools()              → custom tool definitions
  */
 
-import { BaseAgent, type BaseAgentDeps } from "./base/base-agent.ts";
-import type { Message } from "../infra/llm-types.ts";
+import type { LanguageModel, GenerateTextResult, Message } from "../infra/llm-types.ts";
 import type { Event } from "../events/types.ts";
 import { EventType, createEvent } from "../events/types.ts";
+import { EventBus } from "../events/bus.ts";
+import { ToolRegistry } from "../tools/registry.ts";
+import { ToolExecutor } from "../tools/executor.ts";
+import type { ToolCall, ToolDefinition } from "../models/tool.ts";
+import type { ToolResult, ToolContext } from "../tools/types.ts";
+import type { ImageManager } from "../media/image-manager.ts";
+import { hydrateImages } from "../media/image-prune.ts";
+import {
+  AgentStateManager,
+  type PendingWorkResult,
+} from "./base/agent-state.ts";
+import { ToolCallCollector, type ToolCallResult } from "./base/tool-call-collector.ts";
+import { createTaskState, type TaskExecutionState, type CreateTaskStateOptions } from "./base/task-execution-state.ts";
+import { getLogger } from "../infra/logger.ts";
+import { createTokenCounter, type TokenCounter } from "../infra/token-counter.ts";
+import { SessionStore } from "../session/store.ts";
+import { formatToolTimestamp, formatTimestamp } from "../infra/time.ts";
+import {
+  computeTokenBudget,
+  truncateToolResult,
+  summarizeMessages,
+  isContextOverflowError,
+  TASK_COMPACT_THRESHOLD,
+  MAX_OVERFLOW_COMPACT_RETRIES,
+  type ModelLimitsCache,
+} from "../context/index.ts";
 import type { Persona } from "../identity/persona.ts";
 import type {
   ChannelInfo,
   InboundMessage,
   OutboundMessage,
 } from "../channels/types.ts";
-import type { ToolContext } from "../tools/types.ts";
-import { formatTimestamp } from "../infra/time.ts";
 import { sanitizeForPrompt } from "../infra/sanitize.ts";
 import { formatSize } from "../prompts/index.ts";
 import type { ReflectionOrchestrator } from "./reflection-orchestrator.ts";
-import { getLogger } from "../infra/logger.ts";
 
 const logger = getLogger("agent");
 
-// ── Types ────────────────────────────────────────────
+// ── Dependencies ─────────────────────────────────────
 
-export interface AgentDeps extends BaseAgentDeps {
+export interface AgentDeps {
+  /** Unique agent identifier. */
+  agentId: string;
+  /** LLM model for this agent. */
+  model: LanguageModel;
+  /** Tool registry with available tools. */
+  toolRegistry: ToolRegistry;
+  /** Session directory for JSONL persistence. */
+  sessionDir: string;
+  /** Optional shared EventBus. If not provided, creates a new one. */
+  eventBus?: EventBus;
+  /** Tool execution timeout in ms. Default: 30000. */
+  toolTimeout?: number;
+  /** Max tool-use loop iterations per invocation. Default: 25. */
+  maxIterations?: number;
+  /** Optional storeImage callback injected into ToolContext for all tool executions. */
+  storeImage?: ToolContext["storeImage"];
+  /** Context window override (tokens). */
+  contextWindow?: number;
+  /** Model limits cache for token budget computation. */
+  modelLimitsCache?: ModelLimitsCache;
+  /** Optional ImageManager for vision support — enables image hydration in beforeLLMCall(). */
+  imageManager?: ImageManager | null;
+  /** How many recent turns to hydrate images for. Default: 5. */
+  visionKeepLastNTurns?: number;
   /** Agent persona (identity + personality). Optional for execution-only agents. */
   persona?: Persona;
   /** System prompt: string literal or builder function. */
@@ -53,6 +103,36 @@ export interface AgentDeps extends BaseAgentDeps {
   /** ReflectionOrchestrator for post-compaction reflection. Optional. */
   reflectionOrchestrator?: ReflectionOrchestrator;
 }
+
+// ── Helpers ──────────────────────────────────────────
+
+/**
+ * Convert a ToolResult (from ToolExecutor) to a ToolCallResult (for ToolCallCollector).
+ */
+export function formatToolResult(
+  toolCallId: string,
+  _toolName: string,
+  result: ToolResult,
+): ToolCallResult {
+  const content = result.success
+    ? typeof result.result === "string"
+      ? result.result
+      : JSON.stringify(result.result)
+    : `Error: ${result.error}`;
+
+  const tcResult: ToolCallResult = {
+    toolCallId,
+    content,
+  };
+
+  if (result.images?.length) {
+    tcResult.images = result.images;
+  }
+
+  return tcResult;
+}
+
+// ── Types ────────────────────────────────────────────
 
 /** Result of a one-shot run() execution. */
 export interface AgentResult {
@@ -94,8 +174,38 @@ export type QueueItem =
 
 // ── Agent ────────────────────────────────────────────
 
-export class Agent extends BaseAgent {
+export class Agent {
+  readonly agentId: string;
+  readonly eventBus: EventBus;
+  readonly stateManager: AgentStateManager;
+
+  protected model: LanguageModel;
+  protected toolRegistry: ToolRegistry;
+  protected toolExecutor: ToolExecutor;
+  protected maxIterations: number;
+  protected sessionStore: SessionStore;
+  protected sessionMessages: Message[] = [];
+  protected contextWindow?: number;
+  protected modelLimitsCache?: ModelLimitsCache;
   protected persona?: Persona;
+
+  /** Optional storeImage callback injected into ToolContext for all tool executions. */
+  private _storeImage?: ToolContext["storeImage"];
+
+  /** Optional ImageManager for vision support. */
+  protected imageManager?: ImageManager | null;
+
+  /** How many recent turns to hydrate images for. */
+  private _visionKeepLastNTurns: number;
+
+  /** Per-task execution state for event-driven processStep engine. */
+  protected taskStates = new Map<string, TaskExecutionState>();
+
+  /** Queue for events that arrive while agent is BUSY. */
+  private _eventQueue: Event[] = [];
+  private _running = false;
+  private _overflowRetryCount = 0;
+  protected tokenCounter: TokenCounter;
 
   protected _onReply: ReplyCallback | null = null;
 
@@ -116,7 +226,28 @@ export class Agent extends BaseAgent {
   private _lastResult: AgentResult | null = null;
 
   constructor(deps: AgentDeps) {
-    super(deps);
+    this.agentId = deps.agentId;
+    this.model = deps.model;
+    this.toolRegistry = deps.toolRegistry;
+    this.eventBus = deps.eventBus ?? new EventBus();
+    this.stateManager = new AgentStateManager();
+    this.maxIterations = deps.maxIterations ?? 25;
+    this._storeImage = deps.storeImage;
+    this.imageManager = deps.imageManager;
+    this._visionKeepLastNTurns = deps.visionKeepLastNTurns ?? 5;
+    this.sessionStore = new SessionStore(deps.sessionDir);
+    this.contextWindow = deps.contextWindow;
+    this.modelLimitsCache = deps.modelLimitsCache;
+    this.tokenCounter = createTokenCounter(deps.model.provider, {
+      model: deps.model.modelId,
+    });
+
+    this.toolExecutor = new ToolExecutor(
+      this.toolRegistry,
+      this.eventBus,
+      deps.toolTimeout ?? 30000,
+    );
+
     this.persona = deps.persona;
     this._systemPromptSource = deps.systemPrompt;
     this._injectedToolContext = deps.toolContext;
@@ -125,7 +256,30 @@ export class Agent extends BaseAgent {
   }
 
   // ═══════════════════════════════════════════════════
-  // Public API — Conversation (from ConversationAgent)
+  // Lifecycle
+  // ═══════════════════════════════════════════════════
+
+  async start(): Promise<void> {
+    this.subscribeEvents();
+    await this.eventBus.start();
+    this._running = true;
+    await this.onStart();
+    logger.info({ agentId: this.agentId }, "agent_started");
+  }
+
+  async stop(): Promise<void> {
+    this._running = false;
+    await this.onStop();
+    await this.eventBus.stop();
+    logger.info({ agentId: this.agentId }, "agent_stopped");
+  }
+
+  get isRunning(): boolean {
+    return this._running;
+  }
+
+  // ═══════════════════════════════════════════════════
+  // Public API — Conversation
   // ═══════════════════════════════════════════════════
 
   /** Register callback for outbound replies. */
@@ -146,7 +300,7 @@ export class Agent extends BaseAgent {
   }
 
   // ═══════════════════════════════════════════════════
-  // Public API — Execution (from ExecutionAgent)
+  // Public API — Execution (one-shot run)
   // ═══════════════════════════════════════════════════
 
   /**
@@ -189,10 +343,56 @@ export class Agent extends BaseAgent {
   }
 
   // ═══════════════════════════════════════════════════
-  // Lifecycle
+  // Event Queue Management
   // ═══════════════════════════════════════════════════
 
-  protected override async onStart(): Promise<void> {
+  /**
+   * Queue an event for later processing (when agent is BUSY).
+   * If agent can accept work, processes immediately.
+   */
+  protected queueEvent(event: Event): void {
+    if (this.stateManager.canAcceptWork) {
+      // Process immediately (fire-and-forget to avoid blocking EventBus)
+      this.handleEvent(event).catch((err) => {
+        logger.error({ err, agentId: this.agentId, eventType: event.type }, "event_handle_error");
+      });
+    } else {
+      this._eventQueue.push(event);
+    }
+  }
+
+  /** Drain queued events when transitioning back to IDLE or WAITING. */
+  protected async drainEventQueue(): Promise<void> {
+    while (this._eventQueue.length > 0 && this.stateManager.canAcceptWork) {
+      const event = this._eventQueue.shift()!;
+      try {
+        await this.handleEvent(event);
+      } catch (err) {
+        logger.error({ err, agentId: this.agentId, eventType: event.type }, "queued_event_handle_error");
+      }
+    }
+  }
+
+  /**
+   * Notify that pending work has completed.
+   * Removes the work from tracking and calls onPendingWorkComplete().
+   */
+  async completePendingWork(result: PendingWorkResult): Promise<void> {
+    this.stateManager.removePendingWork(result.id);
+    await this.onPendingWorkComplete(result);
+
+    // If we went IDLE, drain any queued events
+    if (this.stateManager.canAcceptWork) {
+      await this.drainEventQueue();
+    }
+  }
+
+  // ═══════════════════════════════════════════════════
+  // Lifecycle Hooks (subclasses override)
+  // ═══════════════════════════════════════════════════
+
+  /** Called during start(). Loads session history and injects memory. */
+  protected async onStart(): Promise<void> {
     // Load existing session history
     this.sessionMessages = await this.sessionStore.load();
     logger.info(
@@ -206,25 +406,52 @@ export class Agent extends BaseAgent {
     }
   }
 
-  protected override async onStop(): Promise<void> {}
+  /** Called during stop(). Subclasses can do async cleanup. */
+  protected async onStop(): Promise<void> {}
+
+  /** Called after each LLM call. Subclasses track usage, trigger compaction. */
+  protected async onLLMUsage(_result: GenerateTextResult): Promise<void> {}
+
+  /** Called when pending work completes. Subclasses decide what to do with results. */
+  protected async onPendingWorkComplete(_result: PendingWorkResult): Promise<void> {}
+
+  /**
+   * Hook called when new messages are added to task state during processStep.
+   * Subclasses can override for immediate per-message persistence.
+   * Default: no-op (ConversationAgent persists in batch after _think completes).
+   */
+  protected async onMessagesAppended(_taskId: string, _newMessages: Message[]): Promise<void> {}
 
   // ═══════════════════════════════════════════════════
   // System Prompt
   // ═══════════════════════════════════════════════════
 
-  protected override buildSystemPrompt(): string {
+  /** Build the system prompt. Called before each processStep LLM call. */
+  protected buildSystemPrompt(_taskId?: string): string {
     if (typeof this._systemPromptSource === "function") {
       return this._systemPromptSource();
     }
     return this._systemPromptSource;
   }
 
+  /** Return tool definitions for LLM visibility. Default: all registered tools. */
+  protected getTools(): ToolDefinition[] {
+    return this.toolRegistry.toLLMTools();
+  }
+
   // ═══════════════════════════════════════════════════
   // ToolContext Injection
   // ═══════════════════════════════════════════════════
 
-  protected override buildToolContext(taskId: string): ToolContext {
-    const ctx = super.buildToolContext(taskId);
+  /**
+   * Build a ToolContext for tool execution. Subclasses override to inject
+   * rich context (memory paths, callbacks, managers) for their tool set.
+   *
+   * Default: minimal context with taskId + storeImage + injected toolContext.
+   */
+  protected buildToolContext(taskId: string): ToolContext {
+    const ctx: ToolContext = { taskId };
+    if (this._storeImage) ctx.storeImage = this._storeImage;
     // Merge injected toolContext fields
     if (this._injectedToolContext) {
       Object.assign(ctx, this._injectedToolContext);
@@ -240,13 +467,416 @@ export class Agent extends BaseAgent {
     return ctx;
   }
 
+  /**
+   * Get the maximum chars allowed for a tool result. Subclasses override
+   * to compute from their model's context window.
+   *
+   * Default: no truncation (returns Infinity).
+   */
+  protected getMaxToolResultChars(): number {
+    return Infinity;
+  }
+
   // ═══════════════════════════════════════════════════
-  // Compaction hooks
+  // Event-Driven processStep Engine
   // ═══════════════════════════════════════════════════
 
-  // (computeBudgetOptions is inherited from BaseAgent — subclasses override directly)
+  /**
+   * Execute one LLM turn: call LLM, then dispatch tools (fire-and-forget) or complete.
+   * NON-BLOCKING: returns after dispatching tools. Next turn triggered by _onAllToolsDone.
+   */
+  protected async processStep(taskId: string): Promise<void> {
+    const state = this.taskStates.get(taskId);
+    if (!state || state.aborted) return;
 
-  protected override async onCompacted(preCompactMessages: Message[]): Promise<void> {
+    if (state.iteration >= state.maxIterations) {
+      await this.onTaskComplete(taskId, "", "max_iterations");
+      return;
+    }
+
+    this.stateManager.markBusy();
+    await this.beforeLLMCall(taskId);
+
+    const tools = this.getTools();
+
+    try {
+      const result = await this.model.generate({
+        system: this.buildSystemPrompt(taskId),
+        messages: state.messages,
+        tools: tools.length ? tools : undefined,
+        toolChoice: tools.length ? "auto" : undefined,
+      });
+
+      state.iteration++;
+      // Track actual prompt token count for accurate compaction decisions
+      state.lastPromptTokens =
+        (result.usage.promptTokens ?? 0) + (result.usage.cacheReadTokens ?? 0);
+      await this.onLLMUsage(result);
+      this._overflowRetryCount = 0; // Reset on successful LLM call
+
+      // No tool calls → task complete
+      if (!result.toolCalls?.length) {
+        if (result.text) {
+          const assistantMsg: Message = { role: "assistant", content: result.text };
+          state.messages.push(assistantMsg);
+          await this.onMessagesAppended(taskId, [assistantMsg]);
+        }
+        await this.eventBus.emit(createEvent(EventType.STEP_COMPLETED, {
+          source: this.agentId, taskId,
+          payload: { iteration: state.iteration, hasToolCalls: false },
+        }));
+        this.stateManager.markIdle();
+        await this.onTaskComplete(taskId, result.text, "complete");
+        return;
+      }
+
+      // Has tool calls → append assistant msg, dispatch tools
+      const assistantMsg: Message = {
+        role: "assistant",
+        content: result.text ?? "",
+        toolCalls: result.toolCalls,
+      };
+      state.messages.push(assistantMsg);
+      await this.onMessagesAppended(taskId, [assistantMsg]);
+
+      await this.eventBus.emit(createEvent(EventType.STEP_COMPLETED, {
+        source: this.agentId, taskId,
+        payload: { iteration: state.iteration, hasToolCalls: true, toolCount: result.toolCalls.length },
+      }));
+
+      // Create collector, dispatch tools in parallel (fire-and-forget)
+      const collector = new ToolCallCollector(
+        result.toolCalls.length,
+        () => {
+          this._onAllToolsDone(taskId).catch((err) => {
+            logger.error({ err, taskId, agentId: this.agentId }, "all_tools_done_error");
+            this.stateManager.markIdle();
+            this.onTaskComplete(taskId, "", "error").catch(() => {});
+          });
+        },
+      );
+      state.activeCollector = collector;
+
+      for (let i = 0; i < result.toolCalls.length; i++) {
+        this._executeToolAsync(taskId, result.toolCalls[i]!, i, collector);
+      }
+
+      this.stateManager.markIdle();
+      // Return immediately — _onAllToolsDone will trigger next step
+    } catch (err) {
+      this.stateManager.markIdle();
+      const shouldRetry = await this.onLLMError(taskId, err);
+      if (shouldRetry) {
+        await this.processStep(taskId);
+      } else {
+        logger.error({ err, taskId, agentId: this.agentId }, "process_step_error");
+        await this.onTaskComplete(taskId, "", "error");
+      }
+    }
+  }
+
+  /**
+   * Called by ToolCallCollector when all tools in a batch complete.
+   * Appends results to messages, then triggers next processStep.
+   */
+  private async _onAllToolsDone(taskId: string): Promise<void> {
+    const state = this.taskStates.get(taskId);
+    if (!state) return;
+
+    // Check abort
+    if (state.aborted) {
+      await this.eventBus.emit(createEvent(EventType.TASK_SUSPENDED, {
+        source: this.agentId, taskId,
+        payload: { reason: "externally suspended" },
+      }));
+      await this.onTaskComplete(taskId, "", "interrupted");
+      return;
+    }
+
+    // Append tool result messages
+    const results = state.activeCollector!.getResults();
+    state.activeCollector = null;
+    const newMessages: Message[] = [];
+    for (const r of results) {
+      const msg: Message = { role: "tool", content: r.content, toolCallId: r.toolCallId };
+      if (r.images?.length) {
+        msg.images = r.images;
+      }
+      state.messages.push(msg);
+      newMessages.push(msg);
+    }
+    await this.onMessagesAppended(taskId, newMessages);
+
+    // Trigger next LLM call
+    await this.processStep(taskId);
+  }
+
+  /**
+   * Execute a single tool call asynchronously. Fire-and-forget.
+   * Always executes via ToolExecutor — no intercept switch.
+   * Includes result formatting: string coercion, timestamp prefix, and truncation.
+   */
+  private _executeToolAsync(
+    taskId: string,
+    tc: ToolCall,
+    index: number,
+    collector: ToolCallCollector,
+  ): void {
+    (async () => {
+      const state = this.taskStates.get(taskId);
+      if (state?.aborted) {
+        collector.addResult(index, {
+          toolCallId: tc.id,
+          content: JSON.stringify({ cancelled: true }),
+        });
+        return;
+      }
+
+      const ctx = this.buildToolContext(taskId);
+      const result = await this.toolExecutor.execute(
+        tc.name,
+        tc.arguments,
+        ctx,
+      );
+      let toolResult = formatToolResult(tc.id, tc.name, result);
+
+      // Apply result formatting: timestamp prefix + truncation
+      const maxChars = this.getMaxToolResultChars();
+      if (maxChars < Infinity && toolResult.content.length > maxChars) {
+        toolResult.content = truncateToolResult(toolResult.content, maxChars);
+      }
+      const tsPrefix = formatToolTimestamp(
+        result.completedAt ?? Date.now(),
+        result.durationMs,
+      );
+      toolResult.content = `${tsPrefix}\n${toolResult.content}`;
+
+      collector.addResult(index, toolResult);
+    })().catch((err) => {
+      logger.error({ err, taskId, toolName: tc.name }, "execute_tool_async_error");
+      collector.addResult(index, {
+        toolCallId: tc.id,
+        content: JSON.stringify({ error: err instanceof Error ? err.message : String(err) }),
+      });
+    });
+  }
+
+  // ═══════════════════════════════════════════════════
+  // Task Completion
+  // ═══════════════════════════════════════════════════
+
+  protected async onTaskComplete(
+    taskId: string,
+    text: string,
+    finishReason: "complete" | "max_iterations" | "interrupted" | "error",
+  ): Promise<void> {
+    const state = this.taskStates.get(taskId);
+
+    // Collect unique image refs from tool result messages
+    const imageRefs: Array<{ id: string; mimeType: string }> = [];
+    if (state) {
+      const seen = new Set<string>();
+      for (const msg of state.messages) {
+        if (msg.images) {
+          for (const img of msg.images) {
+            if (!seen.has(img.id)) {
+              seen.add(img.id);
+              imageRefs.push({ id: img.id, mimeType: img.mimeType });
+            }
+          }
+        }
+      }
+    }
+
+    // Build result (for run() callers)
+    const success = finishReason === "complete";
+    this._lastResult = {
+      success,
+      result: success ? text : undefined,
+      error: !success
+        ? finishReason === "error"
+          ? "LLM call failed"
+          : `Task ${finishReason}`
+        : undefined,
+      llmCallCount: state?.iteration ?? 0,
+      toolCallCount: 0,
+      ...(imageRefs.length > 0 ? { imageRefs } : {}),
+    };
+
+    // Emit events
+    await this.eventBus.emit(
+      createEvent(
+        success ? EventType.TASK_COMPLETED : EventType.TASK_FAILED,
+        {
+          source: this.agentId,
+          taskId,
+          payload: { result: text, finishReason },
+        },
+      ),
+    );
+
+    // Resolve completion promise (works for both _think and run)
+    state?.onComplete?.();
+
+    // Cleanup
+    this.removeTaskState(taskId);
+  }
+
+  // ═══════════════════════════════════════════════════
+  // Compaction
+  // ═══════════════════════════════════════════════════
+
+  /**
+   * Hook called before each LLM call.
+   * Hydrates images and checks token budget for compaction.
+   */
+  protected async beforeLLMCall(taskId: string): Promise<void> {
+    await this.hydrateImagesForLLM(taskId);
+    await this.compactIfNeeded(taskId);
+  }
+
+  /**
+   * Hydrate image references in task messages for LLM consumption.
+   * Uses the ImageManager (with built-in caching) injected via AgentDeps.
+   */
+  protected async hydrateImagesForLLM(taskId: string): Promise<void> {
+    if (!this.imageManager) return;
+    const state = this.taskStates.get(taskId);
+    if (!state) return;
+
+    const imgMgr = this.imageManager;
+
+    // IMPORTANT: mutate in-place to preserve array reference
+    // (state.messages may be the same array as sessionMessages via _think).
+    const hydrated = await hydrateImages(
+      state.messages,
+      this._visionKeepLastNTurns,
+      (id: string) => imgMgr.read(id),
+    );
+    state.messages.length = 0;
+    state.messages.push(...hydrated);
+  }
+
+  /**
+   * Check token budget and trigger compaction if messages exceed threshold.
+   */
+  protected async compactIfNeeded(taskId: string): Promise<void> {
+    const state = this.taskStates.get(taskId);
+    if (!state || state.messages.length < 8) return;
+
+    // Use actual token count from last API response when available;
+    // fall back to token counter for the first call.
+    let estimatedTokens: number;
+    if (state.lastPromptTokens > 0) {
+      estimatedTokens = state.lastPromptTokens;
+    } else {
+      const allText = state.messages.map((m) => {
+        let text = typeof m.content === "string" ? m.content : String(m.content);
+        if (m.toolCalls) text += JSON.stringify(m.toolCalls);
+        return text;
+      }).join("\n");
+      estimatedTokens = await this.tokenCounter.count(allText);
+    }
+
+    const budget = computeTokenBudget(this.computeBudgetOptions());
+
+    if (estimatedTokens < budget.compactTrigger) return;
+
+    await this._compactState(taskId);
+  }
+
+  /**
+   * Compute budget options for compaction threshold.
+   * Subclasses override to use ModelRegistry for dynamic model resolution,
+   * provider-aware caching, and configurable thresholds.
+   */
+  protected computeBudgetOptions(): import("../context/index.ts").BudgetOptions {
+    return {
+      modelId: this.model.modelId,
+      configContextWindow: this.contextWindow,
+      compactThreshold: TASK_COMPACT_THRESHOLD,
+      modelLimitsCache: this.modelLimitsCache,
+    };
+  }
+
+  /**
+   * Hook called when LLM call fails in processStep.
+   * Returns true to retry processStep on context overflow (after compaction),
+   * false to fail the task.
+   */
+  protected async onLLMError(taskId: string, error: unknown): Promise<boolean> {
+    if (!isContextOverflowError(error)) return false;
+    if (this._overflowRetryCount >= MAX_OVERFLOW_COMPACT_RETRIES) return false;
+
+    this._overflowRetryCount++;
+    await this._compactState(taskId);
+    return true;
+  }
+
+  /** Create and register a TaskExecutionState. */
+  protected createTaskExecutionState(
+    taskId: string,
+    messages: Message[],
+    opts?: CreateTaskStateOptions,
+  ): TaskExecutionState {
+    const state = createTaskState(taskId, messages, {
+      maxIterations: opts?.maxIterations ?? this.maxIterations,
+      ...opts,
+    });
+    this.taskStates.set(taskId, state);
+    return state;
+  }
+
+  /** Remove a task execution state. */
+  protected removeTaskState(taskId: string): void {
+    this.taskStates.delete(taskId);
+  }
+
+  /**
+   * Compact the message history for a task: summarize, archive, and reload.
+   * Falls back to mechanical summary if LLM summarization fails.
+   * After compaction, calls onCompacted() hook for post-compact actions.
+   */
+  protected async _compactState(taskId: string): Promise<void> {
+    const state = this.taskStates.get(taskId);
+    if (!state) return;
+
+    const preCompactMessages = [...state.messages];
+
+    let summary: string;
+    try {
+      summary = await summarizeMessages({
+        messages: state.messages,
+        model: this.model,
+        configContextWindow: this.contextWindow,
+        modelLimitsCache: this.modelLimitsCache,
+      });
+    } catch {
+      summary = mechanicalSummary(state.messages);
+    }
+
+    await this.sessionStore.compact(summary);
+    // Mutate in-place to preserve array reference
+    // (state.messages may be the same array as sessionMessages via _think).
+    const reloaded = await this.sessionStore.load();
+    state.messages.length = 0;
+    state.messages.push(...reloaded);
+    this.imageManager?.clearCache();
+
+    logger.info(
+      { taskId, agentId: this.agentId },
+      "state_compacted",
+    );
+
+    await this.onCompacted(preCompactMessages);
+  }
+
+  /**
+   * Hook called after compaction completes.
+   * Auto-injects memory index and fires reflection.
+   * Subclasses override for additional post-compact actions.
+   */
+  protected async onCompacted(preCompactMessages: Message[]): Promise<void> {
     // Auto-inject memory index after compaction
     if (this._memoryDir) {
       await this._injectMemoryIndex();
@@ -261,7 +891,7 @@ export class Agent extends BaseAgent {
   }
 
   // ═══════════════════════════════════════════════════
-  // Queue Processing (from ConversationAgent)
+  // Queue Processing
   // ═══════════════════════════════════════════════════
 
   private _processQueue(): void {
@@ -276,8 +906,6 @@ export class Agent extends BaseAgent {
   /**
    * Wait for the current queue drain cycle to finish.
    * Called by onStop() to ensure no dangling async work after shutdown.
-   * Safe because _drainQueue checks isRunning — once stop() sets _running=false,
-   * the drain loop exits after the current item, so this never hangs.
    */
   protected async waitForQueueDrain(): Promise<void> {
     if (this._drainPromise) {
@@ -324,7 +952,7 @@ export class Agent extends BaseAgent {
   }
 
   // ═══════════════════════════════════════════════════
-  // Message Handling (from ConversationAgent)
+  // Message Handling
   // ═══════════════════════════════════════════════════
 
   protected async _handleMessage(message: InboundMessage): Promise<void> {
@@ -359,7 +987,6 @@ export class Agent extends BaseAgent {
   /**
    * Handle a task notification (completed, failed, or progress update).
    * Formats the notification text, injects into session, and triggers thinking.
-   * Calls onTaskNotificationHandled hook for subclass-specific behavior.
    */
   protected async _handleTaskNotify(notification: TaskNotificationPayload): Promise<void> {
     let resultText: string;
@@ -404,10 +1031,6 @@ export class Agent extends BaseAgent {
 
   /**
    * Run thinking via processStep with a completion Promise.
-   *
-   * processStep is non-blocking: it returns after each LLM call + tool dispatch.
-   * The completion Promise resolves when onTaskComplete fires (all steps done).
-   * Between steps, the agent goes IDLE so it can handle external events (e.g. TASK_SUSPENDED).
    */
   protected async _think(_channel: ChannelInfo): Promise<void> {
     const previousLength = this.sessionMessages.length;
@@ -436,7 +1059,7 @@ export class Agent extends BaseAgent {
   // EventBus (child task completion events)
   // ═══════════════════════════════════════════════════
 
-  protected override subscribeEvents(): void {
+  protected subscribeEvents(): void {
     // Subscribe to child task completions (conversation-mode)
     this.eventBus.subscribe(EventType.TASK_COMPLETED, async (event) => {
       if (event.taskId && this.stateManager.pendingWork.has(event.taskId)) {
@@ -451,7 +1074,7 @@ export class Agent extends BaseAgent {
     });
   }
 
-  protected override async handleEvent(event: Event): Promise<void> {
+  protected async handleEvent(event: Event): Promise<void> {
     switch (event.type) {
       // Child completion events
       case EventType.TASK_COMPLETED:
@@ -487,74 +1110,12 @@ export class Agent extends BaseAgent {
   }
 
   // ═══════════════════════════════════════════════════
-  // Task Completion — merged from both agents
-  // ═══════════════════════════════════════════════════
-
-  protected override async onTaskComplete(
-    taskId: string,
-    text: string,
-    finishReason: "complete" | "max_iterations" | "interrupted" | "error",
-  ): Promise<void> {
-    const state = this.taskStates.get(taskId);
-
-    // Collect unique image refs from tool result messages (from ExecutionAgent)
-    const imageRefs: Array<{ id: string; mimeType: string }> = [];
-    if (state) {
-      const seen = new Set<string>();
-      for (const msg of state.messages) {
-        if (msg.images) {
-          for (const img of msg.images) {
-            if (!seen.has(img.id)) {
-              seen.add(img.id);
-              imageRefs.push({ id: img.id, mimeType: img.mimeType });
-            }
-          }
-        }
-      }
-    }
-
-    // Build result (for run() callers)
-    const success = finishReason === "complete";
-    this._lastResult = {
-      success,
-      result: success ? text : undefined,
-      error: !success
-        ? finishReason === "error"
-          ? "LLM call failed"
-          : `Task ${finishReason}`
-        : undefined,
-      llmCallCount: state?.iteration ?? 0,
-      toolCallCount: 0,
-      ...(imageRefs.length > 0 ? { imageRefs } : {}),
-    };
-
-    // Emit events (from ExecutionAgent)
-    await this.eventBus.emit(
-      createEvent(
-        success ? EventType.TASK_COMPLETED : EventType.TASK_FAILED,
-        {
-          source: this.agentId,
-          taskId,
-          payload: { result: text, finishReason },
-        },
-      ),
-    );
-
-    // Resolve completion promise (works for both _think and run)
-    state?.onComplete?.();
-
-    // Cleanup
-    this.removeTaskState(taskId);
-  }
-
-  // ═══════════════════════════════════════════════════
   // Memory — built-in capabilities controlled by config
   // ═══════════════════════════════════════════════════
 
   /**
    * Load memory entries: list all, then read fact contents.
    * Returns null if memory is empty or unavailable.
-   * Shared by _injectMemoryIndex and _getMemorySnapshot to avoid duplication.
    */
   private async _loadMemoryEntries(): Promise<Array<{ path: string; summary: string; size: number; content?: string }> | null> {
     const memoryDir = this._memoryDir;
@@ -598,7 +1159,6 @@ export class Agent extends BaseAgent {
   /**
    * Inject available memory files into the session so the LLM knows what
    * long-term knowledge is available without needing to call memory_list first.
-   * Called automatically on fresh session start and after compaction when _memoryDir is set.
    */
   private async _injectMemoryIndex(): Promise<void> {
     try {
@@ -645,7 +1205,7 @@ export class Agent extends BaseAgent {
       const entries = await this._loadMemoryEntries();
       if (!entries) return undefined;
 
-      const lines: string[] = ["[Memory snapshot from MainAgent]", ""];
+      const lines: string[] = [`[Memory snapshot from ${this.agentId}]`, ""];
 
       // Facts: full content
       for (const e of entries.filter(e => e.path.startsWith("facts/"))) {
@@ -681,4 +1241,37 @@ export class Agent extends BaseAgent {
 export function formatChannelMeta(channel: ChannelInfo): string {
   const now = formatTimestamp(Date.now());
   return `[${now} | channel: ${channel.type} | id: ${channel.channelId}${channel.userId ? ` | user: ${channel.userId}` : ""}${channel.replyTo ? ` | thread: ${channel.replyTo}` : ""}]`;
+}
+
+/**
+ * Mechanical (non-LLM) summary: extract key stats from messages.
+ * Used as fallback when LLM summarization fails.
+ */
+export function mechanicalSummary(messages: Message[]): string {
+  const userMessages = messages.filter((m) => m.role === "user");
+  const assistantMessages = messages.filter((m) => m.role === "assistant");
+  const toolMessages = messages.filter((m) => m.role === "tool");
+  const recentUsers = userMessages.slice(-3).map(
+    (m, i) =>
+      `  ${i + 1}. ${
+        typeof m.content === "string"
+          ? m.content.slice(0, 200)
+          : String(m.content).slice(0, 200)
+      }`,
+  );
+  const toolNames = new Set<string>();
+  for (const m of assistantMessages) {
+    if (m.toolCalls) {
+      for (const tc of m.toolCalls) toolNames.add(tc.name);
+    }
+  }
+  return [
+    `[Session compacted — ${messages.length} messages archived]`,
+    "",
+    "Recent user messages:",
+    ...recentUsers,
+    "",
+    `Tools used: ${[...toolNames].join(", ") || "(none)"}`,
+    `Total exchanges: ${userMessages.length} user, ${assistantMessages.length} assistant, ${toolMessages.length} tool`,
+  ].join("\n");
 }

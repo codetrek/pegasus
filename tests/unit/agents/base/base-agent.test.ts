@@ -1,16 +1,17 @@
 /**
- * Tests for BaseAgent — abstract base class for all Pegasus agents.
+ * Tests for Agent — unified concrete agent class for Pegasus.
  *
- * Uses a concrete TestAgent subclass to exercise:
+ * Uses a TestAgent subclass to exercise:
  *   - Constructor wiring (agentId, model, toolRegistry)
  *   - Lifecycle (start/stop, isRunning)
  *   - State manager accessibility
  *   - Event queue (immediate processing, queuing when BUSY, drain on complete)
  *   - processStep event-driven engine (non-blocking tool dispatch, task completion)
+ *   - Compaction (beforeLLMCall, onLLMError, mechanicalSummary)
  */
 
 import { describe, test, expect, mock } from "bun:test";
-import { BaseAgent, type BaseAgentDeps } from "../../../../src/agents/base/base-agent.ts";
+import { Agent, type AgentDeps } from "../../../../src/agents/agent.ts";
 import { AgentState } from "../../../../src/agents/base/agent-state.ts";
 import type { Event } from "../../../../src/events/types.ts";
 import { EventType, createEvent } from "../../../../src/events/types.ts";
@@ -47,23 +48,21 @@ function createMockRegistry(): ToolRegistry {
   return new ToolRegistry();
 }
 
-/** Concrete TestAgent for testing BaseAgent's behavior. */
-class TestAgent extends BaseAgent {
+/** Concrete TestAgent subclass for testing Agent's behavior. */
+class TestAgent extends Agent {
   public handleEventMock = mock(async (_event: Event) => {});
   public subscribeEventsMock = mock(() => {});
   public onTaskCompleteMock = mock(
     async (_taskId: string, _text: string, _reason: string) => {},
   );
 
-  protected buildSystemPrompt(_taskId?: string): string {
-    return "test prompt";
-  }
-
-  protected subscribeEvents(): void {
+  protected override subscribeEvents(): void {
     this.subscribeEventsMock();
+    // Call super to get the default child task event handling
+    super.subscribeEvents();
   }
 
-  protected async handleEvent(event: Event): Promise<void> {
+  protected override async handleEvent(event: Event): Promise<void> {
     await this.handleEventMock(event);
   }
 
@@ -125,12 +124,13 @@ class TestAgent extends BaseAgent {
   }
 }
 
-function createTestAgent(overrides?: Partial<BaseAgentDeps>): TestAgent {
+function createTestAgent(overrides?: Partial<AgentDeps>): TestAgent {
   return new TestAgent({
     agentId: "test-agent-1",
     model: createMockModel(),
     toolRegistry: createMockRegistry(),
-    sessionDir: `/tmp/pegasus-test-base-agent-${Date.now()}`,
+    systemPrompt: "test prompt",
+    sessionDir: `/tmp/pegasus-test-agent-${Date.now()}`,
     ...overrides,
   });
 }
@@ -141,7 +141,7 @@ function makeEvent(type: number = EventType.MESSAGE_RECEIVED): Event {
 
 // ── Tests ────────────────────────────────────────────
 
-describe("BaseAgent", () => {
+describe("Agent", () => {
   describe("constructor", () => {
     test("sets agentId, model, toolRegistry", () => {
       const model = createMockModel();
@@ -150,7 +150,8 @@ describe("BaseAgent", () => {
         agentId: "my-agent",
         model,
         toolRegistry: registry,
-        sessionDir: `/tmp/pegasus-test-base-agent-${Date.now()}`,
+        systemPrompt: "test prompt",
+        sessionDir: `/tmp/pegasus-test-agent-${Date.now()}`,
       });
 
       expect(agent.agentId).toBe("my-agent");
@@ -371,7 +372,8 @@ describe("BaseAgent", () => {
         agentId: "error-agent",
         model: createMockModel(),
         toolRegistry: createMockRegistry(),
-        sessionDir: `/tmp/pegasus-test-base-agent-${Date.now()}`,
+        systemPrompt: "test prompt",
+        sessionDir: `/tmp/pegasus-test-agent-${Date.now()}`,
       });
 
       // Should not throw — error is caught and logged
@@ -381,19 +383,13 @@ describe("BaseAgent", () => {
     });
   });
 
-  describe("default getTools and onToolCall", () => {
+  describe("default getTools", () => {
     test("getTools returns toLLMTools from registry", () => {
       const registry = createMockRegistry();
       const agent = createTestAgent({ toolRegistry: registry });
       const tools = (agent as any).getTools();
       expect(Array.isArray(tools)).toBe(true);
       expect(tools).toHaveLength(0); // empty registry
-    });
-
-    test("default onToolCall returns execute action", async () => {
-      const agent = createTestAgent();
-      const result = await (agent as any).onToolCall({ id: "tc-1", name: "some_tool", arguments: {} });
-      expect(result).toEqual({ action: "execute" });
     });
   });
 
@@ -411,7 +407,8 @@ describe("BaseAgent", () => {
         agentId: "partial-error-agent",
         model: createMockModel(),
         toolRegistry: createMockRegistry(),
-        sessionDir: `/tmp/pegasus-test-base-agent-${Date.now()}`,
+        systemPrompt: "test prompt",
+        sessionDir: `/tmp/pegasus-test-agent-${Date.now()}`,
       });
 
       // Queue two events while BUSY
@@ -610,24 +607,35 @@ describe("BaseAgent", () => {
         }),
       });
 
-      // Agent that skips all tool calls
-      class SkipToolAgent extends TestAgent {
-        protected override async onToolCall(tc: any) {
-          return {
-            action: "skip" as const,
-            result: {
-              toolCallId: tc.id,
-              content: JSON.stringify({ ok: true }),
-            },
-          };
-        }
-      }
-      const agent = new SkipToolAgent({
-        agentId: "test-agent-1",
+      // Register tools so they can be executed (no onToolCall intercept anymore)
+      const registry = createMockRegistry();
+      registry.register({
+        name: "test_tool",
+        description: "test",
+        category: "system" as any,
+        parameters: z.object({}),
+        execute: mock(async () => ({
+          success: true,
+          result: JSON.stringify({ ok: true }),
+          startedAt: Date.now(),
+        })),
+      });
+      registry.register({
+        name: "test_tool2",
+        description: "test2",
+        category: "system" as any,
+        parameters: z.object({}),
+        execute: mock(async () => ({
+          success: true,
+          result: JSON.stringify({ ok: true }),
+          startedAt: Date.now(),
+        })),
+      });
+
+      const agent = createTestAgent({
         model,
-        toolRegistry: createMockRegistry(),
+        toolRegistry: registry,
         eventBus: bus,
-        sessionDir: `/tmp/pegasus-test-base-agent-${Date.now()}`,
       });
       agent.testCreateTaskState("task-1", [{ role: "user", content: "hi" }]);
 
@@ -723,25 +731,32 @@ describe("BaseAgent", () => {
         }),
       });
 
-      // Skip all tool calls (simulate instant execution)
-      class ParallelToolAgent extends TestAgent {
-        protected override async onToolCall(tc: any) {
-          return {
-            action: "skip" as const,
-            result: {
-              toolCallId: tc.id,
-              content: JSON.stringify({ result: `${tc.name}_done` }),
-            },
-          };
-        }
-      }
-
-      const agent = new ParallelToolAgent({
-        agentId: "test-agent-1",
-        model,
-        toolRegistry: createMockRegistry(),
-        sessionDir: `/tmp/pegasus-test-base-agent-${Date.now()}`,
+      // Register tools so they can be executed
+      const registry = createMockRegistry();
+      registry.register({
+        name: "tool_a",
+        description: "tool a",
+        category: "system" as any,
+        parameters: z.object({}),
+        execute: mock(async () => ({
+          success: true,
+          result: JSON.stringify({ result: "tool_a_done" }),
+          startedAt: Date.now(),
+        })),
       });
+      registry.register({
+        name: "tool_b",
+        description: "tool b",
+        category: "system" as any,
+        parameters: z.object({}),
+        execute: mock(async () => ({
+          success: true,
+          result: JSON.stringify({ result: "tool_b_done" }),
+          startedAt: Date.now(),
+        })),
+      });
+
+      const agent = createTestAgent({ model, toolRegistry: registry });
       agent.testCreateTaskState("task-1", [
         { role: "user", content: "run two tools" },
       ]);
@@ -778,28 +793,26 @@ describe("BaseAgent", () => {
         }),
       });
 
-      class AbortDuringToolAgent extends TestAgent {
-        protected override async onToolCall(tc: any) {
+      // Register a tool that sets aborted flag during execution
+      const registry = createMockRegistry();
+      const agent = createTestAgent({ model, toolRegistry: registry });
+      registry.register({
+        name: "slow_tool",
+        description: "a tool that aborts",
+        category: "system" as any,
+        parameters: z.object({}),
+        execute: mock(async () => {
           // Set aborted flag during tool execution
-          const state = this.getTaskStates().get("task-1");
+          const state = agent.getTaskStates().get("task-1");
           if (state) state.aborted = true;
-
           return {
-            action: "skip" as const,
-            result: {
-              toolCallId: tc.id,
-              content: JSON.stringify({ done: true }),
-            },
+            success: true,
+            result: JSON.stringify({ done: true }),
+            startedAt: Date.now(),
           };
-        }
-      }
-
-      const agent = new AbortDuringToolAgent({
-        agentId: "test-agent-1",
-        model,
-        toolRegistry: createMockRegistry(),
-        sessionDir: `/tmp/pegasus-test-base-agent-${Date.now()}`,
+        }),
       });
+
       agent.testCreateTaskState("task-1", [
         { role: "user", content: "start" },
       ]);
@@ -870,7 +883,8 @@ describe("BaseAgent", () => {
         agentId: "retry-agent",
         model,
         toolRegistry: createMockRegistry(),
-        sessionDir: `/tmp/pegasus-test-base-agent-${Date.now()}`,
+        systemPrompt: "test prompt",
+        sessionDir: `/tmp/pegasus-test-agent-${Date.now()}`,
       });
       agent.testCreateTaskState("task-1", [
         { role: "user", content: "hi" },
@@ -911,7 +925,8 @@ describe("BaseAgent", () => {
         agentId: "hook-agent",
         model,
         toolRegistry: createMockRegistry(),
-        sessionDir: `/tmp/pegasus-test-base-agent-${Date.now()}`,
+        systemPrompt: "test prompt",
+        sessionDir: `/tmp/pegasus-test-agent-${Date.now()}`,
       });
       agent.testCreateTaskState("task-1", [
         { role: "user", content: "hi" },
@@ -950,16 +965,22 @@ describe("BaseAgent", () => {
       });
 
       const appendedCalls: { taskId: string; messages: Message[] }[] = [];
+
+      // Register tool so it can be executed
+      const registry = createMockRegistry();
+      registry.register({
+        name: "test_tool",
+        description: "test",
+        category: "system" as any,
+        parameters: z.object({}),
+        execute: mock(async () => ({
+          success: true,
+          result: JSON.stringify({ ok: true }),
+          startedAt: Date.now(),
+        })),
+      });
+
       class HookToolAgent extends TestAgent {
-        protected override async onToolCall(tc: any) {
-          return {
-            action: "skip" as const,
-            result: {
-              toolCallId: tc.id,
-              content: JSON.stringify({ ok: true }),
-            },
-          };
-        }
         protected override async onMessagesAppended(taskId: string, newMessages: Message[]): Promise<void> {
           appendedCalls.push({ taskId, messages: [...newMessages] });
         }
@@ -968,8 +989,9 @@ describe("BaseAgent", () => {
       const agent = new HookToolAgent({
         agentId: "hook-tool-agent",
         model,
-        toolRegistry: createMockRegistry(),
-        sessionDir: `/tmp/pegasus-test-base-agent-${Date.now()}`,
+        toolRegistry: registry,
+        systemPrompt: "test prompt",
+        sessionDir: `/tmp/pegasus-test-agent-${Date.now()}`,
       });
       agent.testCreateTaskState("task-1", [
         { role: "user", content: "do something" },
@@ -1064,25 +1086,32 @@ describe("BaseAgent", () => {
         }),
       });
 
-      // Skip all tool calls (simulate instant execution)
-      class MultiIterAgent extends TestAgent {
-        protected override async onToolCall(tc: any) {
-          return {
-            action: "skip" as const,
-            result: {
-              toolCallId: tc.id,
-              content: JSON.stringify({ result: `${tc.name}_result` }),
-            },
-          };
-        }
-      }
-
-      const agent = new MultiIterAgent({
-        agentId: "test-agent-1",
-        model,
-        toolRegistry: createMockRegistry(),
-        sessionDir: `/tmp/pegasus-test-base-agent-${Date.now()}`,
+      // Register tools
+      const registry = createMockRegistry();
+      registry.register({
+        name: "tool_a",
+        description: "tool a",
+        category: "system" as any,
+        parameters: z.object({ step: z.number().optional() }),
+        execute: mock(async () => ({
+          success: true,
+          result: JSON.stringify({ result: "tool_a_result" }),
+          startedAt: Date.now(),
+        })),
       });
+      registry.register({
+        name: "tool_b",
+        description: "tool b",
+        category: "system" as any,
+        parameters: z.object({ step: z.number().optional() }),
+        execute: mock(async () => ({
+          success: true,
+          result: JSON.stringify({ result: "tool_b_result" }),
+          startedAt: Date.now(),
+        })),
+      });
+
+      const agent = createTestAgent({ model, toolRegistry: registry });
       agent.testCreateTaskState("task-1", [
         { role: "user", content: "do a 3-step task" },
       ]);
@@ -1146,8 +1175,7 @@ describe("BaseAgent", () => {
         }),
       });
 
-      // Create an agent that lets tool calls go through to execute,
-      // but the toolExecutor will throw
+      // Create an agent with a tool that throws
       const registry = createMockRegistry();
       registry.register({
         name: "failing_tool",
@@ -1192,7 +1220,7 @@ describe("BaseAgent", () => {
 // Compaction Tests
 // ═══════════════════════════════════════════════════
 
-describe("BaseAgent — compaction", () => {
+describe("Agent — compaction", () => {
   async function createTempDir(): Promise<string> {
     return mkdtemp(path.join(os.tmpdir(), "pegasus-test-compaction-"));
   }

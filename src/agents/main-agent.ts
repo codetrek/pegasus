@@ -113,7 +113,7 @@ export class MainAgent extends Agent {
     const toolRegistry = new ToolRegistry();
     toolRegistry.registerMany(mainAgentTools);
 
-    // Use real model — processStep uses BaseAgent.model.
+    // Use real model — processStep uses Agent.model.
     // Auth is initialized before MainAgent creation (PegasusApp step 3 vs step 11).
     const defaultModel = deps.models.getDefault();
 
@@ -181,7 +181,7 @@ export class MainAgent extends Agent {
     this.tickManager.stop();
 
     // Wait for queue to finish processing the current item.
-    // isRunning is already false (set by BaseAgent.stop()), so _drainQueue
+    // isRunning is already false (set by Agent.stop()), so _drainQueue
     // will exit after the current item — no risk of hanging.
     await this.waitForQueueDrain();
 
@@ -255,7 +255,7 @@ export class MainAgent extends Agent {
 
   /**
    * Compute max tool result chars from the model's context window.
-   * Used by BaseAgent._executeToolAsync() for result truncation.
+   * Used by Agent._executeToolAsync() for result truncation.
    */
   protected override getMaxToolResultChars(): number {
     const budget = computeTokenBudget({
