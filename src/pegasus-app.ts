@@ -47,6 +47,8 @@ import { MainAgent } from "./agents/main-agent.ts";
 import type { InjectedSubsystems } from "./agents/main-agent.ts";
 import { buildMainAgentPaths } from "./storage/paths.ts";
 import type { ChannelAdapter, InboundMessage, OutboundMessage, StoreImageFn } from "./channels/types.ts";
+import { TelegramAdapter } from "./channels/telegram.ts";
+import { buildTelegramCommands } from "./channels/telegram-commands.ts";
 import { OwnerStore } from "./security/owner-store.ts";
 import { classifyMessage } from "./security/message-classifier.ts";
 import { formatChannelMeta } from "./agents/base/conversation-agent.ts";
@@ -478,6 +480,17 @@ export class PegasusApp {
         }
       }
     });
+
+    // 15. Telegram adapter (if configured)
+    const telegramConfig = this.settings.channels?.telegram;
+    if (telegramConfig?.enabled && telegramConfig?.token) {
+      const storeImageFn = this.getStoreImageFn();
+      const commands = buildTelegramCommands(this._mainAgent.skills.listUserInvocable());
+      const telegramAdapter = new TelegramAdapter(telegramConfig.token, storeImageFn, commands);
+      this.registerAdapter(telegramAdapter);
+      await telegramAdapter.start({ send: (msg) => this.routeMessage(msg) });
+      logger.info({ commandCount: commands.length }, "telegram_adapter_started");
+    }
 
     this._started = true;
     logger.info("pegasus_app_started");

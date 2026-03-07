@@ -53,6 +53,11 @@ export class CLIAdapter implements ChannelAdapter {
     this.storeImage = storeImage;
   }
 
+  /** Set or update the storeImage callback (e.g., after PegasusApp.start() initializes ImageManager). */
+  setStoreImage(fn: StoreImageFn | undefined): void {
+    this.storeImage = fn;
+  }
+
   async start(agent: { send(msg: InboundMessage): void }): Promise<void> {
     this.rl = createInterface({
       input: process.stdin,
