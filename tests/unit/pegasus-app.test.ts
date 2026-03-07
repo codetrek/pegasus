@@ -186,7 +186,7 @@ describe("PegasusApp", () => {
     app.mainAgent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
 
     // Wait for async processing
-    await Bun.sleep(100);
+    await Bun.sleep(30);
 
     expect(replies.length).toBeGreaterThanOrEqual(1);
     expect(replies[0]!.text).toBe("Hello from PegasusApp!");
@@ -271,7 +271,7 @@ describe("PegasusApp", () => {
     app.registerAdapter(mockAdapter);
 
     app.mainAgent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(100);
+    await Bun.sleep(30);
 
     expect(replies.length).toBeGreaterThanOrEqual(1);
     expect(replies[0]!.text).toBe("Reply via late adapter");
@@ -295,7 +295,7 @@ describe("PegasusApp", () => {
     mainAgent.onReply((msg) => replies.push(msg));
 
     mainAgent.send({ text: "test", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(100);
+    await Bun.sleep(30);
 
     expect(replies.length).toBeGreaterThanOrEqual(1);
     expect(replies[0]!.text).toBe("Injected mode works!");
@@ -343,7 +343,7 @@ describe("PegasusApp", () => {
     await app.start();
 
     app.mainAgent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(100);
+    await Bun.sleep(30);
 
     // Reply should go to CLI adapter only
     expect(cliReplies.length).toBeGreaterThanOrEqual(1);
@@ -392,7 +392,7 @@ describe("PegasusApp", () => {
         channel: { type: "telegram", channelId: "chat456", userId: "stranger" },
       });
 
-      await Bun.sleep(200);
+      await Bun.sleep(50);
 
       // The message text should NOT appear in session (discarded for security)
       const sessionFile = Bun.file(
@@ -424,12 +424,12 @@ describe("PegasusApp", () => {
         text: "msg1",
         channel: { type: "telegram", channelId: "chat1", userId: "user1" },
       });
-      await Bun.sleep(50);
+      await Bun.sleep(10);
       app.routeMessage({
         text: "msg2",
         channel: { type: "telegram", channelId: "chat1", userId: "user1" },
       });
-      await Bun.sleep(200);
+      await Bun.sleep(50);
 
       const sessionFile = Bun.file(
         `${testDataDir}/agents/main/session/current.jsonl`,
@@ -465,7 +465,7 @@ describe("PegasusApp", () => {
         channel: { type: "telegram", channelId: "chat789", userId: "stranger" },
       });
 
-      await Bun.sleep(200);
+      await Bun.sleep(50);
 
       // Message should NOT appear in MainAgent's session
       const sessionFile = Bun.file(
@@ -504,7 +504,7 @@ describe("PegasusApp", () => {
         channel: { type: "telegram", channelId: "chat123", userId: "owner-user" },
       });
 
-      await Bun.sleep(200);
+      await Bun.sleep(50);
 
       // Owner message SHOULD appear in session
       const sessionFile = Bun.file(
@@ -532,7 +532,7 @@ describe("PegasusApp", () => {
         channel: { type: "cli", channelId: "main" },
       });
 
-      await Bun.sleep(200);
+      await Bun.sleep(50);
 
       const sessionFile = Bun.file(
         `${testDataDir}/agents/main/session/current.jsonl`,
@@ -600,7 +600,7 @@ describe("PegasusApp", () => {
       app.mainAgent.onReply(() => {});
 
       app.mainAgent.send({ text: "spawn a task", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(500);
+      await Bun.sleep(100);
 
       // Verify task notification was routed — session should contain task completion
       const sessionFile = Bun.file(
@@ -633,13 +633,13 @@ describe("PegasusApp", () => {
 
       // Set lastChannel by sending a message first
       app.mainAgent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(100);
+      await Bun.sleep(30);
 
       // Fire tick through the MainAgent tick accessor
       const tickAccessor = app.mainAgent._tick;
       tickAccessor.fire();
 
-      await Bun.sleep(200);
+      await Bun.sleep(50);
 
       // Verify tick status was injected into session
       const sessionFile = Bun.file(
@@ -726,7 +726,7 @@ describe("PegasusApp", () => {
         metadata: { subagentDone: "completed" },
       });
 
-      await Bun.sleep(100);
+      await Bun.sleep(30);
 
       // Verify no crash — markDone might not find the subagent (no active subagent registered)
       // but it should handle gracefully

@@ -102,7 +102,7 @@ describe("Agent coverage", () => {
     }
     activeAgents = [];
     // Allow any remaining microtasks (e.g. appendFile callbacks) to settle
-    await Bun.sleep(50);
+    await Bun.sleep(10);
     await rm(testDataDir, { recursive: true, force: true }).catch(() => {});
   });
 
@@ -198,7 +198,7 @@ describe("Agent coverage", () => {
 
       // Set lastChannel by sending a message first
       agent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(100);
+      await Bun.sleep(30);
 
       // Push task notification
       const notification: TaskNotificationPayload = {
@@ -208,7 +208,7 @@ describe("Agent coverage", () => {
       };
       (agent as any).pushQueue({ kind: "task_notify", notification });
 
-      await Bun.sleep(200);
+      await Bun.sleep(50);
 
       // Verify the notification was added to session
       const sessionFile = Bun.file(`${testDataDir}/session/current.jsonl`);
@@ -227,7 +227,7 @@ describe("Agent coverage", () => {
       agent.onReply(() => {});
 
       agent.send({ text: "hi", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(100);
+      await Bun.sleep(30);
 
       const notification: TaskNotificationPayload = {
         type: "failed",
@@ -236,7 +236,7 @@ describe("Agent coverage", () => {
       };
       (agent as any).pushQueue({ kind: "task_notify", notification });
 
-      await Bun.sleep(200);
+      await Bun.sleep(50);
 
       const content = await Bun.file(`${testDataDir}/session/current.jsonl`).text();
       expect(content).toContain("[Task task-2 failed]");
@@ -253,7 +253,7 @@ describe("Agent coverage", () => {
       agent.onReply(() => {});
 
       agent.send({ text: "hi", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(100);
+      await Bun.sleep(30);
 
       const notification: TaskNotificationPayload = {
         type: "notify",
@@ -262,7 +262,7 @@ describe("Agent coverage", () => {
       };
       (agent as any).pushQueue({ kind: "task_notify", notification });
 
-      await Bun.sleep(200);
+      await Bun.sleep(50);
 
       const content = await Bun.file(`${testDataDir}/session/current.jsonl`).text();
       expect(content).toContain("[Task task-3 update]");
@@ -279,7 +279,7 @@ describe("Agent coverage", () => {
       agent.onReply(() => {});
 
       agent.send({ text: "hi", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(100);
+      await Bun.sleep(30);
 
       const notification: TaskNotificationPayload = {
         type: "completed",
@@ -289,7 +289,7 @@ describe("Agent coverage", () => {
       };
       (agent as any).pushQueue({ kind: "task_notify", notification });
 
-      await Bun.sleep(200);
+      await Bun.sleep(50);
 
       const content = await Bun.file(`${testDataDir}/session/current.jsonl`).text();
       expect(content).toContain("[Task task-img completed]");
@@ -315,7 +315,7 @@ describe("Agent coverage", () => {
 
       // First send a message so lastChannel is set
       agent.send({ text: "hi", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(100);
+      await Bun.sleep(30);
 
       // Register a pending work item so the event handler picks it up
       const childId = "child-task-1";
@@ -335,7 +335,7 @@ describe("Agent coverage", () => {
         }),
       );
 
-      await Bun.sleep(200);
+      await Bun.sleep(50);
 
       // Verify child result was injected into session
       const content = await Bun.file(`${testDataDir}/session/current.jsonl`).text();
@@ -354,7 +354,7 @@ describe("Agent coverage", () => {
       agent.onReply(() => {});
 
       agent.send({ text: "hi", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(100);
+      await Bun.sleep(30);
 
       const childId = "child-task-fail";
       agent.stateManager.addPendingWork({
@@ -372,7 +372,7 @@ describe("Agent coverage", () => {
         }),
       );
 
-      await Bun.sleep(200);
+      await Bun.sleep(50);
 
       const content = await Bun.file(`${testDataDir}/session/current.jsonl`).text();
       expect(content).toContain(`Child agent ${childId} failed`);
@@ -401,7 +401,7 @@ describe("Agent coverage", () => {
       agent.onReply(() => {});
 
       agent.send({ text: "trigger error", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(200);
+      await Bun.sleep(50);
 
       // The error is handled internally by processStep (not _drainQueue catch).
       // Verify the agent is still functional — no crash.
@@ -421,7 +421,7 @@ describe("Agent coverage", () => {
 
       // Push an unknown kind
       (agent as any).pushQueue({ kind: "unknown_kind", data: 42 });
-      await Bun.sleep(100);
+      await Bun.sleep(30);
 
       // Should not crash — just logs a warning
       await agent.stop();
