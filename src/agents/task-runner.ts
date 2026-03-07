@@ -136,7 +136,7 @@ export class TaskRunner {
     });
 
     // Write task index entry (for task_list / task_replay tools)
-    this._appendTaskIndex(taskId, dateStr, { description, taskType, source }).catch((err) => {
+    this._appendTaskIndex(taskId, dateStr, { description, taskType, source, depth }).catch((err) => {
       logger.warn({ taskId, err }, "task_index_append_failed");
     });
 
@@ -173,24 +173,25 @@ export class TaskRunner {
     }
 
     const index = await this._loadIndex();
-    const date = index.get(taskId);
-    if (!date) {
+    const entry = index.get(taskId);
+    if (!entry) {
       throw new Error(`Task ${taskId} not found in task index`);
     }
 
-    const sessionDir = path.join(this.tasksDir, date, taskId);
+    const sessionDir = path.join(this.tasksDir, entry.date, taskId);
     const sessionStore = new SessionStore(sessionDir);
     await sessionStore.append({ role: "user", content: newInput });
 
-    const resolvedType = taskType ?? "general";
+    const resolvedType = taskType ?? entry.taskType ?? "general";
     const resolvedDescription = description ?? `Resumed task ${taskId}`;
-    const toolRegistry = this.getToolRegistryForType(resolvedType);
+    const depth = entry.depth ?? 0;
+    const toolRegistry = this.getToolRegistryForType(resolvedType, depth);
 
     const agent = new Agent({
       agentId: taskId,
       model: this.model,
       toolRegistry,
-      systemPrompt: this._buildSystemPrompt(resolvedDescription, this.taskTypeRegistry.getPrompt(resolvedType)),
+      systemPrompt: this._buildSystemPrompt(resolvedDescription, this.taskTypeRegistry.getPrompt(resolvedType), depth),
       sessionDir,
       storeImage: this.storeImage,
       toolContext: {
@@ -208,7 +209,7 @@ export class TaskRunner {
       description: resolvedDescription,
       source: "resume",
       startedAt: Date.now(),
-      depth: 0,
+      depth,
     };
 
     this._runAgent(agent, taskId, newInput, resolvedType, info);
@@ -294,18 +295,18 @@ export class TaskRunner {
   }
 
   /**
-   * Read the task index file (index.jsonl) and return a map of taskId → date.
+   * Read the task index file (index.jsonl) and return a map of taskId → entry.
    * Returns an empty map if the file does not exist.
    */
-  private async _loadIndex(): Promise<Map<string, string>> {
+  private async _loadIndex(): Promise<Map<string, { date: string; depth?: number; taskType?: string }>> {
     const indexPath = path.join(this.tasksDir, "index.jsonl");
-    const map = new Map<string, string>();
+    const map = new Map<string, { date: string; depth?: number; taskType?: string }>();
     try {
       const content = await readFile(indexPath, "utf-8");
       const lines = content.trim().split("\n").filter(Boolean);
       for (const line of lines) {
-        const entry = JSON.parse(line) as { taskId: string; date: string };
-        map.set(entry.taskId, entry.date);
+        const entry = JSON.parse(line) as { taskId: string; date: string; depth?: number; taskType?: string };
+        map.set(entry.taskId, { date: entry.date, depth: entry.depth, taskType: entry.taskType });
       }
     } catch {
       // File doesn't exist or unreadable — return empty map
@@ -393,14 +394,15 @@ export class TaskRunner {
   private async _appendTaskIndex(
     taskId: string,
     date: string,
-    meta?: { description?: string; taskType?: string; source?: string },
+    meta?: { description?: string; taskType?: string; source?: string; depth?: number },
   ): Promise<void> {
     await mkdir(this.tasksDir, { recursive: true });
     const indexPath = path.join(this.tasksDir, "index.jsonl");
-    const entry: Record<string, string> = { taskId, date };
+    const entry: Record<string, string | number> = { taskId, date };
     if (meta?.description) entry.description = meta.description;
     if (meta?.taskType) entry.taskType = meta.taskType;
     if (meta?.source) entry.source = meta.source;
+    if (meta?.depth !== undefined) entry.depth = meta.depth;
     const line = JSON.stringify(entry) + "\n";
     await appendFile(indexPath, line, "utf-8");
   }
