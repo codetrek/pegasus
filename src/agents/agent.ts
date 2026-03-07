@@ -7,11 +7,19 @@
  *
  * Key design decisions:
  *   - systemPrompt is constructor-injected (string | (() => string)), NOT abstract
- *   - AgentCallbacks for lifecycle hooks (onStart, onStop, onCompacted, etc.)
+ *   - AgentCallbacks for lifecycle hooks (onStart, onStop, etc.)
  *   - toolContext injection for pre-set ToolContext fields
  *   - Image ref collection and event emission from ExecutionAgent
  *   - Queue processing from ConversationAgent
  *   - spawn_task is a self-executing tool using ToolContext.taskRegistry (TaskRunner)
+ *
+ * Built-in capabilities (controlled by configuration):
+ *   - Memory injection: auto-injects memory index on fresh start + after compaction
+ *     (enabled when toolContext.memoryDir is set)
+ *   - Reflection: auto-runs ReflectionOrchestrator after compaction
+ *     (enabled when reflectionOrchestrator is provided in deps)
+ *   - Memory snapshot: auto-injects getMemorySnapshot into ToolContext
+ *     (enabled when toolContext.memoryDir is set)
  */
 
 import { BaseAgent, type BaseAgentDeps } from "./base/base-agent.ts";
@@ -29,6 +37,8 @@ import type { ToolContext } from "../tools/types.ts";
 import type { BudgetOptions } from "../context/index.ts";
 import { formatTimestamp } from "../infra/time.ts";
 import { sanitizeForPrompt } from "../infra/sanitize.ts";
+import { formatSize } from "../prompts/index.ts";
+import type { ReflectionOrchestrator } from "./reflection-orchestrator.ts";
 import { getLogger } from "../infra/logger.ts";
 
 const logger = getLogger("agent");
@@ -44,13 +54,14 @@ export interface AgentDeps extends BaseAgentDeps {
   toolContext?: Partial<ToolContext>;
   /** Lifecycle callbacks (replaces subclass overrides). */
   callbacks?: AgentCallbacks;
+  /** ReflectionOrchestrator for post-compaction reflection. Optional. */
+  reflectionOrchestrator?: ReflectionOrchestrator;
 }
 
 /** Lifecycle callbacks — subclasses (MainAgent) provide these instead of overrides. */
 export interface AgentCallbacks {
   onStart?: () => Promise<void>;
   onStop?: () => Promise<void>;
-  onCompacted?: (preCompactMessages: Message[]) => Promise<void>;
   computeBudgetOptions?: () => BudgetOptions;
   onTaskNotificationHandled?: (notification: TaskNotificationPayload) => Promise<void>;
 }
@@ -110,6 +121,11 @@ export class Agent extends BaseAgent {
   private _injectedToolContext?: Partial<ToolContext>;
   private _callbacks?: AgentCallbacks;
 
+  /** Memory directory path — enables auto memory injection on start/compact. */
+  private _memoryDir?: string;
+  /** ReflectionOrchestrator — enables auto reflection after compaction. */
+  private _reflectionOrchestrator?: ReflectionOrchestrator;
+
   /** Holds the last execution result for run() to resolve. */
   private _lastResult: AgentResult | null = null;
 
@@ -119,6 +135,8 @@ export class Agent extends BaseAgent {
     this._systemPromptSource = deps.systemPrompt;
     this._injectedToolContext = deps.toolContext;
     this._callbacks = deps.callbacks;
+    this._memoryDir = deps.toolContext?.memoryDir;
+    this._reflectionOrchestrator = deps.reflectionOrchestrator;
   }
 
   // ═══════════════════════════════════════════════════
@@ -202,6 +220,12 @@ export class Agent extends BaseAgent {
       { agentId: this.agentId, messageCount: this.sessionMessages.length },
       "session_loaded",
     );
+
+    // Auto-inject memory index for fresh sessions (empty = new conversation)
+    if (this._memoryDir && this.sessionMessages.length === 0) {
+      await this._injectMemoryIndex();
+    }
+
     await this._callbacks?.onStart?.();
   }
 
@@ -234,6 +258,10 @@ export class Agent extends BaseAgent {
     if (this._onReply) {
       ctx.onReply = (msg: unknown) => this._onReply!(msg as OutboundMessage);
     }
+    // Auto-inject getMemorySnapshot when memoryDir is set
+    if (this._memoryDir && !ctx.getMemorySnapshot) {
+      ctx.getMemorySnapshot = () => this._getMemorySnapshot();
+    }
     return ctx;
   }
 
@@ -246,7 +274,17 @@ export class Agent extends BaseAgent {
   }
 
   protected override async onCompacted(preCompactMessages: Message[]): Promise<void> {
-    await this._callbacks?.onCompacted?.(preCompactMessages);
+    // Auto-inject memory index after compaction
+    if (this._memoryDir) {
+      await this._injectMemoryIndex();
+    }
+
+    // Fire-and-forget reflection on the archived session
+    if (this._reflectionOrchestrator?.shouldReflect(preCompactMessages)) {
+      this._reflectionOrchestrator.runReflection(preCompactMessages).catch((err) => {
+        logger.warn({ error: err instanceof Error ? err.message : String(err) }, "reflection_failed");
+      });
+    }
   }
 
   // ═══════════════════════════════════════════════════
@@ -630,6 +668,120 @@ export class Agent extends BaseAgent {
 
     // Cleanup
     this.removeTaskState(taskId);
+  }
+
+  // ═══════════════════════════════════════════════════
+  // Memory — built-in capabilities controlled by config
+  // ═══════════════════════════════════════════════════
+
+  /**
+   * Inject available memory files into the session so the LLM knows what
+   * long-term knowledge is available without needing to call memory_list first.
+   * Called automatically on fresh session start and after compaction when _memoryDir is set.
+   */
+  private async _injectMemoryIndex(): Promise<void> {
+    const memoryDir = this._memoryDir;
+    if (!memoryDir) return;
+
+    try {
+      const listResult = await this.toolExecutor.execute(
+        "memory_list",
+        {},
+        { taskId: this.agentId, memoryDir },
+      );
+      if (!listResult.success || !Array.isArray(listResult.result) || listResult.result.length === 0) return;
+
+      const entries = listResult.result as Array<{ path: string; summary: string; size: number }>;
+      const lines: string[] = ["[Available memory]", ""];
+
+      // Facts: load full content
+      for (const e of entries.filter(e => e.path.startsWith("facts/"))) {
+        try {
+          const readResult = await this.toolExecutor.execute(
+            "memory_read",
+            { path: e.path },
+            { taskId: this.agentId, memoryDir },
+          );
+          if (readResult.success && typeof readResult.result === "string") {
+            lines.push(`### ${e.path} (${formatSize(e.size)})`, "", readResult.result as string, "");
+          }
+        } catch {
+          lines.push(`- ${e.path} (${formatSize(e.size)}): [failed to load]`);
+        }
+      }
+
+      // Episodes: summary only
+      const episodes = entries.filter(e => e.path.startsWith("episodes/"));
+      if (episodes.length > 0) {
+        lines.push("### Episodes (use memory_read to load details)", "");
+        for (const e of episodes) {
+          lines.push(`- ${e.path} (${formatSize(e.size)}): ${e.summary}`);
+        }
+        lines.push("");
+      }
+
+      const msg: Message = { role: "user", content: lines.join("\n") };
+      this.sessionMessages.push(msg);
+      await this.sessionStore.append(msg);
+      logger.debug({ count: entries.length }, "memory_index_injected");
+    } catch {
+      // Memory unavailable — continue without it
+    }
+  }
+
+  /**
+   * Build a text snapshot of the memory index (facts + episode summaries)
+   * to pass to SubAgents so they have context from long-term memory.
+   * Returns undefined if memory is empty or unavailable.
+   */
+  private async _getMemorySnapshot(): Promise<string | undefined> {
+    const memoryDir = this._memoryDir;
+    if (!memoryDir) return undefined;
+
+    try {
+      const listResult = await this.toolExecutor.execute(
+        "memory_list",
+        {},
+        { taskId: this.agentId, memoryDir },
+      );
+      if (!listResult.success || !Array.isArray(listResult.result) || listResult.result.length === 0) {
+        return undefined;
+      }
+
+      const entries = listResult.result as Array<{ path: string; summary: string; size: number }>;
+      const lines: string[] = ["[Memory snapshot from MainAgent]", ""];
+
+      // Facts: load full content
+      for (const e of entries.filter(e => e.path.startsWith("facts/"))) {
+        try {
+          const readResult = await this.toolExecutor.execute(
+            "memory_read",
+            { path: e.path },
+            { taskId: this.agentId, memoryDir },
+          );
+          if (readResult.success && typeof readResult.result === "string") {
+            lines.push(`### ${e.path}`, "", readResult.result as string, "");
+          }
+        } catch {
+          // Skip unreadable facts
+        }
+      }
+
+      // Episodes: summary only
+      const episodes = entries.filter(e => e.path.startsWith("episodes/"));
+      if (episodes.length > 0) {
+        lines.push("### Episodes", "");
+        for (const e of episodes) {
+          lines.push(`- ${e.path}: ${e.summary}`);
+        }
+        lines.push("");
+      }
+
+      const snapshot = lines.join("\n").trim();
+      return snapshot.length > 0 ? snapshot : undefined;
+    } catch {
+      return undefined;
+    }
   }
 }
 

@@ -3,26 +3,30 @@
  *
  * Extends Agent to inherit queue processing, session management,
  * reply routing, and the processStep-based thinking engine. Adds task/subagent
- * delegation, skills, MCP integration, memory, vision, and compaction.
+ * delegation, skills, MCP integration, vision, and compaction.
+ *
+ * Memory injection and reflection are handled by Agent (built-in capabilities):
+ *   - Agent auto-injects memory index on fresh session start and after compaction
+ *   - Agent auto-runs reflection after compaction via injected ReflectionOrchestrator
+ *   - Agent auto-injects getMemorySnapshot into ToolContext when memoryDir is set
  *
  * All infrastructure subsystems (auth, MCP, skills, tasks, etc.) are injected
  * by PegasusApp — MainAgent never self-initializes them.
  *
  * Key overrides:
  *   - buildToolContext()      → rich ToolContext with all dependencies
- *   - onStart()/onStop()      → session lifecycle (load, memory, prompt; tick + drain)
+ *   - onStart()/onStop()      → session lifecycle (MCP tools, prompt; tick + drain)
  *   - getMaxToolResultChars() → truncation budget from model context window
  *
  * Uses AgentCallbacks (constructor-injected) for:
  *   - computeBudgetOptions    → ModelRegistry-aware compaction budget
- *   - onCompacted             → memory re-injection + fire-and-forget reflection
  *   - onTaskNotificationHandled → tick management (checkShouldStop)
  *   - systemPrompt            → lazy builder function returning cached prompt
  */
 
 import type { Message } from "../infra/llm-types.ts";
 import type { Persona } from "../identity/persona.ts";
-import { buildSystemPrompt, formatSize } from "../prompts/index.ts";
+import { buildSystemPrompt } from "../prompts/index.ts";
 import type { Settings } from "../infra/config.ts";
 import { getSettings } from "../infra/config.ts";
 import { getLogger } from "../infra/logger.ts";
@@ -102,7 +106,6 @@ export class MainAgent extends Agent {
   private subAgentManager: SubAgentManager | null = null;
   private ownerStore: OwnerStore;
   private _systemPrompt: string = "";
-  private reflectionOrchestrator!: ReflectionOrchestrator;
   private tickManager!: TickManager;
 
   /** Injected subsystems from PegasusApp (stored for onStart MCP tool registration). */
@@ -129,6 +132,8 @@ export class MainAgent extends Agent {
       contextWindow: settings.llm.contextWindow,
       imageManager: deps.injected.imageManager,
       visionKeepLastNTurns: settings.vision?.keepLastNTurns,
+      toolContext: { memoryDir: mainStorePaths.memory! },
+      reflectionOrchestrator: deps.injected.reflectionOrchestrator,
       callbacks: {
         computeBudgetOptions: () => {
           const dm = this.models.getDefault();
@@ -141,15 +146,6 @@ export class MainAgent extends Agent {
             compactThreshold: this.settings.session?.compactThreshold,
             modelLimitsCache: this.modelLimitsCache,
           };
-        },
-        onCompacted: async (preCompactMessages: Message[]) => {
-          await this._injectMemoryIndex();
-          // Fire-and-forget reflection on the archived session
-          if (this.reflectionOrchestrator.shouldReflect(preCompactMessages)) {
-            this.reflectionOrchestrator.runReflection(preCompactMessages).catch((err) => {
-              logger.warn({ error: err instanceof Error ? err.message : String(err) }, "main_reflection_failed");
-            });
-          }
         },
         onTaskNotificationHandled: async (notification) => {
           // Stop tick if no more active work (completed/failed, not progress updates)
@@ -177,7 +173,6 @@ export class MainAgent extends Agent {
     this.projectAdapter = inj.projectAdapter;
     this.subAgentManager = inj.subAgentManager;
     this.tickManager = inj.tickManager;
-    this.reflectionOrchestrator = inj.reflectionOrchestrator;
   }
 
   // ═══════════════════════════════════════════════════
@@ -186,14 +181,8 @@ export class MainAgent extends Agent {
 
   /** Start the Main Agent and underlying Task System. */
   protected override async onStart(): Promise<void> {
-    // Load session history from disk (parent does this)
+    // Load session history + auto-inject memory for fresh sessions (parent does this)
     await super.onStart();
-
-    // Inject memory index only for fresh sessions (empty = new, or compact summary only)
-    // On restart with existing messages, the memory index is already persisted in JSONL
-    if (this.sessionMessages.length === 0) {
-      await this._injectMemoryIndex();
-    }
 
     // Register pre-wrapped MCP tools in MainAgent's own tool registry (for conversation).
     // PegasusApp already wrapped them once — no need to re-call listTools/wrapMCPTools.
@@ -261,7 +250,6 @@ export class MainAgent extends Agent {
       subAgentManager: this.subAgentManager,
       skillRegistry: this.skillRegistry,
       tickManager: this.tickManager,
-      getMemorySnapshot: () => this._getMemorySnapshot(),
       onSkillsReloaded: () => {
         this._reloadSkills();
         return this.skillRegistry.listAll().length;
@@ -305,115 +293,6 @@ export class MainAgent extends Agent {
 
     if (this.lastChannel) {
       this.pushQueue({ kind: "think", channel: this.lastChannel } as QueueItem);
-    }
-  }
-
-  // ═══════════════════════════════════════════════════
-  // Memory index injection
-  // ═══════════════════════════════════════════════════
-
-  /**
-   * Build a text snapshot of the memory index (facts + episode summaries)
-   * to pass to SubAgents so they have context from long-term memory.
-   * Returns undefined if memory is empty or unavailable.
-   */
-  private async _getMemorySnapshot(): Promise<string | undefined> {
-    try {
-      const memoryDir = this.mainStorePaths.memory!;
-      const listResult = await this.toolExecutor.execute(
-        "memory_list",
-        {},
-        { taskId: "main-agent", memoryDir },
-      );
-      if (!listResult.success || !Array.isArray(listResult.result) || listResult.result.length === 0) {
-        return undefined;
-      }
-
-      const entries = listResult.result as Array<{ path: string; summary: string; size: number }>;
-      const lines: string[] = ["[Memory snapshot from MainAgent]", ""];
-
-      // Facts: load full content
-      for (const e of entries.filter(e => e.path.startsWith("facts/"))) {
-        try {
-          const readResult = await this.toolExecutor.execute(
-            "memory_read",
-            { path: e.path },
-            { taskId: "main-agent", memoryDir },
-          );
-          if (readResult.success && typeof readResult.result === "string") {
-            lines.push(`### ${e.path}`, "", readResult.result as string, "");
-          }
-        } catch {
-          // Skip unreadable facts
-        }
-      }
-
-      // Episodes: summary only
-      const episodes = entries.filter(e => e.path.startsWith("episodes/"));
-      if (episodes.length > 0) {
-        lines.push("### Episodes", "");
-        for (const e of episodes) {
-          lines.push(`- ${e.path}: ${e.summary}`);
-        }
-        lines.push("");
-      }
-
-      const snapshot = lines.join("\n").trim();
-      return snapshot.length > 0 ? snapshot : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
-  /**
-   * Inject available memory files into the session so the LLM knows what
-   * long-term knowledge is available without needing to call memory_list first.
-   */
-  private async _injectMemoryIndex(): Promise<void> {
-    try {
-      const memoryDir = this.mainStorePaths.memory!;
-      const listResult = await this.toolExecutor.execute(
-        "memory_list",
-        {},
-        { taskId: "main-agent", memoryDir },
-      );
-      if (!listResult.success || !Array.isArray(listResult.result) || listResult.result.length === 0) return;
-
-      const entries = listResult.result as Array<{ path: string; summary: string; size: number }>;
-      const lines: string[] = ["[Available memory]", ""];
-
-      // Facts: load full content
-      for (const e of entries.filter(e => e.path.startsWith("facts/"))) {
-        try {
-          const readResult = await this.toolExecutor.execute(
-            "memory_read",
-            { path: e.path },
-            { taskId: "main-agent", memoryDir },
-          );
-          if (readResult.success && typeof readResult.result === "string") {
-            lines.push(`### ${e.path} (${formatSize(e.size)})`, "", readResult.result as string, "");
-          }
-        } catch {
-          lines.push(`- ${e.path} (${formatSize(e.size)}): [failed to load]`);
-        }
-      }
-
-      // Episodes: summary only
-      const episodes = entries.filter(e => e.path.startsWith("episodes/"));
-      if (episodes.length > 0) {
-        lines.push("### Episodes (use memory_read to load details)", "");
-        for (const e of episodes) {
-          lines.push(`- ${e.path} (${formatSize(e.size)}): ${e.summary}`);
-        }
-        lines.push("");
-      }
-
-      const msg: Message = { role: "user", content: lines.join("\n") };
-      this.sessionMessages.push(msg);
-      await this.sessionStore.append(msg);
-      logger.debug({ count: entries.length }, "memory_index_injected");
-    } catch {
-      // Memory unavailable — continue without it
     }
   }
 
