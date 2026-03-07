@@ -25,6 +25,7 @@ import { ToolRegistry } from "@pegasus/tools/registry.ts";
 import { ToolExecutor } from "@pegasus/tools/executor.ts";
 import { mainAgentTools } from "@pegasus/tools/builtins/index.ts";
 import { buildMainAgentPaths } from "@pegasus/storage/paths.ts";
+import { OwnerStore } from "@pegasus/security/owner-store.ts";
 import path from "node:path";
 
 export interface CreateInjectedOpts {
@@ -151,6 +152,7 @@ export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubs
     tickManager,
     reflectionOrchestrator,
     mcpTools: [],
+    ownerStore: new OwnerStore(settings.authDir),
     _wireTickToAgent: (agent) => {
       agentRef.handleTick = (t, s) => agent._handleTickFromApp(t, s);
     },

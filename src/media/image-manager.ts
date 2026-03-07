@@ -15,6 +15,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { getLogger } from "../infra/logger.ts";
 import { resizeImage } from "./image-resize.ts";
+import { extToMime } from "./image-helpers.ts";
 import type { ImageRef } from "./types.ts";
 
 const logger = getLogger("media.image_manager");
@@ -53,6 +54,9 @@ export class ImageManager {
   private imagesDir: string;
   private maxDimensionPx: number;
   private maxBytes: number;
+
+  /** In-memory read cache — avoids re-reading files from disk on every LLM call. */
+  private readCache = new Map<string, { data: string; mimeType: string }>();
 
   constructor(
     mediaDir: string,
@@ -140,8 +144,11 @@ export class ImageManager {
     return ref;
   }
 
-  /** Read stored image data as base64, updating lastAccessedAt. */
+  /** Read stored image data as base64 with caching. */
   async read(id: string): Promise<{ data: string; mimeType: string } | null> {
+    const cached = this.readCache.get(id);
+    if (cached) return cached;
+
     const row = this._getRow(id);
     if (!row) return null;
 
@@ -152,11 +159,18 @@ export class ImageManager {
         Date.now(),
         id,
       ]);
-      return { data: buffer.toString("base64"), mimeType: row.mimeType };
+      const result = { data: buffer.toString("base64"), mimeType: row.mimeType };
+      this.readCache.set(id, result);
+      return result;
     } catch (err) {
       logger.warn({ id, error: String(err) }, "image_read_failed");
       return null;
     }
+  }
+
+  /** Clear the in-memory read cache (e.g. after session compaction). */
+  clearCache(): void {
+    this.readCache.clear();
   }
 
   /** Get metadata for a stored image without reading the file. */
@@ -175,6 +189,34 @@ export class ImageManager {
   /** Release the SQLite connection. */
   close(): void {
     this.db.close();
+  }
+
+  /**
+   * Resolve an image identifier — accepts either a 12-char hash ID (looked up
+   * via read()) or a file path (read from disk, stored for persistence).
+   * Returns null when the identifier cannot be resolved.
+   */
+  async resolve(
+    idOrPath: string,
+  ): Promise<{ id: string; data: string; mimeType: string } | null> {
+    // 1. Try as hash ID first (fast path)
+    const img = await this.read(idOrPath);
+    if (img) return { id: idOrPath, data: img.data, mimeType: img.mimeType };
+
+    // 2. Try as file path
+    if (idOrPath.includes("/") || idOrPath.includes(".")) {
+      try {
+        const buffer = await readFile(idOrPath);
+        const ext = path.extname(idOrPath).slice(1).toLowerCase();
+        const mimeType = extToMime(ext);
+        const ref = await this.store(buffer, mimeType, "reply");
+        return { id: ref.id, data: buffer.toString("base64"), mimeType: ref.mimeType };
+      } catch {
+        return null;
+      }
+    }
+
+    return null;
   }
 
   private _getRow(id: string): ImageRef | null {

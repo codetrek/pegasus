@@ -16,7 +16,7 @@
  */
 
 import { BaseAgent, type BaseAgentDeps, type ToolCallInterceptResult } from "./base-agent.ts";
-import type { PendingWork, PendingWorkResult } from "./agent-state.ts";
+import type { PendingWorkResult } from "./agent-state.ts";
 import type { Message } from "../../infra/llm-types.ts";
 import type { Event } from "../../events/types.ts";
 import { EventType } from "../../events/types.ts";
@@ -27,6 +27,8 @@ import type {
   InboundMessage,
   OutboundMessage,
 } from "../../channels/types.ts";
+import { formatTimestamp } from "../../infra/time.ts";
+import { sanitizeForPrompt } from "../../infra/sanitize.ts";
 import { getLogger } from "../../infra/logger.ts";
 
 const logger = getLogger("conversation_agent");
@@ -44,6 +46,7 @@ export type ReplyCallback = (msg: OutboundMessage) => void;
 /**
  * Callback for spawning child agents.
  * Returns the child agent ID.
+ * @deprecated Use spawn_task/spawn_subagent tools via ToolContext instead.
  */
 export type SpawnAgentCallback = (
   kind: "orchestrator" | "execution",
@@ -56,11 +59,21 @@ export interface CustomQueueItem {
   [key: string]: unknown;
 }
 
+/**
+ * Task notification payload — mirrors TaskRunner's TaskNotification type
+ * without coupling ConversationAgent to the task-runner module.
+ */
+export type TaskNotificationPayload =
+  | { type: "completed"; taskId: string; result: unknown; imageRefs?: Array<{ id: string; mimeType: string }> }
+  | { type: "failed"; taskId: string; error: string }
+  | { type: "notify"; taskId: string; message: string; imageRefs?: Array<{ id: string; mimeType: string }> };
+
 /** Queue item — what arrives from the outside world. Subclasses extend via onCustomQueueItem. */
 export type QueueItem =
   | { kind: "message"; message: InboundMessage }
   | { kind: "child_complete"; childId: string; result: PendingWorkResult }
   | { kind: "think"; channel: ChannelInfo }
+  | { kind: "task_notify"; notification: TaskNotificationPayload }
   | CustomQueueItem;
 
 // ── ConversationAgent ────────────────────────────────
@@ -69,7 +82,6 @@ export abstract class ConversationAgent extends BaseAgent {
   protected persona: Persona;
 
   protected _onReply: ReplyCallback | null = null;
-  private _onSpawnAgent: SpawnAgentCallback | null = null;
 
   private queue: QueueItem[] = [];
   private processing = false;
@@ -88,11 +100,6 @@ export abstract class ConversationAgent extends BaseAgent {
   /** Register callback for outbound replies. */
   onReply(callback: ReplyCallback): void {
     this._onReply = callback;
-  }
-
-  /** Register callback for spawning child agents. */
-  onSpawnAgent(callback: SpawnAgentCallback): void {
-    this._onSpawnAgent = callback;
   }
 
   /** Send an inbound message to this conversation agent. */
@@ -171,6 +178,11 @@ export abstract class ConversationAgent extends BaseAgent {
             await this._think(ti.channel);
             break;
           }
+          case "task_notify": {
+            const ni = item as { kind: "task_notify"; notification: TaskNotificationPayload };
+            await this._handleTaskNotify(ni.notification);
+            break;
+          }
           default:
             await this.onCustomQueueItem(item);
             break;
@@ -199,8 +211,24 @@ export abstract class ConversationAgent extends BaseAgent {
   protected async _handleMessage(message: InboundMessage): Promise<void> {
     this.lastChannel = message.channel;
 
+    // Sanitize input — strip control characters that could be used for prompt injection
+    const text = sanitizeForPrompt(message.text.trim());
+
+    // Extract imageRefs from metadata (e.g. subagent/worker notifications)
+    if (message.metadata?.imageRefs) {
+      const refs = message.metadata.imageRefs as Array<{ id: string; mimeType: string }>;
+      if (refs.length > 0) {
+        const existing = message.images ?? [];
+        message.images = [...existing, ...refs.map(ref => ({ id: ref.id, mimeType: ref.mimeType }))];
+      }
+    }
+
+    // Channel metadata for LLM visibility
+    const channelMeta = formatChannelMeta(message.channel);
+    const content = channelMeta ? `${channelMeta}\n${text}` : text;
+
     // Add user message to session
-    const userMsg: Message = { role: "user", content: message.text };
+    const userMsg: Message = { role: "user", content };
     if (message.images?.length) userMsg.images = message.images;
     this.sessionMessages.push(userMsg);
     await this.sessionStore.append(userMsg, { channel: message.channel });
@@ -233,6 +261,52 @@ export abstract class ConversationAgent extends BaseAgent {
     // Trigger thinking to process the result
     await this._think(this.lastChannel);
   }
+
+  /**
+   * Handle a task notification (completed, failed, or progress update).
+   * Formats the notification text, injects into session, and triggers thinking.
+   * Subclasses override onTaskNotificationHandled() for tick management.
+   */
+  protected async _handleTaskNotify(notification: TaskNotificationPayload): Promise<void> {
+    let resultText: string;
+    if (notification.type === "failed") {
+      resultText = `[Task ${notification.taskId} failed]\nError: ${notification.error}`;
+    } else if (notification.type === "notify") {
+      resultText = `[Task ${notification.taskId} update]\n${notification.message}`;
+    } else {
+      resultText = `[Task ${notification.taskId} completed]\nResult: ${JSON.stringify(notification.result)}`;
+    }
+
+    const systemMsg: Message = { role: "user", content: resultText };
+
+    // Attach image refs from notification
+    const imageRefs = (notification.type === "completed" || notification.type === "notify")
+      ? notification.imageRefs
+      : undefined;
+    if (imageRefs?.length) {
+      systemMsg.images = imageRefs.map(ref => ({ id: ref.id, mimeType: ref.mimeType }));
+    }
+
+    this.sessionMessages.push(systemMsg);
+    await this.sessionStore.append(systemMsg, {
+      type: "task_notify",
+      taskId: notification.taskId,
+    });
+
+    const lastChannel = this.lastChannel;
+    if (lastChannel) {
+      this.pushQueue({ kind: "think", channel: lastChannel } as QueueItem);
+    }
+
+    // Hook for subclass tick management
+    await this.onTaskNotificationHandled(notification);
+  }
+
+  /**
+   * Hook called after task notification is handled.
+   * Subclasses override for tick management (e.g. checkShouldStop).
+   */
+  protected async onTaskNotificationHandled(_notification: TaskNotificationPayload): Promise<void> {}
 
   /**
    * Run thinking via processStep with a completion Promise.
@@ -272,9 +346,8 @@ export abstract class ConversationAgent extends BaseAgent {
     if (tc.name === "reply") {
       return this._interceptReply(tc);
     }
-    if (tc.name === "spawn_task" || tc.name === "spawn_subagent") {
-      return this._interceptSpawn(tc);
-    }
+    // spawn_task and spawn_subagent go through the tool executor
+    // (they use ToolContext.taskRegistry and SubAgentManager respectively).
     // Everything else: normal execution
     return { action: "execute" };
   }
@@ -307,37 +380,6 @@ export abstract class ConversationAgent extends BaseAgent {
         toolCallId: tc.id,
         content: JSON.stringify({ delivered: true }),
       },
-    };
-  }
-
-  private _interceptSpawn(tc: ToolCall): ToolCallInterceptResult {
-    if (!this._onSpawnAgent) {
-      return {
-        action: "skip",
-        result: {
-          toolCallId: tc.id,
-          content: JSON.stringify({ error: "Agent spawning not configured" }),
-        },
-      };
-    }
-
-    const kind = tc.name === "spawn_subagent" ? "orchestrator" : "execution";
-    const childId = this._onSpawnAgent(kind, tc.arguments as Record<string, unknown>);
-
-    const pendingWork: PendingWork = {
-      id: childId,
-      kind: "child_agent",
-      description: (tc.arguments as Record<string, unknown>).description as string ?? tc.name,
-      dispatchedAt: Date.now(),
-    };
-
-    return {
-      action: "intercept",
-      result: {
-        toolCallId: tc.id,
-        content: JSON.stringify({ childId, status: "spawned" }),
-      },
-      pendingWork,
     };
   }
 
@@ -409,4 +451,15 @@ export abstract class ConversationAgent extends BaseAgent {
     // Cleanup
     this.removeTaskState(taskId);
   }
+}
+
+// ── Helpers ──────────────────────────────────────────
+
+/**
+ * Format channel metadata as a prefix line for LLM visibility.
+ * Includes timestamp, channel type, ID, user, and thread info.
+ */
+export function formatChannelMeta(channel: ChannelInfo): string {
+  const now = formatTimestamp(Date.now());
+  return `[${now} | channel: ${channel.type} | id: ${channel.channelId}${channel.userId ? ` | user: ${channel.userId}` : ""}${channel.replyTo ? ` | thread: ${channel.replyTo}` : ""}]`;
 }

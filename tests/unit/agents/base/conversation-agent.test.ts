@@ -134,7 +134,7 @@ describe("ConversationAgent", () => {
       const msgs = agent.getSessionMessages();
       expect(msgs.length).toBeGreaterThanOrEqual(1);
       expect(msgs[0]!.role).toBe("user");
-      expect(msgs[0]!.content).toBe("hi there");
+      expect(msgs[0]!.content).toContain("hi there");
 
       // LLM should have been called
       expect(generateMock).toHaveBeenCalled();
@@ -246,96 +246,6 @@ describe("ConversationAgent", () => {
     });
   });
 
-  describe("onSpawnAgent callback is called when LLM calls spawn_task", () => {
-    test("spawn_task tool triggers onSpawnAgent callback", async () => {
-      let callIndex = 0;
-      const model = createMockModel(
-        mock(async () => {
-          callIndex++;
-          if (callIndex === 1) {
-            return {
-              text: "",
-              finishReason: "tool_calls" as const,
-              toolCalls: [
-                {
-                  id: "tc-spawn-1",
-                  name: "spawn_task",
-                  arguments: { description: "do something" },
-                },
-              ],
-              usage: { promptTokens: 10, completionTokens: 5 },
-            };
-          }
-          return {
-            text: "task spawned",
-            finishReason: "stop" as const,
-            usage: { promptTokens: 10, completionTokens: 5 },
-          };
-        }),
-      );
-
-      const agent = new TestConversationAgent(createTestDeps({ model }));
-      await agent.start();
-
-      const spawnCb = mock((_kind: any, _config: any) => "child-42");
-      agent.onSpawnAgent(spawnCb);
-
-      agent.send(makeInboundMessage("run a task"));
-
-      await new Promise((r) => setTimeout(r, 50));
-
-      expect(spawnCb).toHaveBeenCalledTimes(1);
-      const [kind, config] = spawnCb.mock.calls[0]!;
-      expect(kind).toBe("execution");
-      expect(config.description).toBe("do something");
-
-      await agent.stop();
-    });
-
-    test("spawn_subagent tool uses orchestrator kind", async () => {
-      let callIndex = 0;
-      const model = createMockModel(
-        mock(async () => {
-          callIndex++;
-          if (callIndex === 1) {
-            return {
-              text: "",
-              finishReason: "tool_calls" as const,
-              toolCalls: [
-                {
-                  id: "tc-spawn-2",
-                  name: "spawn_subagent",
-                  arguments: { description: "orchestrate" },
-                },
-              ],
-              usage: { promptTokens: 10, completionTokens: 5 },
-            };
-          }
-          return {
-            text: "done",
-            finishReason: "stop" as const,
-            usage: { promptTokens: 10, completionTokens: 5 },
-          };
-        }),
-      );
-
-      const agent = new TestConversationAgent(createTestDeps({ model }));
-      await agent.start();
-
-      const spawnCb = mock((_kind: any, _config: any) => "child-43");
-      agent.onSpawnAgent(spawnCb);
-
-      agent.send(makeInboundMessage("orchestrate something"));
-
-      await new Promise((r) => setTimeout(r, 50));
-
-      expect(spawnCb).toHaveBeenCalled();
-      expect(spawnCb.mock.calls[0]![0]).toBe("orchestrator");
-
-      await agent.stop();
-    });
-  });
-
   describe("childComplete() injects result and triggers thinking", () => {
     test("childComplete() adds system message and runs thinking", async () => {
       const generateMock = mock(async () => ({
@@ -436,7 +346,7 @@ describe("ConversationAgent", () => {
       // Should have: user message + assistant response
       expect(msgs.length).toBeGreaterThanOrEqual(2);
       expect(msgs[0]!.role).toBe("user");
-      expect(msgs[0]!.content).toBe("trigger thinking");
+      expect(msgs[0]!.content).toContain("trigger thinking");
       // The assistant message is appended by processStep
       const assistantMsg = msgs.find((m) => m.role === "assistant");
       expect(assistantMsg).toBeDefined();
@@ -713,7 +623,7 @@ describe("ConversationAgent", () => {
 
       // Session should have both user and assistant messages
       const msgs = agent.getSessionMessages();
-      expect(msgs.some((m) => m.role === "user" && m.content === "complete me")).toBe(true);
+      expect(msgs.some((m) => m.role === "user" && m.content.includes("complete me"))).toBe(true);
       expect(msgs.some((m) => m.role === "assistant" && m.content === "final answer")).toBe(true);
 
       await agent.stop();

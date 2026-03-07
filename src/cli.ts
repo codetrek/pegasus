@@ -65,13 +65,13 @@ export async function startCLI(): Promise<void> {
     const commands = buildTelegramCommands(app.mainAgent.skills.listUserInvocable());
     const telegramAdapter = new TelegramAdapter(telegramConfig.token, storeImageFn, commands);
     app.registerAdapter(telegramAdapter);
-    await telegramAdapter.start({ send: (msg) => app.mainAgent.send(msg) });
+    await telegramAdapter.start({ send: (msg) => app.routeMessage(msg) });
     logger.info({ commandCount: commands.length }, "telegram_adapter_started");
   }
 
   printBanner(persona.name, persona.role);
 
-  await cliAdapter.start({ send: (msg) => app.mainAgent.send(msg) });
+  await cliAdapter.start({ send: (msg) => app.routeMessage(msg) });
 }
 
 // Entry point: run CLI when this file is executed directly

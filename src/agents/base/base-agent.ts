@@ -26,6 +26,8 @@ import { ToolRegistry } from "../../tools/registry.ts";
 import { ToolExecutor } from "../../tools/executor.ts";
 import type { ToolCall, ToolDefinition } from "../../models/tool.ts";
 import type { ToolResult, ToolContext } from "../../tools/types.ts";
+import type { ImageManager } from "../../media/image-manager.ts";
+import { hydrateImages } from "../../media/image-prune.ts";
 import {
   AgentStateManager,
   type PendingWork,
@@ -36,8 +38,10 @@ import { createTaskState, type TaskExecutionState, type CreateTaskStateOptions }
 import { getLogger } from "../../infra/logger.ts";
 import { createTokenCounter, type TokenCounter } from "../../infra/token-counter.ts";
 import { SessionStore } from "../../session/store.ts";
+import { formatToolTimestamp } from "../../infra/time.ts";
 import {
   computeTokenBudget,
+  truncateToolResult,
   summarizeMessages,
   isContextOverflowError,
   TASK_COMPACT_THRESHOLD,
@@ -70,6 +74,10 @@ export interface BaseAgentDeps {
   contextWindow?: number;
   /** Model limits cache for token budget computation. */
   modelLimitsCache?: ModelLimitsCache;
+  /** Optional ImageManager for vision support — enables image hydration in beforeLLMCall(). */
+  imageManager?: ImageManager | null;
+  /** How many recent turns to hydrate images for. Default: 5. */
+  visionKeepLastNTurns?: number;
 }
 
 // ── Helpers ──────────────────────────────────────────
@@ -133,6 +141,12 @@ export abstract class BaseAgent {
   /** Optional storeImage callback injected into ToolContext for all tool executions. */
   private _storeImage?: ToolContext["storeImage"];
 
+  /** Optional ImageManager for vision support. */
+  protected imageManager?: ImageManager | null;
+
+  /** How many recent turns to hydrate images for. */
+  private _visionKeepLastNTurns: number;
+
   /** Per-task execution state for event-driven processStep engine. */
   protected taskStates = new Map<string, TaskExecutionState>();
 
@@ -150,6 +164,8 @@ export abstract class BaseAgent {
     this.stateManager = new AgentStateManager();
     this.maxIterations = deps.maxIterations ?? 25;
     this._storeImage = deps.storeImage;
+    this.imageManager = deps.imageManager;
+    this._visionKeepLastNTurns = deps.visionKeepLastNTurns ?? 5;
     this.sessionStore = new SessionStore(deps.sessionDir);
     this.contextWindow = deps.contextWindow;
     this.modelLimitsCache = deps.modelLimitsCache;
@@ -278,6 +294,28 @@ export abstract class BaseAgent {
   /** Called during stop(). Subclasses can do async cleanup. */
   protected async onStop(): Promise<void> {}
 
+  /**
+   * Build a ToolContext for tool execution. Subclasses override to inject
+   * rich context (memory paths, callbacks, managers) for their tool set.
+   *
+   * Default: minimal context with taskId + storeImage.
+   */
+  protected buildToolContext(taskId: string): ToolContext {
+    const ctx: ToolContext = { taskId };
+    if (this._storeImage) ctx.storeImage = this._storeImage;
+    return ctx;
+  }
+
+  /**
+   * Get the maximum chars allowed for a tool result. Subclasses override
+   * to compute from their model's context window.
+   *
+   * Default: no truncation (returns Infinity).
+   */
+  protected getMaxToolResultChars(): number {
+    return Infinity;
+  }
+
   // ═══════════════════════════════════════════════════
   // Event-Driven processStep Engine
   // ═══════════════════════════════════════════════════
@@ -346,7 +384,13 @@ export abstract class BaseAgent {
       // Create collector, dispatch tools in parallel (fire-and-forget)
       const collector = new ToolCallCollector(
         result.toolCalls.length,
-        () => { this._onAllToolsDone(taskId); },
+        () => {
+          this._onAllToolsDone(taskId).catch((err) => {
+            logger.error({ err, taskId, agentId: this.agentId }, "all_tools_done_error");
+            this.stateManager.markIdle();
+            this.onTaskComplete(taskId, "", "error").catch(() => {});
+          });
+        },
       );
       state.activeCollector = collector;
 
@@ -406,6 +450,7 @@ export abstract class BaseAgent {
 
   /**
    * Execute a single tool call asynchronously. Fire-and-forget.
+   * Includes result formatting: string coercion, timestamp prefix, and truncation.
    */
   private _executeToolAsync(
     taskId: string,
@@ -437,14 +482,24 @@ export abstract class BaseAgent {
           }
           break;
         case "execute": {
-          const ctx: ToolContext = { taskId };
-          if (this._storeImage) ctx.storeImage = this._storeImage;
+          const ctx = this.buildToolContext(taskId);
           const result = await this.toolExecutor.execute(
             tc.name,
             tc.arguments,
             ctx,
           );
           toolResult = formatToolResult(tc.id, tc.name, result);
+
+          // Apply result formatting: timestamp prefix + truncation
+          const maxChars = this.getMaxToolResultChars();
+          if (maxChars < Infinity && toolResult.content.length > maxChars) {
+            toolResult.content = truncateToolResult(toolResult.content, maxChars);
+          }
+          const tsPrefix = formatToolTimestamp(
+            result.completedAt ?? Date.now(),
+            result.durationMs,
+          );
+          toolResult.content = `${tsPrefix}\n${toolResult.content}`;
           break;
         }
       }
@@ -466,8 +521,45 @@ export abstract class BaseAgent {
     finishReason: "complete" | "max_iterations" | "interrupted" | "error",
   ): Promise<void>;
 
-  /** Hook called before each LLM call. Checks token budget and triggers compaction if needed. */
+  /**
+   * Hook called before each LLM call.
+   * Hydrates images and checks token budget for compaction.
+   * Subclasses override individual hooks (hydrateImagesForLLM, compactIfNeeded)
+   * rather than this method.
+   */
   protected async beforeLLMCall(taskId: string): Promise<void> {
+    await this.hydrateImagesForLLM(taskId);
+    await this.compactIfNeeded(taskId);
+  }
+
+  /**
+   * Hydrate image references in task messages for LLM consumption.
+   * Uses the ImageManager (with built-in caching) injected via BaseAgentDeps.
+   */
+  protected async hydrateImagesForLLM(taskId: string): Promise<void> {
+    if (!this.imageManager) return;
+    const state = this.taskStates.get(taskId);
+    if (!state) return;
+
+    const imgMgr = this.imageManager;
+
+    // IMPORTANT: mutate in-place to preserve array reference
+    // (state.messages may be the same array as sessionMessages via _think).
+    const hydrated = await hydrateImages(
+      state.messages,
+      this._visionKeepLastNTurns,
+      (id: string) => imgMgr.read(id),
+    );
+    state.messages.length = 0;
+    state.messages.push(...hydrated);
+  }
+
+  /**
+   * Check token budget and trigger compaction if messages exceed threshold.
+   * Uses computeBudgetOptions() for budget parameters — subclasses override
+   * that hook for custom model/threshold, not this method.
+   */
+  protected async compactIfNeeded(taskId: string): Promise<void> {
     const state = this.taskStates.get(taskId);
     if (!state || state.messages.length < 8) return;
 
@@ -478,23 +570,32 @@ export abstract class BaseAgent {
       estimatedTokens = state.lastPromptTokens;
     } else {
       const allText = state.messages.map((m) => {
-        let text = m.content;
+        let text = typeof m.content === "string" ? m.content : String(m.content);
         if (m.toolCalls) text += JSON.stringify(m.toolCalls);
         return text;
       }).join("\n");
       estimatedTokens = await this.tokenCounter.count(allText);
     }
 
-    const budget = computeTokenBudget({
-      modelId: this.model.modelId,
-      configContextWindow: this.contextWindow,
-      compactThreshold: TASK_COMPACT_THRESHOLD,
-      modelLimitsCache: this.modelLimitsCache,
-    });
+    const budget = computeTokenBudget(this.computeBudgetOptions());
 
     if (estimatedTokens < budget.compactTrigger) return;
 
     await this._compactState(taskId);
+  }
+
+  /**
+   * Compute budget options for compaction threshold.
+   * Subclasses override to use ModelRegistry for dynamic model resolution,
+   * provider-aware caching, and configurable thresholds.
+   */
+  protected computeBudgetOptions(): import("../../context/index.ts").BudgetOptions {
+    return {
+      modelId: this.model.modelId,
+      configContextWindow: this.contextWindow,
+      compactThreshold: TASK_COMPACT_THRESHOLD,
+      modelLimitsCache: this.modelLimitsCache,
+    };
   }
 
   /**
@@ -540,10 +641,13 @@ export abstract class BaseAgent {
   /**
    * Compact the message history for a task: summarize, archive, and reload.
    * Falls back to mechanical summary if LLM summarization fails.
+   * After compaction, calls onCompacted() hook for post-compact actions.
    */
-  private async _compactState(taskId: string): Promise<void> {
+  protected async _compactState(taskId: string): Promise<void> {
     const state = this.taskStates.get(taskId);
     if (!state) return;
+
+    const preCompactMessages = [...state.messages];
 
     let summary: string;
     try {
@@ -558,13 +662,29 @@ export abstract class BaseAgent {
     }
 
     await this.sessionStore.compact(summary);
-    state.messages = await this.sessionStore.load();
+    // Mutate in-place to preserve array reference
+    // (state.messages may be the same array as sessionMessages via _think).
+    const reloaded = await this.sessionStore.load();
+    state.messages.length = 0;
+    state.messages.push(...reloaded);
+    this.imageManager?.clearCache();
 
     logger.info(
       { taskId, agentId: this.agentId },
       "state_compacted",
     );
+
+    await this.onCompacted(preCompactMessages);
   }
+
+  /**
+   * Hook called after compaction completes.
+   * Subclasses override for post-compact actions: memory re-injection,
+   * cache clearing, reflection, etc.
+   *
+   * @param preCompactMessages - snapshot of messages before compaction
+   */
+  protected async onCompacted(_preCompactMessages: Message[]): Promise<void> {}
 }
 
 // ── Private Helpers ──────────────────────────────────
