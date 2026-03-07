@@ -1132,7 +1132,7 @@ describe("initSubAgent", () => {
 
     // Create mock that resolves with success
     const successAgent = createMockOrchestrator();
-    successAgent.run = mock(async () => ({ success: true, result: "All done!", llmCallCount: 1, toolCallCount: 0 }));
+    successAgent.run = mock(async () => ({ success: true, result: "All done!", llmCallCount: 1 }));
     cleanupOrchestrator();
     cleanupOrchestrator = _setOrchestratorFactoryForTest((deps) => {
       lastOrchestratorDeps = deps;
@@ -1173,7 +1173,6 @@ describe("initSubAgent", () => {
       success: true,
       result: "Screenshot captured",
       llmCallCount: 1,
-      toolCallCount: 0,
       imageRefs: [{ id: "img123", mimeType: "image/png" }],
     }));
     cleanupOrchestrator();
@@ -1217,7 +1216,6 @@ describe("initSubAgent", () => {
       success: true,
       result: { data: 42, summary: "analysis complete" },
       llmCallCount: 1,
-      toolCallCount: 0,
     }));
     cleanupOrchestrator();
     cleanupOrchestrator = _setOrchestratorFactoryForTest((deps) => {
@@ -1260,7 +1258,6 @@ describe("initSubAgent", () => {
       success: false,
       error: "timeout exceeded",
       llmCallCount: 1,
-      toolCallCount: 0,
     }));
     cleanupOrchestrator();
     cleanupOrchestrator = _setOrchestratorFactoryForTest((deps) => {

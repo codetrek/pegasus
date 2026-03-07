@@ -12,7 +12,7 @@
  *   4. Concurrency control (event queue for BUSY state)
  *   5. Session persistence (SessionStore + sessionMessages)
  *   6. Context compaction (beforeLLMCall + onLLMError overflow recovery)
- *   7. Queue processing from ConversationAgent pattern
+ *   7. Queue-based message processing (send → queue → _handleMessage → _think)
  *   8. One-shot run() execution (returns Promise<AgentResult>)
  *   9. Memory injection: auto-injects memory index on fresh start + after compaction
  *  10. Reflection: auto-runs ReflectionOrchestrator after compaction
@@ -141,8 +141,6 @@ export interface AgentResult {
   error?: string;
   /** Number of LLM calls made. */
   llmCallCount: number;
-  /** Number of tools executed. */
-  toolCallCount: number;
   /** Image refs collected from tool results during execution. */
   imageRefs?: Array<{ id: string; mimeType: string }>;
 }
@@ -326,27 +324,55 @@ export class Agent {
       }
     }
 
-    return new Promise<AgentResult>((resolve) => {
-      const state = this.createTaskExecutionState(this.agentId, messages, {
+    try {
+      await this._executeTask(this.agentId, messages, {
+        maxIterations: opts?.maxIterations,
+        persist: persistSession,
+      });
+    } catch (err) {
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+        llmCallCount: 0,
+      };
+    }
+    return this._lastResult!;
+  }
+
+  // ═══════════════════════════════════════════════════
+  // Core execution — shared by run() and _think()
+  // ═══════════════════════════════════════════════════
+
+  /**
+   * Execute a task to completion: create TaskState → processStep loop → resolve.
+   * Shared by run() (one-shot) and _think() (conversation).
+   *
+   * @param taskId - unique task identifier
+   * @param messages - message array (may be shared reference like sessionMessages)
+   * @param opts.maxIterations - override max iterations
+   * @param opts.persist - enable incremental session persistence via onMessagesAppended
+   */
+  private async _executeTask(
+    taskId: string,
+    messages: Message[],
+    opts?: { maxIterations?: number; persist?: boolean },
+  ): Promise<void> {
+    if (opts?.persist) {
+      this._persistingTasks.add(taskId);
+    }
+
+    return new Promise<void>((resolve, reject) => {
+      this.createTaskExecutionState(taskId, messages, {
         maxIterations: opts?.maxIterations ?? this.maxIterations,
         onComplete: () => {
-          this._persistingTasks.delete(this.agentId);
-          resolve(this._lastResult!);
+          this._persistingTasks.delete(taskId);
+          resolve();
         },
       });
 
-      // Enable incremental session persistence during processStep
-      if (persistSession) {
-        this._persistingTasks.add(this.agentId);
-      }
-
-      this.processStep(this.agentId).catch((err) => {
-        resolve({
-          success: false,
-          error: err instanceof Error ? err.message : String(err),
-          llmCallCount: state.iteration,
-          toolCallCount: 0,
-        });
+      this.processStep(taskId).catch((err) => {
+        this._persistingTasks.delete(taskId);
+        reject(err);
       });
     });
   }
@@ -713,7 +739,6 @@ export class Agent {
           : `Task ${finishReason}`
         : undefined,
       llmCallCount: state?.iteration ?? 0,
-      toolCallCount: 0,
       ...(imageRefs.length > 0 ? { imageRefs } : {}),
     };
 
@@ -985,8 +1010,7 @@ export class Agent {
     }
 
     // Channel metadata for LLM visibility
-    const channelMeta = formatChannelMeta(message.channel);
-    const content = channelMeta ? `${channelMeta}\n${text}` : text;
+    const content = `${formatChannelMeta(message.channel)}\n${text}`;
 
     // Add user message to session
     const userMsg: Message = { role: "user", content };
@@ -1044,29 +1068,11 @@ export class Agent {
   protected async onTaskNotificationHandled(_notification: TaskNotificationPayload): Promise<void> {}
 
   /**
-   * Run thinking via processStep with a completion Promise.
+   * Run thinking — delegates to _executeTask with session messages.
+   * Session persistence is always enabled for conversation mode.
    */
   protected async _think(_channel: ChannelInfo): Promise<void> {
-    const previousLength = this.sessionMessages.length;
-
-    // Create or reuse task state for the session
-    const completionPromise = new Promise<void>((resolve) => {
-      this.createTaskExecutionState("session", this.sessionMessages, {
-        maxIterations: this.maxIterations,
-        onComplete: resolve,
-      });
-    });
-
-    // Start processing (returns after first LLM call or tool dispatch)
-    await this.processStep("session");
-
-    // Wait for full cycle to complete (onTaskComplete resolves this)
-    await completionPromise;
-
-    // Persist new messages to session
-    for (let i = previousLength; i < this.sessionMessages.length; i++) {
-      await this.sessionStore.append(this.sessionMessages[i]!);
-    }
+    await this._executeTask("session", this.sessionMessages, { persist: true });
   }
 
   // ═══════════════════════════════════════════════════

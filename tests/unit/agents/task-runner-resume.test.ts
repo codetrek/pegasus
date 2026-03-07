@@ -202,7 +202,6 @@ describe("TaskRunner.resume", () => {
           success: true,
           result: "resumed result",
           llmCallCount: 1,
-          toolCallCount: 0,
         };
       };
 

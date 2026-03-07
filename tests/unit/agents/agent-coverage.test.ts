@@ -130,7 +130,6 @@ describe("Agent coverage", () => {
       expect(result.success).toBe(false);
       expect(result.error).toContain("beforeLLMCall exploded");
       expect(result.llmCallCount).toBe(0);
-      expect(result.toolCallCount).toBe(0);
     }, 10_000);
 
     it("should return success result on normal completion", async () => {
