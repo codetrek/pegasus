@@ -1,21 +1,16 @@
 /**
  * CLI — Interactive REPL for conversing with the Pegasus agent.
  *
- * Uses CLIAdapter for terminal interaction and optionally starts
- * TelegramAdapter when configured. Both adapters route through
- * PegasusApp's multi-channel adapter system.
+ * Uses CLIAdapter for terminal interaction. Telegram and other channel
+ * adapters are managed by PegasusApp internally.
  */
 import { PegasusApp } from "./pegasus-app.ts";
 import { loadPersona } from "./identity/persona.ts";
 import { setSettings } from "./infra/config.ts";
 import { loadSettings } from "./infra/config-loader.ts";
-import { getLogger, initLogger } from "./infra/logger.ts";
+import { initLogger } from "./infra/logger.ts";
 import { ModelRegistry } from "./infra/model-registry.ts";
 import { CLIAdapter } from "./channels/cli-adapter.ts";
-import { TelegramAdapter } from "./channels/telegram.ts";
-import { buildTelegramCommands } from "./channels/telegram-commands.ts";
-
-const logger = getLogger("cli");
 
 /** Print a styled banner. */
 function printBanner(personaName: string, personaRole: string) {
@@ -47,27 +42,17 @@ export async function startCLI(): Promise<void> {
 
   const app = new PegasusApp({ models, persona, settings });
 
-  // Get StoreImageFn for channel adapters (undefined when vision disabled)
-  const storeImageFn = app.getStoreImageFn();
-
   // Register CLI adapter
   const cliAdapter = new CLIAdapter(persona.name, async () => {
     await app.stop();
-  }, storeImageFn);
+  });
   app.registerAdapter(cliAdapter);
 
+  // Start PegasusApp — initializes all subsystems including Telegram
   await app.start();
 
-  // Start Telegram if configured
-  const telegramConfig = settings.channels?.telegram;
-  if (telegramConfig?.enabled && telegramConfig?.token) {
-    // Build / command menu from user-invocable skills
-    const commands = buildTelegramCommands(app.mainAgent.skills.listUserInvocable());
-    const telegramAdapter = new TelegramAdapter(telegramConfig.token, storeImageFn, commands);
-    app.registerAdapter(telegramAdapter);
-    await telegramAdapter.start({ send: (msg) => app.routeMessage(msg) });
-    logger.info({ commandCount: commands.length }, "telegram_adapter_started");
-  }
+  // Now ImageManager is initialized — inject storeImage into CLI adapter
+  cliAdapter.setStoreImage(app.getStoreImageFn());
 
   printBanner(persona.name, persona.role);
 
