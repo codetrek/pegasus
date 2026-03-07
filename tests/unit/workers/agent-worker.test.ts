@@ -1155,9 +1155,7 @@ describe("initSubAgent", () => {
     );
     expect(doneNotifies.length).toBe(1);
     expect((doneNotifies[0]!.message as any)?.text).toBe("All done!");
-
-    // Wait for setTimeout(handleShutdown, 100)
-    await new Promise(resolve => setTimeout(resolve, 200));
+    // afterEach already waits 200ms for handleShutdown — no extra sleep needed here
   }, 10_000);
 
   it("should send completed notification with imageRefs when run() succeeds with images", async () => {
@@ -1199,8 +1197,7 @@ describe("initSubAgent", () => {
     expect((doneNotifies[0]!.message as any)?.metadata?.imageRefs).toEqual([
       { id: "img123", mimeType: "image/png" },
     ]);
-
-    await new Promise(resolve => setTimeout(resolve, 200));
+    // afterEach already waits 200ms for handleShutdown — no extra sleep needed here
   }, 10_000);
 
   it("should JSON.stringify non-string result in completed notification", async () => {
@@ -1241,8 +1238,7 @@ describe("initSubAgent", () => {
     const text = (doneNotifies[0]!.message as any)?.text;
     expect(text).toContain('"data":42');
     expect(text).toContain('"summary":"analysis complete"');
-
-    await new Promise(resolve => setTimeout(resolve, 200));
+    // afterEach already waits 200ms for handleShutdown — no extra sleep needed here
   }, 10_000);
 
   it("should send failed notification when run() returns failure", async () => {
@@ -1281,8 +1277,7 @@ describe("initSubAgent", () => {
     );
     expect(failNotifies.length).toBe(1);
     expect((failNotifies[0]!.message as any)?.text).toBe("[Task failed: timeout exceeded]");
-
-    await new Promise(resolve => setTimeout(resolve, 200));
+    // afterEach already waits 200ms for handleShutdown — no extra sleep needed here
   }, 10_000);
 
   it("should set agentId to channelId in OrchestratorAgent deps", async () => {
@@ -1403,9 +1398,7 @@ describe("initSubAgent", () => {
     );
     expect(failNotifies.length).toBe(1);
     expect((failNotifies[0]!.message as any)?.text).toContain("LLM timed out");
-
-    // Wait for shutdown timeout
-    await new Promise(resolve => setTimeout(resolve, 200));
+    // afterEach already waits 200ms for handleShutdown — no extra sleep needed here
   }, 10_000);
 
   it("should send failed notification when run() rejects with non-Error value", async () => {
@@ -1442,9 +1435,7 @@ describe("initSubAgent", () => {
     );
     expect(failNotifies.length).toBe(1);
     expect((failNotifies[0]!.message as any)?.text).toContain("raw string error");
-
-    // Wait for shutdown timeout
-    await new Promise(resolve => setTimeout(resolve, 200));
+    // afterEach already waits 200ms for handleShutdown — no extra sleep needed here
   }, 10_000);
 
   it("should set storeImage in deps when vision is enabled", async () => {

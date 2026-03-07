@@ -232,7 +232,7 @@ describe("loginCodexDeviceCode", () => {
         return new Response(JSON.stringify({
           device_auth_id: "dev_auth_123",
           user_code: "ABCD-1234",
-          interval: 1,
+          interval: 0.05,
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
 
@@ -300,7 +300,7 @@ describe("loginCodexDeviceCode", () => {
         return new Response(JSON.stringify({
           device_auth_id: "dev_auth_123",
           user_code: "ABCD-1234",
-          interval: 1,
+          interval: 0.05,
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
 
@@ -338,7 +338,7 @@ describe("loginCodexDeviceCode", () => {
         return new Response(JSON.stringify({
           device_auth_id: "dev_auth_123",
           user_code: "ABCD-1234",
-          interval: 1,
+          interval: 0.05,
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
 
@@ -387,7 +387,7 @@ describe("loginCodexDeviceCode", () => {
         return new Response(JSON.stringify({
           device_auth_id: "dev_auth_123",
           user_code: "ABCD-1234",
-          interval: 1,
+          interval: 0.05,
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
 
@@ -489,7 +489,7 @@ describe("loginCodexDeviceCode", () => {
         return new Response(JSON.stringify({
           device_auth_id: "dev_auth_123",
           user_code: "ABCD-1234",
-          interval: 1,
+          interval: 0.05,
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
 
@@ -538,7 +538,7 @@ describe("loginCodexDeviceCode", () => {
         return new Response(JSON.stringify({
           device_auth_id: "dev_auth_123",
           user_code: "ABCD-1234",
-          interval: 1,
+          interval: 0.05,
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
 
@@ -570,7 +570,7 @@ describe("loginCodexDeviceCode", () => {
         return new Response(JSON.stringify({
           device_auth_id: "dev_auth_123",
           user_code: "ABCD-1234",
-          interval: 1,
+          interval: 0.05,
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
 
@@ -624,7 +624,7 @@ describe("loginCodexDeviceCode", () => {
         return new Response(JSON.stringify({
           device_auth_id: "dev_auth_123",
           user_code: "ABCD-1234",
-          interval: 1,
+          interval: 0.05,
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
 

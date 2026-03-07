@@ -86,7 +86,7 @@ function createDeps(overrides?: Partial<TaskRunnerDeps>): TaskRunnerDeps {
 }
 
 /** Wait for notifications to arrive (fire-and-forget needs a tick). */
-async function waitForNotifications(ms = 200): Promise<void> {
+async function waitForNotifications(ms = 50): Promise<void> {
   await new Promise((r) => setTimeout(r, ms));
 }
 
@@ -351,7 +351,7 @@ describe("TaskRunner", () => {
       const runner = new TaskRunner(createDeps({ model, onNotification }));
       runner.submit("do work", "user", "general", "Notify test");
 
-      await waitForNotifications(500);
+      await waitForNotifications(100);
 
       const notifyCall = notifications.find((n) => n.type === "notify");
       expect(notifyCall).toBeDefined();
@@ -396,7 +396,7 @@ describe("TaskRunner", () => {
         const runner = new TaskRunner(createDeps({ onNotification }));
         runner.submit("do stuff", "user", "general", "Failing task");
 
-        await waitForNotifications(500);
+        await waitForNotifications(100);
 
         // The .catch() branch should fire, producing a "failed" notification
         const failedCall = notifications.find((n) => n.type === "failed");
@@ -426,7 +426,7 @@ describe("TaskRunner", () => {
         const runner = new TaskRunner(createDeps({ onNotification }));
         runner.submit("do stuff", "user", "general", "String error task");
 
-        await waitForNotifications(500);
+        await waitForNotifications(100);
 
         const failedCall = notifications.find((n) => n.type === "failed");
         expect(failedCall).toBeDefined();
@@ -492,7 +492,7 @@ describe("TaskRunner", () => {
 
       runner.submit("run spy", "user", "general", "Spy task");
 
-      await waitForNotifications(500);
+      await waitForNotifications(100);
 
       expect(capturedContext).not.toBeNull();
       expect(capturedContext!.storeImage).toBe(mockStoreImage);
@@ -540,7 +540,7 @@ describe("TaskRunner", () => {
       runner.setAdditionalTools([spyTool]);
       runner.submit("run spy", "user", "general", "No image task");
 
-      await waitForNotifications(500);
+      await waitForNotifications(100);
 
       expect(capturedContext).not.toBeNull();
       expect(capturedContext!.storeImage).toBeUndefined();
@@ -599,7 +599,7 @@ describe("TaskRunner", () => {
       runner.setAdditionalTools([imageTool]);
       runner.submit("take screenshot", "user", "general", "Image task");
 
-      await waitForNotifications(500);
+      await waitForNotifications(100);
 
       const completed = notifications.find((n) => n.type === "completed");
       expect(completed).toBeDefined();
@@ -623,7 +623,7 @@ describe("TaskRunner", () => {
       const runner = new TaskRunner(createDeps({ onNotification }));
       runner.submit("no images", "user", "general", "Plain task");
 
-      await waitForNotifications(500);
+      await waitForNotifications(100);
 
       const completed = notifications.find((n) => n.type === "completed");
       expect(completed).toBeDefined();

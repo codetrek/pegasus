@@ -101,11 +101,13 @@ describe("DeviceCodeAuthError", () => {
 describe("executeDeviceCodeFlow", () => {
   let originalFetch: typeof globalThis.fetch;
   let originalConsoleLog: typeof console.log;
+  let originalSetTimeout: typeof globalThis.setTimeout;
   let consoleLogCalls: unknown[][];
 
   beforeEach(() => {
     originalFetch = globalThis.fetch;
     originalConsoleLog = console.log;
+    originalSetTimeout = globalThis.setTimeout;
     consoleLogCalls = [];
     console.log = mock((...args: unknown[]) => {
       consoleLogCalls.push(args);
@@ -115,6 +117,7 @@ describe("executeDeviceCodeFlow", () => {
   afterEach(() => {
     globalThis.fetch = originalFetch;
     console.log = originalConsoleLog;
+    globalThis.setTimeout = originalSetTimeout;
   });
 
   // ── Successful flow ──
@@ -156,11 +159,17 @@ describe("executeDeviceCodeFlow", () => {
   // ── slow_down handling ──
 
   it("should increase poll interval on slow_down response", async () => {
-    // timeoutSeconds must be long enough to accommodate 5s backoff from slow_down
     const config = makeConfig({ pollIntervalSeconds: 0.05, timeoutSeconds: 10 });
     const deviceResp = makeDeviceAuthResponse();
-    const timestamps: number[] = [];
     let tokenCallCount = 0;
+
+    // Mock setTimeout to fire immediately but capture the requested delays.
+    // This avoids the real 5+ second wait from the slow_down interval increase.
+    const sleepDelays: number[] = [];
+    globalThis.setTimeout = ((fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
+      if (ms !== undefined) sleepDelays.push(ms);
+      return originalSetTimeout(fn, 0, ...args);
+    }) as unknown as typeof globalThis.setTimeout;
 
     globalThis.fetch = asFetch(mock(async (input: string | URL | Request) => {
       const url = extractUrl(input);
@@ -171,7 +180,6 @@ describe("executeDeviceCodeFlow", () => {
 
       if (url === config.tokenUrl) {
         tokenCallCount++;
-        timestamps.push(Date.now());
 
         if (tokenCallCount === 1) {
           // First call: slow_down → interval should increase by 5000ms
@@ -191,12 +199,13 @@ describe("executeDeviceCodeFlow", () => {
     expect(token.accessToken).toBe("access_tok_xyz");
     expect(tokenCallCount).toBe(2);
 
-    // After slow_down, the interval should have been increased by 5000ms.
-    // The gap between call 1 and 2 should be >= 5000ms.
-    // We allow some tolerance since timers aren't perfectly precise.
-    const gap = timestamps[1]! - timestamps[0]!;
-    expect(gap).toBeGreaterThanOrEqual(4900);
-  }, { timeout: 15_000 });
+    // The first sleep should use the initial interval (50ms).
+    // After slow_down, the interval increases by 5000ms, so the second sleep
+    // should be 5050ms. Verify via the captured setTimeout delay values.
+    expect(sleepDelays.length).toBeGreaterThanOrEqual(2);
+    expect(sleepDelays[0]).toBe(50);   // initial: 0.05s * 1000
+    expect(sleepDelays[1]).toBe(5050); // after slow_down: 50 + 5000
+  }, { timeout: 10_000 });
 
   // ── access_denied ──
 
