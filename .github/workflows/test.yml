@@ -31,8 +31,20 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+
       - name: Install Playwright Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: bunx playwright install chromium --with-deps
+
+      - name: Install Playwright system deps (cached browser)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: bunx playwright install-deps chromium
 
       - name: Run typecheck
         run: bun run typecheck
@@ -40,7 +52,7 @@ jobs:
       - name: Run tests with coverage
         id: coverage
         run: |
-          OUTPUT=$(bun run coverage 2>&1 | tee /dev/stderr)
+          OUTPUT=$(PEGASUS_LOG_LEVEL=silent bun test --coverage --coverage-reporter=text --coverage-reporter=lcov tests/ 2>&1 | tee /dev/stderr)
           COVERAGE=$(echo "$OUTPUT" | grep "All files" | awk '{print $4}' | tr -d '%')
           echo "percentage=$COVERAGE" >> $GITHUB_OUTPUT
           echo "Line Coverage: $COVERAGE%"
@@ -68,3 +80,4 @@ jobs:
           name: coverage-report
           path: coverage/
           retention-days: 7
+          if-no-files-found: ignore
