@@ -1,7 +1,7 @@
 /**
  * MainAgent — persistent LLM conversation partner.
  *
- * Extends ConversationAgent to inherit queue processing, session management,
+ * Extends Agent to inherit queue processing, session management,
  * reply routing, and the processStep-based thinking engine. Adds task/subagent
  * delegation, skills, MCP integration, memory, vision, and compaction.
  *
@@ -10,11 +10,10 @@
  *
  * Key overrides:
  *   - buildToolContext()      → rich ToolContext with all dependencies
- *   - compactIfNeeded()       → session compaction using ModelRegistry
- *   - onLLMError()            → overflow recovery with session reload
  *   - onStart()/onStop()      → session lifecycle (load, memory, prompt; tick + drain)
- *   - buildSystemPrompt()     → cached system prompt with skills/projects/etc.
  *   - getMaxToolResultChars() → truncation budget from model context window
+ *
+ * Uses AgentCallbacks for: computeBudgetOptions, onCompacted, onTaskNotificationHandled.
  */
 
 import type { Message } from "../infra/llm-types.ts";
@@ -40,7 +39,7 @@ import { OwnerStore } from "../security/owner-store.ts";
 import { TickManager } from "./tick-manager.ts";
 import { AuthManager } from "./auth-manager.ts";
 import { ReflectionOrchestrator } from "./reflection-orchestrator.ts";
-import { ConversationAgent, type QueueItem } from "./base/conversation-agent.ts";
+import { Agent, type QueueItem, type TaskNotificationPayload } from "./agent.ts";
 import { EventBus } from "../events/bus.ts";
 
 // Main Agent's curated tool set
@@ -86,7 +85,7 @@ export interface MainAgentDeps {
   injected: InjectedSubsystems;
 }
 
-export class MainAgent extends ConversationAgent {
+export class MainAgent extends Agent {
   private models: ModelRegistry;
   private settings: Settings;
   private taskRunner!: TaskRunner;
@@ -120,6 +119,7 @@ export class MainAgent extends ConversationAgent {
       model: defaultModel,
       toolRegistry,
       persona: deps.persona,
+      systemPrompt: "", // overridden by buildSystemPrompt()
       sessionDir: mainStorePaths.session,
       eventBus: new EventBus({ keepHistory: true }),
       contextWindow: settings.llm.contextWindow,
@@ -300,7 +300,7 @@ export class MainAgent extends ConversationAgent {
   // Task notification tick management
   // ═══════════════════════════════════════════════════
 
-  protected override async onTaskNotificationHandled(notification: import("./base/conversation-agent.ts").TaskNotificationPayload): Promise<void> {
+  protected override async onTaskNotificationHandled(notification: TaskNotificationPayload): Promise<void> {
     // Stop tick if no more active work (completed/failed, not progress updates)
     if (notification.type !== "notify") {
       this.tickManager.checkShouldStop();
@@ -463,7 +463,7 @@ export class MainAgent extends ConversationAgent {
 
     return buildSystemPrompt({
       mode: "main",
-      persona: this.persona,
+      persona: this.persona!,
       aiTaskMetadata: aiTaskMetadata || undefined,
       skillMetadata: skillMetadata || undefined,
       projectMetadata: projectMetadata || undefined,

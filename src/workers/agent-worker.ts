@@ -21,7 +21,7 @@ import { AITaskTypeRegistry } from "../aitask-types/registry.ts";
 import { loadAITaskTypeDefinitions } from "../aitask-types/loader.ts";
 import { OrchestratorAgent } from "../agents/base/orchestrator-agent.ts";
 import type { OrchestratorAgentDeps, ExecutionSpawnConfig, ExecutionHandle, OrchestratorNotification } from "../agents/base/orchestrator-agent.ts";
-import { ExecutionAgent } from "../agents/base/execution-agent.ts";
+import { Agent } from "../agents/agent.ts";
 import { EventBus } from "../events/bus.ts";
 import { ToolRegistry } from "../tools/registry.ts";
 import { subAgentTools, allTaskTools } from "../tools/builtins/index.ts";
@@ -302,7 +302,7 @@ export async function initSubAgent(config: SubAgentConfig): Promise<void> {
   // 7. Build storage paths
   const storePaths = buildSubAgentPaths(subagentDir);
 
-  // 8. Build onSpawnExecution callback that creates child ExecutionAgents
+  // 8. Build onSpawnExecution callback that creates child Agents
   const onSpawnExecution = (spawnConfig: ExecutionSpawnConfig): ExecutionHandle => {
     const taskId = shortId();
     const childToolRegistry = new ToolRegistry();
@@ -311,20 +311,26 @@ export async function initSubAgent(config: SubAgentConfig): Promise<void> {
     const dateStr = new Date().toISOString().slice(0, 10);
     const sessionDir = path.join(storePaths.tasks, dateStr, taskId);
 
-    const agent = new ExecutionAgent({
+    const childSystemPrompt = [
+      "You are an execution agent working on a specific task.",
+      `Task: ${spawnConfig.description}`,
+      "",
+      "Complete the task using your available tools. Be efficient and focused.",
+      "When done, provide your final result as text output.",
+    ].join("\n");
+
+    const agent = new Agent({
       agentId: taskId,
       model: proxyModel!,
       toolRegistry: childToolRegistry,
       eventBus,
-      input: spawnConfig.input,
-      description: spawnConfig.description,
-      mode: "worker",
+      systemPrompt: childSystemPrompt,
       sessionDir,
       storeImage,
       contextWindow: settings.llm.contextWindow,
     });
 
-    const promise = agent.run().then((execResult) => ({
+    const promise = agent.run(spawnConfig.input, { persistSession: true }).then((execResult) => ({
       success: execResult.success,
       result: execResult.result,
       error: execResult.error,

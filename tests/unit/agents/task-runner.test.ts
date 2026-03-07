@@ -1,5 +1,5 @@
 /**
- * Tests for TaskRunner — manages ExecutionAgent instances for AITask execution.
+ * Tests for TaskRunner — manages Agent instances for AITask execution.
  *
  * Exercises:
  *   - submit returns taskId and increments activeCount
@@ -11,7 +11,7 @@
  *   - listAll returns all active tasks
  *   - per-type tool registry uses allTaskTools by default
  *   - concurrent tasks — submit 2 tasks, both complete independently
- *   - onNotify callback forwarded from ExecutionAgent
+ *   - onNotify callback forwarded from Agent
  *   - setAdditionalTools clears tool registry cache
  *   - run() promise rejection triggers failed notification (.catch branch)
  */
@@ -22,7 +22,7 @@ import type { TaskNotification } from "../../../src/agents/task-runner.ts";
 import type { LanguageModel } from "../../../src/infra/llm-types.ts";
 import { AITaskTypeRegistry } from "../../../src/aitask-types/registry.ts";
 import { allTaskTools } from "../../../src/tools/builtins/index.ts";
-import { ExecutionAgent } from "../../../src/agents/base/execution-agent.ts";
+import { Agent } from "../../../src/agents/agent.ts";
 import type { Tool, ToolContext, ToolResult } from "../../../src/tools/types.ts";
 import { ToolCategory } from "../../../src/tools/types.ts";
 import { z } from "zod";
@@ -314,7 +314,7 @@ describe("TaskRunner", () => {
     }, 5000);
   });
 
-  describe("onNotify callback forwarded from ExecutionAgent", () => {
+  describe("onNotify callback forwarded from Agent", () => {
     test("sends notify notification when LLM returns notify tool call", async () => {
       const notifications: TaskNotification[] = [];
       const onNotification = mock((n: TaskNotification) => {
@@ -385,10 +385,10 @@ describe("TaskRunner", () => {
         notifications.push(n);
       });
 
-      // Monkeypatch ExecutionAgent.prototype.run to reject its promise,
+      // Monkeypatch Agent.prototype.run to reject its promise,
       // simulating an unhandled exception escaping run() itself.
-      const originalRun = ExecutionAgent.prototype.run;
-      ExecutionAgent.prototype.run = async function () {
+      const originalRun = Agent.prototype.run;
+      Agent.prototype.run = async function () {
         throw new Error("run() blew up");
       };
 
@@ -407,7 +407,7 @@ describe("TaskRunner", () => {
         // activeCount should be back to 0
         expect(runner.activeCount).toBe(0);
       } finally {
-        ExecutionAgent.prototype.run = originalRun;
+        Agent.prototype.run = originalRun;
       }
     }, 5000);
 
@@ -417,8 +417,8 @@ describe("TaskRunner", () => {
         notifications.push(n);
       });
 
-      const originalRun = ExecutionAgent.prototype.run;
-      ExecutionAgent.prototype.run = async function () {
+      const originalRun = Agent.prototype.run;
+      Agent.prototype.run = async function () {
         throw "string error from run";
       };
 
@@ -432,7 +432,7 @@ describe("TaskRunner", () => {
         expect(failedCall).toBeDefined();
         expect((failedCall as any).error).toBe("string error from run");
       } finally {
-        ExecutionAgent.prototype.run = originalRun;
+        Agent.prototype.run = originalRun;
       }
     }, 5000);
   });
@@ -547,7 +547,7 @@ describe("TaskRunner", () => {
     }, 5000);
   });
 
-  describe("imageRefs flow from ExecutionAgent through TaskRunner notification", () => {
+  describe("imageRefs flow from Agent through TaskRunner notification", () => {
     test("completed notification includes imageRefs when tool returns images", async () => {
       const notifications: TaskNotification[] = [];
       const onNotification = mock((n: TaskNotification) => {

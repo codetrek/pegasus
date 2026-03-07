@@ -6,9 +6,10 @@
  *   - ToolCallCollector — parallel tool execution coordinator
  *   - TaskExecutionState — per-task state tracking
  *   - BaseAgent — abstract base class for all agents
- *   - ConversationAgent — persistent conversation management
+ *   - Agent — unified concrete agent (conversation + execution)
  *   - OrchestratorAgent — complex task decomposition and coordination
- *   - ExecutionAgent — direct task execution (task/worker modes)
+ *   - ConversationAgent — DEPRECATED: use Agent instead
+ *   - ExecutionAgent — DEPRECATED: use Agent instead
  */
 
 // State model
@@ -40,14 +41,27 @@ export {
   type ToolCallInterceptResult,
 } from "./base-agent.ts";
 
-// Agent types
+// Unified Agent
+export {
+  Agent,
+  type AgentDeps,
+  type AgentCallbacks,
+  type AgentResult,
+  type ReplyCallback,
+  type QueueItem,
+  type CustomQueueItem,
+  type TaskNotificationPayload,
+  formatChannelMeta,
+} from "../agent.ts";
+
+// Agent types — backward-compat re-exports
 export {
   ConversationAgent,
   type ConversationAgentDeps,
-  type ReplyCallback,
+  type ReplyCallback as ConversationReplyCallback,
   type SpawnAgentCallback,
-  type QueueItem,
-  type CustomQueueItem,
+  type QueueItem as ConversationQueueItem,
+  type CustomQueueItem as ConversationCustomQueueItem,
 } from "./conversation-agent.ts";
 
 export {

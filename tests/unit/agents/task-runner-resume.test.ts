@@ -10,7 +10,7 @@ import { TaskRunner, type TaskRunnerDeps } from "../../../src/agents/task-runner
 import type { TaskNotification } from "../../../src/agents/task-runner.ts";
 import type { LanguageModel } from "../../../src/infra/llm-types.ts";
 import { AITaskTypeRegistry } from "../../../src/aitask-types/registry.ts";
-import { ExecutionAgent } from "../../../src/agents/base/execution-agent.ts";
+import { Agent } from "../../../src/agents/agent.ts";
 import { mkdtemp, mkdir, writeFile, readFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -80,7 +80,7 @@ async function writeIndex(
   await writeFile(path.join(tasksDir, "index.jsonl"), content, "utf-8");
 }
 
-/** Write a minimal session file so ExecutionAgent.run() can load it. */
+/** Write a minimal session file so Agent.run() can load it. */
 async function writeSession(
   tasksDir: string,
   date: string,
@@ -183,7 +183,7 @@ describe("TaskRunner.resume", () => {
     }, 5000);
   });
 
-  describe("resume creates ExecutionAgent and calls run()", () => {
+  describe("resume creates Agent and calls run()", () => {
     test("creates agent with correct sessionDir and fires run()", async () => {
       const taskId = "agent-run-test1";
       const date = "2026-03-05";
@@ -193,10 +193,10 @@ describe("TaskRunner.resume", () => {
         { role: "user", content: "first message" },
       ]);
 
-      // Spy on ExecutionAgent.prototype.run
-      const originalRun = ExecutionAgent.prototype.run;
+      // Spy on Agent.prototype.run
+      const originalRun = Agent.prototype.run;
       let runCalled = false;
-      ExecutionAgent.prototype.run = async function () {
+      Agent.prototype.run = async function () {
         runCalled = true;
         return {
           success: true,
@@ -214,7 +214,7 @@ describe("TaskRunner.resume", () => {
 
         expect(runCalled).toBe(true);
       } finally {
-        ExecutionAgent.prototype.run = originalRun;
+        Agent.prototype.run = originalRun;
       }
     }, 5000);
 
@@ -327,8 +327,8 @@ describe("TaskRunner.resume", () => {
       });
 
       // Monkeypatch to simulate failure
-      const originalRun = ExecutionAgent.prototype.run;
-      ExecutionAgent.prototype.run = async function () {
+      const originalRun = Agent.prototype.run;
+      Agent.prototype.run = async function () {
         throw new Error("agent crashed on resume");
       };
 
@@ -344,7 +344,7 @@ describe("TaskRunner.resume", () => {
         expect((failedCall as any).error).toBe("agent crashed on resume");
         expect(runner.activeCount).toBe(0);
       } finally {
-        ExecutionAgent.prototype.run = originalRun;
+        Agent.prototype.run = originalRun;
       }
     }, 5000);
   });

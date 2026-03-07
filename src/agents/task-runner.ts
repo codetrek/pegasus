@@ -1,15 +1,14 @@
 /**
- * TaskRunner — manages ExecutionAgent instances for AITask execution.
+ * TaskRunner — manages Agent instances for AITask execution.
  *
- * One ExecutionAgent per task, fire-and-forget via run().
+ * One Agent per task, fire-and-forget via run().
  * Tracks active tasks, notifies parent on completion/failure.
  *
  * Replaces the old Agent.submit() + TaskFSM pattern with a direct
- * ExecutionAgent.run() call — no FSM, no event bus gymnastics.
+ * Agent.run() call — no FSM, no event bus gymnastics.
  */
 
-import { ExecutionAgent } from "./base/execution-agent.ts";
-import type { ExecutionResult } from "./base/execution-agent.ts";
+import { Agent, type AgentResult } from "./agent.ts";
 import type { LanguageModel } from "../infra/llm-types.ts";
 import { ToolRegistry } from "../tools/registry.ts";
 import type { Tool, ToolContext } from "../tools/types.ts";
@@ -99,19 +98,18 @@ export class TaskRunner {
     const dateStr = new Date().toISOString().slice(0, 10);
     const sessionDir = path.join(this.tasksDir, dateStr, taskId);
 
-    const agent = new ExecutionAgent({
+    const agent = new Agent({
       agentId: taskId,
       model: this.model,
       toolRegistry,
-      input,
-      description,
-      mode: "worker",
+      systemPrompt: this._buildSystemPrompt(description, this.taskTypeRegistry.getPrompt(taskType)),
       sessionDir,
-      contextPrompt: this.taskTypeRegistry.getPrompt(taskType),
       storeImage: this.storeImage,
       contextWindow: this.contextWindow,
-      onNotify: (message: string) => {
-        this.onNotification({ type: "notify", taskId, message });
+      toolContext: {
+        onNotify: (message: string) => {
+          this.onNotification({ type: "notify", taskId, message });
+        },
       },
     });
 
@@ -129,7 +127,7 @@ export class TaskRunner {
       startedAt: Date.now(),
     };
 
-    this._runAgent(agent, taskId, taskType, info);
+    this._runAgent(agent, taskId, input, taskType, info);
 
     return taskId;
   }
@@ -165,18 +163,17 @@ export class TaskRunner {
     const resolvedDescription = description ?? `Resumed task ${taskId}`;
     const toolRegistry = this.getToolRegistryForType(resolvedType);
 
-    const agent = new ExecutionAgent({
+    const agent = new Agent({
       agentId: taskId,
       model: this.model,
       toolRegistry,
-      input: newInput,
-      description: resolvedDescription,
-      mode: "worker",
+      systemPrompt: this._buildSystemPrompt(resolvedDescription, this.taskTypeRegistry.getPrompt(resolvedType)),
       sessionDir,
-      contextPrompt: this.taskTypeRegistry.getPrompt(resolvedType),
       storeImage: this.storeImage,
-      onNotify: (message: string) => {
-        this.onNotification({ type: "notify", taskId, message });
+      toolContext: {
+        onNotify: (message: string) => {
+          this.onNotification({ type: "notify", taskId, message });
+        },
       },
     });
 
@@ -189,7 +186,7 @@ export class TaskRunner {
       startedAt: Date.now(),
     };
 
-    this._runAgent(agent, taskId, resolvedType, info);
+    this._runAgent(agent, taskId, newInput, resolvedType, info);
 
     return taskId;
   }
@@ -228,16 +225,17 @@ export class TaskRunner {
    * and handle completion/failure notifications.
    */
   private _runAgent(
-    agent: ExecutionAgent,
+    agent: Agent,
     taskId: string,
+    input: string,
     taskType: string,
     info: TaskInfo,
   ): void {
     this.activeTasks.set(taskId, info);
 
     agent
-      .run()
-      .then((result: ExecutionResult) => {
+      .run(input, { persistSession: true })
+      .then((result: AgentResult) => {
         this.activeTasks.delete(taskId);
         if (result.success) {
           this.onNotification({
@@ -316,6 +314,28 @@ export class TaskRunner {
 
     this.toolRegistryCache.set(taskType, registry);
     return registry;
+  }
+
+  /**
+   * Build a system prompt for task execution agents.
+   * Mirrors the old ExecutionAgent.buildSystemPrompt() logic.
+   */
+  private _buildSystemPrompt(description: string, contextPrompt?: string): string {
+    const lines = [
+      "You are an execution agent working on a specific task.",
+      `Task: ${description}`,
+      "",
+      "Complete the task using your available tools. Be efficient and focused.",
+      "When done, provide your final result as text output.",
+      "",
+      "Use notify(message) to report significant progress to your coordinator.",
+    ];
+
+    if (contextPrompt) {
+      lines.push("", "## Context", contextPrompt);
+    }
+
+    return lines.join("\n");
   }
 
   /**
