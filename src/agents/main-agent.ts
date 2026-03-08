@@ -28,6 +28,7 @@ import type { Settings } from "../infra/config.ts";
 import { getSettings } from "../infra/config.ts";
 import { getLogger } from "../infra/logger.ts";
 import { ToolRegistry } from "./tools/registry.ts";
+import { allTaskTools } from "./tools/builtins/index.ts";
 import { ImageManager } from "../media/image-manager.ts";
 import type { TaskNotification } from "./agent.ts";
 import { computeTokenBudget, calculateMaxToolResultChars, ModelLimitsCache } from "../context/index.ts";
@@ -140,9 +141,11 @@ export class MainAgent extends Agent {
         subagentTypeRegistry: deps.injected.subagentTypeRegistry,
         tasksDir: mainStorePaths.tasks,
         onNotification: (n) => this.pushTaskNotification(n),
-        // Subagents inherit MainAgent's tools MINUS privileged ones.
-        // Privileged tools are MainAgent-only (channel reply, trust, project mgmt, skill reload).
-        parentTools: toolRegistry.list().filter(t => !PRIVILEGED_TOOL_NAMES.has(t.name)),
+        // Subagents get the full task tool set (file, shell, network, etc.)
+        // MINUS MainAgent-only privileged tools (reply, trust, project mgmt, skill reload).
+        // Note: MainAgent's own toolRegistry is a curated subset (no shell/file tools),
+        // so we use allTaskTools as the base for subagent tool inheritance.
+        parentTools: allTaskTools.filter(t => !PRIVILEGED_TOOL_NAMES.has(t.name)),
         // Image storage for subagent tools (e.g. browser screenshots)
         storeImage: deps.injected.imageManager
           ? async (buffer: Buffer, mimeType: string, source: string) => {
