@@ -11,7 +11,7 @@ The key mental model: **one person, many projects**. MainAgent is the single bra
 | Concept | What It Is | Lifecycle | Context |
 |---------|-----------|-----------|---------|
 | **AITask** | One-off task executor | Created → done → discarded | Inherits from MainAgent |
-| **Project** | Persistent task space | active ⇄ suspended → completed → archived | Own session, memory, skills |
+| **Project** | Persistent task space | active ⇄ disabled, active/disabled → archived | Own session, memory, skills |
 | **MainAgent** | The brain | Always running | Global persona + memory |
 
 ### Why Not Just AITasks?
@@ -58,7 +58,7 @@ MainAgent (brain, main thread)
 | 2 | Core directory | `data/agents/projects/<name>/` | Unified plain directory for session, memory, skills, tasks |
 | 3 | Working data | Separate from core directory | Code/work files live in independent git repos; Project directory stores only the agent's brain |
 | 4 | Agent instance | **Independent Agent per Project** | Own EventBus, TaskFSM, cognitive pipeline in Worker thread |
-| 5 | Lifecycle | **Four states**: active ⇄ suspended → completed → archived | Simple, no transient states |
+| 5 | Lifecycle | **Three states**: active ⇄ disabled, active/disabled → archived | Simple, no transient states |
 | 6 | Concurrency | **Multiple Projects can be active in parallel** | MainAgent is a project manager overseeing many efforts |
 | 7 | Communication | **Channel Adapter pattern** | Single ProjectAdapter manages all Workers, routes by channelId |
 | 8 | Initial context | **PROJECT.md definition file** | MainAgent generates it at creation time; injected as system prompt |
@@ -111,12 +111,11 @@ Follows the same frontmatter + markdown body pattern as AITASK.md and SKILL.md.
 ```yaml
 ---
 name: frontend-redesign
-status: active                          # active | suspended | completed | archived
+status: active                          # active | disabled | archived
 model: "anthropic/claude-sonnet-4-20250514"  # optional, falls back to config default
 workdir: /home/user/code/my-app         # optional, for code projects
 created: 2026-02-28T10:00:00Z
-suspended: null                         # timestamp of last suspension
-completed: null                         # timestamp of completion
+disabled: null                          # timestamp of last disable
 ---
 
 ## Goal
@@ -145,8 +144,7 @@ Migrate the frontend component library from class components to React hooks.
 | `model` | No | LLM model override (e.g. `"anthropic/claude-sonnet-4-20250514"`) |
 | `workdir` | No | External working directory for code/data |
 | `created` | Yes | Creation timestamp |
-| `suspended` | No | Last suspension timestamp |
-| `completed` | No | Completion timestamp |
+| `disabled` | No | Last disable timestamp |
 
 **Body**: injected into Project Agent's system prompt. Contains goal, background, constraints — everything the agent needs to know about this project. Written by MainAgent at creation time; only MainAgent may update it.
 
@@ -157,25 +155,20 @@ Migrate the frontend component library from class components to React hooks.
                  │
                  ▼
             ┌─────────┐
-     ┌─────►│  active  │
-     │      └────┬─────┘
-     │           │ suspend / idle timeout
-     │           ▼
-     │      ┌───────────┐
-     │      │ suspended  │
-     │      └────┬───────┘
-     │           │ resume
-     └───────────┘
-                 │ complete
-                 ▼
-            ┌───────────┐
-            │ completed  │
-            └────┬───────┘
-                 │ archive
-                 ▼
-            ┌───────────┐
-            │  archived  │
-            └────────────┘
+     ┌─────►│  active  │──────────┐
+     │      └────┬─────┘          │
+     │           │ disable        │ archive
+     │           ▼                │
+     │      ┌───────────┐        │
+     │      │  disabled  │───┐    │
+     │      └────┬───────┘   │    │
+     │           │ enable    │    │
+     └───────────┘           │    │
+                    archive  │    │
+                             ▼    ▼
+                        ┌───────────┐
+                        │  archived  │
+                        └────────────┘
 ```
 
 **State descriptions**:
@@ -183,8 +176,7 @@ Migrate the frontend component library from class components to React hooks.
 | State | Worker Thread | Agent Instance | Session | Description |
 |-------|--------------|----------------|---------|-------------|
 | **active** | Running | Running | Accumulating | Worker thread alive, processing messages |
-| **suspended** | Stopped | Stopped | Preserved | Worker terminated, session/memory persisted on disk |
-| **completed** | Stopped | Stopped | Preserved | Task done, results available |
+| **disabled** | Stopped | Stopped | Preserved | Worker terminated, session/memory persisted on disk |
 | **archived** | Stopped | Stopped | Preserved | Historical record, no longer relevant |
 
 **Transitions**:
@@ -192,10 +184,10 @@ Migrate the frontend component library from class components to React hooks.
 | From | To | Trigger | What Happens |
 |------|-----|---------|-------------|
 | — | active | `create_project()` tool call | MainAgent generates PROJECT.md, creates directory structure, spawns Worker |
-| active | suspended | `suspend_project()` / idle timeout | Graceful shutdown (see below), update PROJECT.md status |
-| suspended | active | `resume_project()` / MainAgent decision | Spawn Worker, load persisted session, continue |
-| active | completed | `complete_project()` / Project Agent notifies MainAgent | Graceful shutdown, update PROJECT.md status |
-| completed | archived | `archive_project()` / auto-archive policy | Update status field, no data deleted |
+| active | disabled | `disable_project()` / idle timeout | Graceful shutdown (see below), update PROJECT.md status |
+| disabled | active | `enable_project()` / MainAgent decision | Spawn Worker, load persisted session, continue |
+| active | archived | `archive_project()` | Graceful shutdown, update PROJECT.md status |
+| disabled | archived | `archive_project()` | Update status field, no data deleted |
 
 ## Communication: Channel Adapter Pattern
 
@@ -396,7 +388,7 @@ self.onmessage = async (event) => {
     //    - Memory tools scoped to projectPath/memory/
     //    - TaskPersister writing to projectPath/tasks/
     // 5. Build system prompt from PROJECT.md body
-    // 6. Load session history (if resuming from suspended)
+    // 6. Load session history (if resuming from disabled)
     // 7. Start EventBus
     postMessage({ type: "ready" });
   }
@@ -431,7 +423,7 @@ Graceful shutdown with timeout:
 5. Worker sends `{ type: "shutdown-complete" }` back
 6. Main thread receives confirmation and cleans up
 
-**Timeout**: if Worker doesn't respond within 30 seconds, main thread calls `worker.terminate()`. Session may lose the last few messages, but JSONL repair on next resume handles this (same as MainAgent crash recovery).
+**Timeout**: if Worker doesn't respond within 30 seconds, main thread calls `worker.terminate()`. Session may lose the last few messages, but JSONL repair on next enable handles this (same as MainAgent crash recovery).
 
 ### Resource Management
 
@@ -459,10 +451,9 @@ New tools added to MainAgent's tool set:
 |------|-----------|-------------|
 | `create_project` | `name`, `goal`, `background?`, `constraints?`, `model?`, `workdir?` | Create new Project: generate PROJECT.md, create directory structure, spawn Worker, status = active |
 | `list_projects` | `status?` | List all Projects with status summary |
-| `suspend_project` | `name` | Suspend active Project (graceful shutdown Worker, preserve state) |
-| `resume_project` | `name` | Resume suspended Project (spawn Worker, load persisted session) |
-| `complete_project` | `name` | Mark Project as completed (graceful shutdown Worker) |
-| `archive_project` | `name` | Archive completed Project |
+| `disable_project` | `name` | Disable active Project (graceful shutdown Worker, preserve state) |
+| `enable_project` | `name` | Enable disabled Project (spawn Worker, load persisted session) |
+| `archive_project` | `name` | Archive Project (stop Worker if running) |
 
 Note: MainAgent communicates with active Projects via the existing `reply()` tool (channelType = "project"). No special "send message to project" tool is needed.
 
@@ -489,7 +480,7 @@ On MainAgent startup:
 1. Scan `data/agents/projects/*/PROJECT.md`
 2. Parse frontmatter to get status
 3. For each `active` Project → spawn Worker thread via ProjectAdapter
-4. For `suspended`/`completed`/`archived` → register metadata only (no Worker)
+4. For `disabled`/`archived` → register metadata only (no Worker)
 
 **Crash recovery**: if Pegasus process crashes and restarts, Projects with `status: active` in their PROJECT.md are automatically resumed. The Worker is re-spawned, and SessionStore applies the same JSONL repair logic as MainAgent (inject cancellation results for incomplete tool calls). TaskPersister marks any interrupted pending tasks as FAILED.
 
@@ -501,9 +492,9 @@ Each Project has its own SessionStore (`data/agents/projects/<name>/session/`):
 
 - **Same format as MainAgent**: JSONL files, append-only
 - **Same compaction logic**: auto-compact when context window fills up
-- **Same repair logic**: on resume, repair incomplete tool calls
+- **Same repair logic**: on re-enable, repair incomplete tool calls
 - **Independent from MainAgent session**: Project session tracks Project-internal conversations
-- **Persisted across suspend/resume**: when a Project is resumed, its session history is loaded
+- **Persisted across disable/enable**: when a Project is re-enabled, its session history is loaded
 
 ## Memory Isolation
 
@@ -550,6 +541,6 @@ Each Project Worker has its own EventBus instance. Events don't cross Worker bou
 - **Heartbeat**: active Projects could have periodic self-check cycles (ties into the planned Heartbeat system)
 - **Project templates**: pre-defined PROJECT.md templates for common project types
 - **Project-to-Project communication**: currently all communication goes through MainAgent; direct Project ↔ Project channels could be added later
-- **Auto-suspend**: idle timeout to automatically suspend Projects that haven't been active
+- **Auto-disable**: idle timeout to automatically disable Projects that haven't been active
 - **Resource limits**: per-Project token budgets, tool call limits
 - **CLI commands**: direct `/projects` command for listing status without LLM call

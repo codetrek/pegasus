@@ -108,8 +108,8 @@ The following sections replace the current `buildToolsSection()` and `buildDeleg
 ### Projects
 - create_project(name, goal, background?, constraints?, model?, workdir?):
   Create a persistent project workspace for long-running efforts (days/weeks).
-- suspend_project(name) / resume_project(name): Pause/restart a project.
-- complete_project(name) / archive_project(name): Finish and archive.
+- disable_project(name) / enable_project(name): Disable/re-enable a project.
+- archive_project(name): Archive a project permanently.
 
 ### Skills
 - use_skill(skill, args?): Invoke a registered skill by name.
@@ -481,7 +481,7 @@ interface WorkerEntry {
 
 **ProjectManager** (unchanged from current design):
 - Scan `data/agents/projects/*/PROJECT.md` on startup
-- CRUD operations (create, suspend, resume, complete, archive)
+- CRUD operations (create, disable, enable, archive)
 - Status transitions and PROJECT.md updates
 - Calls `WorkerAdapter.startWorker()` / `stopWorker()` for lifecycle
 

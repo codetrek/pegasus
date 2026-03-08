@@ -35,7 +35,7 @@ export interface PromptOptions {
   aiTaskMetadata?: string;
   /** Main mode: skill metadata from SkillRegistry */
   skillMetadata?: string;
-  /** Main mode: active/suspended project metadata */
+  /** Main mode: active/disabled project metadata */
   projectMetadata?: string;
 }
 
