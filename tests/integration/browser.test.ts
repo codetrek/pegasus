@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { BrowserManager } from "../../src/tools/browser/browser-manager.ts";
 import type { BrowserConfig } from "../../src/tools/browser/types.ts";
-import { existsSync } from "fs";
+import { existsSync, unlinkSync, readdirSync } from "fs";
 
 const TASK_A = "integration-task-a";
 const TASK_B = "integration-task-b";
@@ -131,6 +131,14 @@ describe("Browser integration", () => {
 
   afterAll(async () => {
     await manager.close();
+    // Clean up screenshot files created during tests
+    try {
+      for (const f of readdirSync("/tmp")) {
+        if (f.startsWith("pegasus-browser-") && f.endsWith(".png")) {
+          unlinkSync(`/tmp/${f}`);
+        }
+      }
+    } catch (_e) { /* ignore */ }
   });
 
   // ── Navigate + Snapshot ──

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
 import type {
   LanguageModel,
   GenerateTextResult,
@@ -110,6 +110,10 @@ describe("MainAgent", () => {
     afterEach(async () => {
       await Promise.all(cacheDirs.map(d => rm(d, { recursive: true, force: true }).catch(() => {})));
       cacheDirs.length = 0;
+    });
+
+    afterAll(async () => {
+      await Promise.all(cacheDirs.map(d => rm(d, { recursive: true, force: true }).catch(() => {})));
     });
 
     it("should return null for non-existent file", async () => {
@@ -230,7 +234,12 @@ describe("MainAgent", () => {
 
     afterEach(async () => {
       await Promise.all(limitsCacheDirs.map(d => rm(d, { recursive: true, force: true }).catch(() => {})));
-      limitsCacheDirs.length = 0;
+    });
+
+    afterAll(async () => {
+      // Final sweep: background fetches may recreate dirs after afterEach
+      await Bun.sleep(100);
+      await Promise.all(limitsCacheDirs.map(d => rm(d, { recursive: true, force: true }).catch(() => {})));
     });
 
     it("should do nothing when no providers are configured", async () => {

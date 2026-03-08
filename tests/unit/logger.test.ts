@@ -1,7 +1,7 @@
 /**
  * Tests for logger.ts
  */
-import { describe, expect, test, beforeEach, afterEach } from "bun:test";
+import { describe, expect, test, beforeEach, afterEach, afterAll } from "bun:test";
 import { resolveTransport, initLogger, getLogger, isLoggerInitialized } from "../../src/infra/logger.ts";
 import { existsSync, rmSync, mkdirSync, writeFileSync, utimesSync } from "fs";
 import { join } from "path";
@@ -9,17 +9,30 @@ import { tmpdir } from "os";
 
 describe("logger", () => {
   let testDir: string;
+  const allTestDirs: string[] = [];
 
   beforeEach(() => {
     testDir = join(tmpdir(), `pegasus-logger-test-${Date.now()}`);
     mkdirSync(testDir, { recursive: true });
+    allTestDirs.push(testDir);
   });
 
   afterEach(() => {
     try {
       rmSync(testDir, { recursive: true, force: true });
     } catch (_err) {
-      // Ignore cleanup errors
+      // Ignore cleanup errors — pino transport may still hold the dir
+    }
+  });
+
+  afterAll(async () => {
+    // Re-init logger as silent to prevent pino transport from writing to
+    // test dirs during subsequent test files (pino logger is a global singleton).
+    initLogger("/dev/null", "json", "silent");
+    // Final cleanup: sweep all test dirs
+    await Bun.sleep(100);
+    for (const dir of allTestDirs) {
+      try { rmSync(dir, { recursive: true, force: true }); } catch (_e) { /* ignore */ }
     }
   });
 
