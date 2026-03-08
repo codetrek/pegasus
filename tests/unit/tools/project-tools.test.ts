@@ -3,9 +3,8 @@ import {
   projectTools,
   create_project,
   list_projects,
-  suspend_project,
-  resume_project,
-  complete_project,
+  disable_project,
+  enable_project,
   archive_project,
 } from "../../../src/tools/builtins/project-tools.ts";
 import { ToolCategory } from "../../../src/tools/types.ts";
@@ -23,7 +22,7 @@ const mockManager = {
   list: (status?: string) => {
     const all = [
       { name: "proj1", status: "active" },
-      { name: "proj2", status: "completed" },
+      { name: "proj2", status: "disabled" },
     ];
     if (!status) return all;
     return all.filter((p) => p.status === status);
@@ -32,13 +31,10 @@ const mockManager = {
     if (name === "not-found") return null;
     return { name, projectDir: `/tmp/projects/${name}`, status: "active" };
   },
-  suspend: (name: string) => {
+  disable: (name: string) => {
     if (name === "not-found") throw new Error(`Project "${name}" not found`);
   },
-  resume: (name: string) => {
-    if (name === "not-found") throw new Error(`Project "${name}" not found`);
-  },
-  complete: (name: string) => {
+  enable: (name: string) => {
     if (name === "not-found") throw new Error(`Project "${name}" not found`);
   },
   archive: (name: string) => {
@@ -66,8 +62,8 @@ function makeContext(manager = mockManager, adapter?: ReturnType<typeof makeMock
 // ── Tests ─────────────────────────────────────────────────
 
 describe("project tools", () => {
-  it("should export 6 project tools", () => {
-    expect(projectTools).toHaveLength(6);
+  it("should export 5 project tools", () => {
+    expect(projectTools).toHaveLength(5);
   });
 
   it("tool names should be correct", () => {
@@ -75,9 +71,8 @@ describe("project tools", () => {
     expect(names).toEqual([
       "create_project",
       "list_projects",
-      "suspend_project",
-      "resume_project",
-      "complete_project",
+      "disable_project",
+      "enable_project",
       "archive_project",
     ]);
   });
@@ -213,70 +208,47 @@ describe("list_projects tool", () => {
   });
 });
 
-describe("suspend_project tool", () => {
+describe("disable_project tool", () => {
   it("should require name parameter", () => {
-    const schema = suspend_project.parameters;
+    const schema = disable_project.parameters;
     expect(schema.safeParse({ name: "proj1" }).success).toBe(true);
     expect(schema.safeParse({}).success).toBe(false);
   });
 
-  it("should return success when suspending a project", async () => {
-    const result = await suspend_project.execute({ name: "proj1" }, makeContext());
+  it("should return success when disabling a project", async () => {
+    const result = await disable_project.execute({ name: "proj1" }, makeContext());
     expect(result.success).toBe(true);
     const data = result.result as { action: string; name: string; status: string };
-    expect(data.action).toBe("suspend_project");
+    expect(data.action).toBe("disable_project");
     expect(data.name).toBe("proj1");
-    expect(data.status).toBe("suspended");
+    expect(data.status).toBe("disabled");
   });
 
   it("should return error for non-existent project", async () => {
-    const result = await suspend_project.execute({ name: "not-found" }, makeContext());
+    const result = await disable_project.execute({ name: "not-found" }, makeContext());
     expect(result.success).toBe(false);
     expect(result.error).toContain("not found");
   });
 });
 
-describe("resume_project tool", () => {
+describe("enable_project tool", () => {
   it("should require name parameter", () => {
-    const schema = resume_project.parameters;
+    const schema = enable_project.parameters;
     expect(schema.safeParse({ name: "proj1" }).success).toBe(true);
     expect(schema.safeParse({}).success).toBe(false);
   });
 
-  it("should return success when resuming a project", async () => {
-    const result = await resume_project.execute({ name: "proj1" }, makeContext());
+  it("should return success when enabling a project", async () => {
+    const result = await enable_project.execute({ name: "proj1" }, makeContext());
     expect(result.success).toBe(true);
     const data = result.result as { action: string; name: string; status: string };
-    expect(data.action).toBe("resume_project");
+    expect(data.action).toBe("enable_project");
     expect(data.name).toBe("proj1");
     expect(data.status).toBe("active");
   });
 
   it("should return error for non-existent project", async () => {
-    const result = await resume_project.execute({ name: "not-found" }, makeContext());
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("not found");
-  });
-});
-
-describe("complete_project tool", () => {
-  it("should require name parameter", () => {
-    const schema = complete_project.parameters;
-    expect(schema.safeParse({ name: "proj1" }).success).toBe(true);
-    expect(schema.safeParse({}).success).toBe(false);
-  });
-
-  it("should return success when completing a project", async () => {
-    const result = await complete_project.execute({ name: "proj1" }, makeContext());
-    expect(result.success).toBe(true);
-    const data = result.result as { action: string; name: string; status: string };
-    expect(data.action).toBe("complete_project");
-    expect(data.name).toBe("proj1");
-    expect(data.status).toBe("completed");
-  });
-
-  it("should return error for non-existent project", async () => {
-    const result = await complete_project.execute({ name: "not-found" }, makeContext());
+    const result = await enable_project.execute({ name: "not-found" }, makeContext());
     expect(result.success).toBe(false);
     expect(result.error).toContain("not found");
   });
@@ -319,9 +291,9 @@ describe("project tools Worker lifecycle", () => {
     expect(adapter.startProject).toHaveBeenCalledWith("new-proj", "/tmp/projects/new-proj");
   });
 
-  it("suspend_project should call projectAdapter.stopProject", async () => {
+  it("disable_project should call projectAdapter.stopProject", async () => {
     const adapter = makeMockAdapter();
-    const result = await suspend_project.execute(
+    const result = await disable_project.execute(
       { name: "proj1" },
       makeContext(mockManager, adapter),
     );
@@ -330,9 +302,9 @@ describe("project tools Worker lifecycle", () => {
     expect(adapter.stopProject).toHaveBeenCalledWith("proj1");
   });
 
-  it("resume_project should call projectAdapter.startProject with projectDir from pm.get()", async () => {
+  it("enable_project should call projectAdapter.startProject with projectDir from pm.get()", async () => {
     const adapter = makeMockAdapter();
-    const result = await resume_project.execute(
+    const result = await enable_project.execute(
       { name: "proj1" },
       makeContext(mockManager, adapter),
     );
@@ -341,26 +313,15 @@ describe("project tools Worker lifecycle", () => {
     expect(adapter.startProject).toHaveBeenCalledWith("proj1", "/tmp/projects/proj1");
   });
 
-  it("complete_project should call projectAdapter.stopProject", async () => {
-    const adapter = makeMockAdapter();
-    const result = await complete_project.execute(
-      { name: "proj1" },
-      makeContext(mockManager, adapter),
-    );
-    expect(result.success).toBe(true);
-    expect(adapter.stopProject).toHaveBeenCalledTimes(1);
-    expect(adapter.stopProject).toHaveBeenCalledWith("proj1");
-  });
-
-  it("archive_project should NOT call projectAdapter", async () => {
+  it("archive_project should call projectAdapter.stopProject", async () => {
     const adapter = makeMockAdapter();
     const result = await archive_project.execute(
       { name: "proj1" },
       makeContext(mockManager, adapter),
     );
     expect(result.success).toBe(true);
-    expect(adapter.startProject).not.toHaveBeenCalled();
-    expect(adapter.stopProject).not.toHaveBeenCalled();
+    expect(adapter.stopProject).toHaveBeenCalledTimes(1);
+    expect(adapter.stopProject).toHaveBeenCalledWith("proj1");
   });
 
   it("list_projects should NOT call projectAdapter", async () => {
@@ -386,24 +347,16 @@ describe("project tools without projectAdapter (graceful fallback)", () => {
     expect(data.name).toBe("no-adapter");
   });
 
-  it("suspend_project should succeed without projectAdapter", async () => {
-    const result = await suspend_project.execute(
+  it("disable_project should succeed without projectAdapter", async () => {
+    const result = await disable_project.execute(
       { name: "proj1" },
       makeContext(),
     );
     expect(result.success).toBe(true);
   });
 
-  it("resume_project should succeed without projectAdapter", async () => {
-    const result = await resume_project.execute(
-      { name: "proj1" },
-      makeContext(),
-    );
-    expect(result.success).toBe(true);
-  });
-
-  it("complete_project should succeed without projectAdapter", async () => {
-    const result = await complete_project.execute(
+  it("enable_project should succeed without projectAdapter", async () => {
+    const result = await enable_project.execute(
       { name: "proj1" },
       makeContext(),
     );

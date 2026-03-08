@@ -14,7 +14,7 @@ import type { ProjectDefinition, ProjectFrontmatter, ProjectStatus } from "./typ
 const logger = getLogger("project_loader");
 
 const PROJECT_FILE = "PROJECT.md";
-const VALID_STATUSES: Set<string> = new Set(["active", "suspended", "completed", "archived"]);
+const VALID_STATUSES: Set<string> = new Set(["active", "disabled", "archived"]);
 
 /** Split YAML frontmatter from markdown body. */
 export function splitFrontmatter(content: string): { frontmatter: string | null; body: string } {
@@ -64,8 +64,7 @@ export function parseProjectFile(
       model: fm.model,
       workdir: fm.workdir,
       created: fm.created ?? new Date().toISOString(),
-      suspended: fm.suspended,
-      completed: fm.completed,
+      disabled: fm.disabled,
       prompt: body,
       projectDir,
     };

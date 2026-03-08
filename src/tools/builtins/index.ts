@@ -94,12 +94,11 @@ export { use_skill, reload_skills };
 import * as projectToolsModule from "./project-tools.ts";
 const create_project = projectToolsModule.create_project;
 const list_projects = projectToolsModule.list_projects;
-const suspend_project = projectToolsModule.suspend_project;
-const resume_project = projectToolsModule.resume_project;
-const complete_project = projectToolsModule.complete_project;
+const disable_project = projectToolsModule.disable_project;
+const enable_project = projectToolsModule.enable_project;
 const archive_project = projectToolsModule.archive_project;
 
-export { create_project, list_projects, suspend_project, resume_project, complete_project, archive_project };
+export { create_project, list_projects, disable_project, enable_project, archive_project };
 export { projectTools } from "./project-tools.ts";
 
 // Trust tool (for Main Agent — owner identity management)
@@ -251,9 +250,8 @@ export const mainAgentTools: Tool[] = [
   reload_skills,
   create_project,
   list_projects,
-  suspend_project,
-  resume_project,
-  complete_project,
+  disable_project,
+  enable_project,
   archive_project,
   trust,
 ];

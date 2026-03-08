@@ -3,10 +3,9 @@
  * directory structure, and PROJECT.md writing/updating.
  *
  * Valid status transitions:
- *   active    → suspended, completed
- *   suspended → active
- *   completed → archived
- *   archived  → (none)
+ *   active   → disabled, archived
+ *   disabled → active, archived
+ *   archived → (none)
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import path from "node:path";
@@ -30,9 +29,8 @@ const PROJECT_SUBDIRS = [
 
 /** Valid status transitions: from → Set<to>. */
 const VALID_TRANSITIONS: Record<ProjectStatus, Set<ProjectStatus>> = {
-  active: new Set(["suspended", "completed"]),
-  suspended: new Set(["active"]),
-  completed: new Set(["archived"]),
+  active: new Set(["disabled", "archived"]),
+  disabled: new Set(["active", "archived"]),
   archived: new Set(),
 };
 
@@ -117,22 +115,17 @@ export class ProjectManager {
     return def;
   }
 
-  /** Transition active → suspended. */
-  suspend(name: string): void {
-    this.transition(name, "suspended");
+  /** Transition active → disabled. */
+  disable(name: string): void {
+    this.transition(name, "disabled");
   }
 
-  /** Transition suspended → active. */
-  resume(name: string): void {
+  /** Transition disabled → active. */
+  enable(name: string): void {
     this.transition(name, "active");
   }
 
-  /** Transition active → completed. */
-  complete(name: string): void {
-    this.transition(name, "completed");
-  }
-
-  /** Transition completed → archived. */
+  /** Transition active|disabled → archived. */
   archive(name: string): void {
     this.transition(name, "archived");
   }
@@ -158,13 +151,11 @@ export class ProjectManager {
     def.status = to;
     const now = new Date().toISOString();
 
-    if (to === "suspended") {
-      def.suspended = now;
-    } else if (to === "completed") {
-      def.completed = now;
+    if (to === "disabled") {
+      def.disabled = now;
     } else if (to === "active") {
-      // Resuming — clear suspended timestamp
-      def.suspended = undefined;
+      // Re-enabling — clear disabled timestamp
+      def.disabled = undefined;
     }
 
     // Update PROJECT.md on disk: replace frontmatter, keep body
@@ -186,8 +177,7 @@ export class ProjectManager {
     };
     if (def.model) fm.model = def.model;
     if (def.workdir) fm.workdir = def.workdir;
-    if (def.suspended) fm.suspended = def.suspended;
-    if (def.completed) fm.completed = def.completed;
+    if (def.disabled) fm.disabled = def.disabled;
 
     const content = buildProjectMd(fm, body);
     writeFileSync(filePath, content, "utf-8");

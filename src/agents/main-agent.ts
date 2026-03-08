@@ -318,9 +318,9 @@ export class MainAgent extends Agent {
 
   private _buildProjectMetadata(): string {
     const activeProjects = this.projectManager.list("active");
-    const suspendedProjects = this.projectManager.list("suspended");
+    const disabledProjects = this.projectManager.list("disabled");
 
-    if (activeProjects.length === 0 && suspendedProjects.length === 0) return "";
+    if (activeProjects.length === 0 && disabledProjects.length === 0) return "";
 
     const lines: string[] = [];
     lines.push("You manage these long-running projects. Use reply(channelType='project', channelId='<name>') to communicate with them.");
@@ -328,8 +328,8 @@ export class MainAgent extends Agent {
     for (const p of activeProjects) {
       lines.push(`- **${p.name}** (active): ${p.prompt.split("\n")[0]}`);
     }
-    for (const p of suspendedProjects) {
-      lines.push(`- **${p.name}** (suspended): ${p.prompt.split("\n")[0]}`);
+    for (const p of disabledProjects) {
+      lines.push(`- **${p.name}** (disabled): ${p.prompt.split("\n")[0]}`);
     }
     return lines.join("\n");
   }

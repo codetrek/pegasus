@@ -179,13 +179,13 @@ Body.`;
     expect(project).toBeNull();
   });
 
-  it("should parse suspended project with timestamp", () => {
+  it("should parse disabled project with timestamp", () => {
     const dir = makeTmpDir();
     const content = `---
 name: paused-project
-status: suspended
+status: disabled
 created: "2025-01-10T08:00:00Z"
-suspended: "2025-01-20T12:00:00Z"
+disabled: "2025-01-20T12:00:00Z"
 ---
 This project is paused.`;
 
@@ -193,17 +193,16 @@ This project is paused.`;
     const project = parseProjectFile(filePath, "paused-project");
 
     expect(project).not.toBeNull();
-    expect(project!.status).toBe("suspended");
-    expect(project!.suspended).toBe("2025-01-20T12:00:00Z");
+    expect(project!.status).toBe("disabled");
+    expect(project!.disabled).toBe("2025-01-20T12:00:00Z");
   });
 
-  it("should parse completed project with timestamp", () => {
+  it("should parse archived project", () => {
     const dir = makeTmpDir();
     const content = `---
 name: done-project
-status: completed
+status: archived
 created: "2025-01-10T08:00:00Z"
-completed: "2025-02-01T16:00:00Z"
 ---
 This project is done.`;
 
@@ -211,8 +210,7 @@ This project is done.`;
     const project = parseProjectFile(filePath, "done-project");
 
     expect(project).not.toBeNull();
-    expect(project!.status).toBe("completed");
-    expect(project!.completed).toBe("2025-02-01T16:00:00Z");
+    expect(project!.status).toBe("archived");
   });
 });
 
@@ -228,7 +226,7 @@ status: active
 Body A.`);
     writeProjectFile(dir, "project-b", `---
 name: project-b
-status: suspended
+status: disabled
 ---
 Body B.`);
 

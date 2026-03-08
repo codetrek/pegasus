@@ -1,6 +1,6 @@
 /**
  * Project management tools — allow MainAgent to create, list, and
- * manage project lifecycle (suspend/resume/complete/archive).
+ * manage project lifecycle (disable/enable/archive).
  *
  * Tools directly manage Worker lifecycle via ctx.projectAdapter when available.
  * If projectAdapter is not in the context (e.g. task agents), the tool still
@@ -31,9 +31,8 @@ interface ProjectManagerLike {
   }): { name: string; status: string; prompt: string; projectDir: string };
   list(status?: string): Array<{ name: string; status: string; [k: string]: unknown }>;
   get(name: string): { name: string; projectDir: string; [k: string]: unknown } | null;
-  suspend(name: string): void;
-  resume(name: string): void;
-  complete(name: string): void;
+  disable(name: string): void;
+  enable(name: string): void;
   archive(name: string): void;
 }
 
@@ -126,11 +125,11 @@ export const create_project: Tool = {
 export const list_projects: Tool = {
   name: "list_projects",
   description:
-    "List all projects, optionally filtered by status (active, suspended, completed, archived).",
+    "List all projects, optionally filtered by status (active, disabled, archived).",
   category: ToolCategory.SYSTEM,
   parameters: z.object({
     status: z
-      .enum(["active", "suspended", "completed", "archived"])
+      .enum(["active", "disabled", "archived"])
       .optional()
       .describe("Filter by project status"),
   }),
@@ -163,22 +162,22 @@ export const list_projects: Tool = {
   },
 };
 
-// ── suspend_project ────────────────────────────────────────
+// ── disable_project ────────────────────────────────────────
 
-export const suspend_project: Tool = {
-  name: "suspend_project",
+export const disable_project: Tool = {
+  name: "disable_project",
   description:
-    "Suspend an active project. The project worker will be stopped and the project can be resumed later.",
+    "Disable an active project. The project worker will be stopped and the project can be re-enabled later.",
   category: ToolCategory.SYSTEM,
   parameters: z.object({
-    name: z.string().describe("Name of the project to suspend"),
+    name: z.string().describe("Name of the project to disable"),
   }),
   async execute(params: unknown, context: ToolContext): Promise<ToolResult> {
     const startedAt = Date.now();
     try {
       const { name } = params as { name: string };
       const pm = getProjectManager(context);
-      pm.suspend(name);
+      pm.disable(name);
 
       // Stop the project Worker if projectAdapter is available
       const adapter = getProjectAdapter(context);
@@ -188,7 +187,7 @@ export const suspend_project: Tool = {
 
       return {
         success: true,
-        result: { action: "suspend_project", name, status: "suspended" },
+        result: { action: "disable_project", name, status: "disabled" },
         startedAt,
         completedAt: Date.now(),
         durationMs: Date.now() - startedAt,
@@ -205,22 +204,22 @@ export const suspend_project: Tool = {
   },
 };
 
-// ── resume_project ────────────────────────────────────────
+// ── enable_project ────────────────────────────────────────
 
-export const resume_project: Tool = {
-  name: "resume_project",
+export const enable_project: Tool = {
+  name: "enable_project",
   description:
-    "Resume a suspended project. The project worker will be restarted.",
+    "Enable a disabled project. The project worker will be restarted.",
   category: ToolCategory.SYSTEM,
   parameters: z.object({
-    name: z.string().describe("Name of the project to resume"),
+    name: z.string().describe("Name of the project to enable"),
   }),
   async execute(params: unknown, context: ToolContext): Promise<ToolResult> {
     const startedAt = Date.now();
     try {
       const { name } = params as { name: string };
       const pm = getProjectManager(context);
-      pm.resume(name);
+      pm.enable(name);
 
       // Start the project Worker if projectAdapter is available
       const adapter = getProjectAdapter(context);
@@ -233,49 +232,7 @@ export const resume_project: Tool = {
 
       return {
         success: true,
-        result: { action: "resume_project", name, status: "active" },
-        startedAt,
-        completedAt: Date.now(),
-        durationMs: Date.now() - startedAt,
-      };
-    } catch (err) {
-      return {
-        success: false,
-        error: (err as Error).message,
-        startedAt,
-        completedAt: Date.now(),
-        durationMs: Date.now() - startedAt,
-      };
-    }
-  },
-};
-
-// ── complete_project ────────────────────────────────────────
-
-export const complete_project: Tool = {
-  name: "complete_project",
-  description:
-    "Mark an active project as completed. The project worker will be stopped.",
-  category: ToolCategory.SYSTEM,
-  parameters: z.object({
-    name: z.string().describe("Name of the project to complete"),
-  }),
-  async execute(params: unknown, context: ToolContext): Promise<ToolResult> {
-    const startedAt = Date.now();
-    try {
-      const { name } = params as { name: string };
-      const pm = getProjectManager(context);
-      pm.complete(name);
-
-      // Stop the project Worker if projectAdapter is available
-      const adapter = getProjectAdapter(context);
-      if (adapter) {
-        await adapter.stopProject(name);
-      }
-
-      return {
-        success: true,
-        result: { action: "complete_project", name, status: "completed" },
+        result: { action: "enable_project", name, status: "active" },
         startedAt,
         completedAt: Date.now(),
         durationMs: Date.now() - startedAt,
@@ -297,7 +254,7 @@ export const complete_project: Tool = {
 export const archive_project: Tool = {
   name: "archive_project",
   description:
-    "Archive a completed project. Archived projects cannot be resumed.",
+    "Archive a project. Archived projects cannot be re-enabled.",
   category: ToolCategory.SYSTEM,
   parameters: z.object({
     name: z.string().describe("Name of the project to archive"),
@@ -308,6 +265,13 @@ export const archive_project: Tool = {
       const { name } = params as { name: string };
       const pm = getProjectManager(context);
       pm.archive(name);
+
+      // Stop the project Worker if it's still running
+      const adapter = getProjectAdapter(context);
+      if (adapter) {
+        await adapter.stopProject(name);
+      }
+
       return {
         success: true,
         result: { action: "archive_project", name, status: "archived" },
@@ -332,8 +296,7 @@ export const archive_project: Tool = {
 export const projectTools: Tool[] = [
   create_project,
   list_projects,
-  suspend_project,
-  resume_project,
-  complete_project,
+  disable_project,
+  enable_project,
   archive_project,
 ];
