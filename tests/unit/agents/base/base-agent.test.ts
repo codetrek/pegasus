@@ -10,7 +10,7 @@
  *   - Compaction (beforeLLMCall, onLLMError, mechanicalSummary)
  */
 
-import { describe, test, expect, mock } from "bun:test";
+import { describe, test, expect, mock, afterEach } from "bun:test";
 import { Agent, type AgentDeps } from "../../../../src/agents/agent.ts";
 import { AgentState } from "../../../../src/agents/base/agent-state.ts";
 import type { Event } from "../../../../src/events/types.ts";
@@ -20,7 +20,7 @@ import type { TaskExecutionState, CreateTaskStateOptions } from "../../../../src
 import { ToolRegistry } from "../../../../src/tools/registry.ts";
 import { EventBus } from "../../../../src/events/bus.ts";
 import { z } from "zod";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import {
@@ -1221,9 +1221,17 @@ describe("Agent", () => {
 // ═══════════════════════════════════════════════════
 
 describe("Agent — compaction", () => {
+  const tempDirs: string[] = [];
   async function createTempDir(): Promise<string> {
-    return mkdtemp(path.join(os.tmpdir(), "pegasus-test-compaction-"));
+    const dir = await mkdtemp(path.join(os.tmpdir(), "pegasus-test-compaction-"));
+    tempDirs.push(dir);
+    return dir;
   }
+
+  afterEach(async () => {
+    await Promise.all(tempDirs.map(d => rm(d, { recursive: true, force: true }).catch(() => {})));
+    tempDirs.length = 0;
+  });
 
   /**
    * Build messages that exceed the default compactTrigger.
