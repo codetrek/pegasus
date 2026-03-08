@@ -63,7 +63,7 @@ pegasus/
 │   │   ├── executor.ts             # ToolExecutor (validation + timeout + events)
 │   │   └── builtins/               # Built-in tools
 │   │       ├── index.ts            # Tool collections (allTaskTools, mainAgentTools, reflectionTools)
-│   │       ├── system-tools.ts     # current_time, sleep, get_env, set_env
+│   │       ├── system-tools.ts     # current_time, sleep
 │   │       ├── file-tools.ts       # read_file, write_file, edit_file, grep_files, list_files, etc.
 │   │       ├── network-tools.ts    # http_get, http_post, http_request, web_search
 │   │       ├── data-tools.ts       # base64_encode/decode

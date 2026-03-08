@@ -8,10 +8,8 @@ import type { Tool } from "../types.ts";
 import * as systemToolsModule from "./system-tools.ts";
 const current_time = systemToolsModule.current_time;
 const sleep = systemToolsModule.sleep;
-const get_env = systemToolsModule.get_env;
-const set_env = systemToolsModule.set_env;
 
-export { current_time, sleep, get_env, set_env };
+export { current_time, sleep };
 
 // Shell tools
 import * as shellToolsModule from "./shell-tools.ts";
@@ -164,8 +162,6 @@ export { browser_navigate, browser_snapshot, browser_screenshot, browser_click, 
 export const systemTools: Tool[] = [
   current_time,
   sleep,
-  get_env,
-  set_env,
   shell_exec,
 ];
 

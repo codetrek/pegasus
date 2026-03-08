@@ -64,7 +64,7 @@ Today, every spawned task gets the full `allTaskTools` array (26+ tools) and a g
 ### Tool Sets
 
 **general** (default — all task tools, unchanged):
-- system: current_time, sleep, get_env, set_env
+- system: current_time, sleep
 - file: read_file, write_file, list_files, edit_file, grep_files, glob_files
 - network: http_get, http_post, http_request, web_search
 - data: base64_encode, base64_decode
@@ -73,7 +73,7 @@ Today, every spawned task gets the full `allTaskTools` array (26+ tools) and a g
 - notify
 
 **explore** (read-only — no write, no mutation):
-- system: current_time, get_env
+- system: current_time
 - file: read_file, list_files, glob_files, grep_files
 - network: http_get, web_search
 - data: base64_decode
@@ -82,7 +82,7 @@ Today, every spawned task gets the full `allTaskTools` array (26+ tools) and a g
 - notify
 
 **plan** (read-only + write to memory):
-- system: current_time, get_env
+- system: current_time
 - file: read_file, list_files, glob_files, grep_files
 - network: http_get, web_search
 - data: base64_decode

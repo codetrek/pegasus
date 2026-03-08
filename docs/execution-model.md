@@ -347,7 +347,7 @@ SubAgent is an orchestrator that can also execute directly:
 - File I/O: read_file, write_file, list_files, edit_file, grep_files, glob_files
 - Network: http_get, http_post, http_request, web_search
 - Data: base64_encode, base64_decode
-- System: current_time, sleep, get_env, set_env
+- System: current_time, sleep
 
 **Memory tools** (read-only access to MainAgent memory):
 - `memory_list`, `memory_read` — read from snapshot injected at init

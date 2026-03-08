@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { current_time, sleep, get_env, set_env } from "../../../src/agents/tools/builtins/system-tools.ts";
+import { current_time, sleep } from "../../../src/agents/tools/builtins/system-tools.ts";
 
 describe("current_time tool", () => {
   it("should return current time", async () => {
@@ -96,71 +96,5 @@ describe("sleep tool", () => {
     expect(result.startedAt).toBeGreaterThan(0);
     expect(result.completedAt).toBeGreaterThanOrEqual(result.startedAt);
     expect(result.durationMs).toBeGreaterThanOrEqual(40); // at least ~50ms
-  });
-});
-
-describe("get_env tool", () => {
-  it("should get environment variable", async () => {
-    process.env.TEST_VAR = "test_value";
-    const context = { agentId: "test-task-id" };
-    const result = await get_env.execute({ key: "TEST_VAR" }, context);
-
-    expect(result.success).toBe(true);
-    expect(result.result as { key: string; value: string | null }).toEqual({ key: "TEST_VAR", value: "test_value" });
-  });
-
-  it("should return null for unset variable", async () => {
-    delete process.env.UNSET_VAR;
-    const context = { agentId: "test-task-id" };
-    const result = await get_env.execute({ key: "UNSET_VAR" }, context);
-
-    expect(result.success).toBe(true);
-    expect((result.result as { value: string | null }).value).toBeNull();
-  });
-
-  it("should include key in result", async () => {
-    const context = { agentId: "test-task-id" };
-    const result = await get_env.execute({ key: "PATH" }, context);
-
-    expect(result.success).toBe(true);
-    const resultObj = result.result as { key: string; value: string | null };
-    expect(resultObj.key).toBe("PATH");
-    // PATH should always be set
-    expect(resultObj.value).not.toBeNull();
-  });
-});
-
-describe("set_env tool", () => {
-  it("should set environment variable", async () => {
-    delete process.env.NEW_VAR;
-    const context = { agentId: "test-task-id" };
-    const result = await set_env.execute({ key: "NEW_VAR", value: "new_value" }, context);
-
-    expect(result.success).toBe(true);
-    expect(result.result as { key: string; previous: string | null; current: string }).toEqual({ key: "NEW_VAR", previous: null, current: "new_value" });
-    expect((process.env.NEW_VAR as string | undefined) ?? "UNDEFINED").toBe("new_value");
-  });
-
-  it("should return previous value when overwriting", async () => {
-    process.env.EXISTING_VAR = "old_value";
-    const context = { agentId: "test-task-id" };
-    const result = await set_env.execute({ key: "EXISTING_VAR", value: "new_value" }, context);
-
-    expect(result.success).toBe(true);
-    expect((result.result as { previous: string | null }).previous).toBe("old_value");
-    expect((process.env.EXISTING_VAR as string | undefined) ?? "UNDEFINED").toBe("new_value");
-  });
-
-  it("should include all result properties", async () => {
-    delete process.env.SET_ENV_TEST;
-    const context = { agentId: "test-task-id" };
-    const result = await set_env.execute({ key: "SET_ENV_TEST", value: "val123" }, context);
-
-    expect(result.success).toBe(true);
-    const resultObj = result.result as { key: string; previous: string | null; current: string };
-    expect(resultObj.key).toBe("SET_ENV_TEST");
-    expect(resultObj.previous).toBeNull();
-    expect(resultObj.current).toBe("val123");
-    expect(result.startedAt).toBeGreaterThan(0);
   });
 });
