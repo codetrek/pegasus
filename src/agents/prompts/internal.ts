@@ -4,7 +4,7 @@
  *
  * Extracted from cognitive/reflect.ts so all prompt text lives in src/prompts/.
  */
-import type { Persona } from "../identity/persona.ts";
+import type { Persona } from "../../identity/persona.ts";
 
 /**
  * Build the system prompt for post-task reflection.

@@ -4,7 +4,7 @@
  * Kept separate from agent-specific sections so the shared parts
  * (identity, runtime, safety) stay in one place.
  */
-import type { Persona } from "../identity/persona.ts";
+import type { Persona } from "../../identity/persona.ts";
 
 /** Entry in the memory index injected into user messages (not system prompt). */
 export interface MemoryIndexEntry {

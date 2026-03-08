@@ -5,7 +5,7 @@
 import { z } from "zod";
 import TurndownService from "turndown";
 import type { Tool, ToolResult, ToolContext, ToolCategory } from "../types.ts";
-import { WEB_EXTRACT_SYSTEM_PROMPT } from "../../../prompts/index.ts";
+import { WEB_EXTRACT_SYSTEM_PROMPT } from "../../prompts/index.ts";
 
 // ── http_get ────────────────────────────────────
 

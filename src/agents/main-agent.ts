@@ -23,7 +23,7 @@
 
 import type { Message } from "../infra/llm-types.ts";
 import type { Persona } from "../identity/persona.ts";
-import { buildSystemPrompt } from "../prompts/index.ts";
+import { buildSystemPrompt } from "./prompts/index.ts";
 import type { Settings } from "../infra/config.ts";
 import { getSettings } from "../infra/config.ts";
 import { getLogger } from "../infra/logger.ts";
