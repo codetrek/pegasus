@@ -26,7 +26,7 @@ function createMockManager(screenshotPath: string) {
     click: mock(() => Promise.resolve({ snapshot: "", truncated: false })),
     type: mock(() => Promise.resolve({ snapshot: "", truncated: false })),
     scroll: mock(() => Promise.resolve({ snapshot: "", truncated: false })),
-    screenshot: mock((_taskId: string, _fullPage?: boolean) =>
+    screenshot: mock((_agentId: string, _fullPage?: boolean) =>
       Promise.resolve({
         screenshotPath,
         snapshot: "[page] url: https://example.com",
@@ -48,7 +48,7 @@ function makeContext(
   ) => Promise<{ id: string; mimeType: string }>,
 ) {
   return {
-    taskId: "test-task",
+    agentId: "test-task",
     browserManager: manager,
     storeImage,
   } as any;

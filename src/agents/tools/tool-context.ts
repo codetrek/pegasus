@@ -21,15 +21,9 @@ export interface SubagentRegistryLike {
     opts?: { memorySnapshot?: string; depth?: number },
   ): string;
   resume(subagentId: string, input: string): Promise<string>;
-  getStatus(subagentId: string): { subagentId: string; taskType: string; description: string; source: string; startedAt: number } | null;
-  listAll(): Array<{ subagentId: string; taskType: string; description: string; source: string; startedAt: number }>;
+  getStatus(subagentId: string): { subagentId: string; agentType: string; description: string; source: string; startedAt: number } | null;
+  listAll(): Array<{ subagentId: string; agentType: string; description: string; source: string; startedAt: number }>;
   readonly activeCount: number;
-}
-
-// ── TickManager ──────────────────────────────────────────
-
-export interface TickManagerLike {
-  start(): void;
 }
 
 // ── OwnerStore ───────────────────────────────────────────

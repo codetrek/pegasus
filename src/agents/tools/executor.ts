@@ -55,7 +55,7 @@ export class ToolExecutor {
     this.bus.emit(
       createEvent(ET.TOOL_CALL_REQUESTED, {
         source: "tools.executor",
-        taskId: context.agentId,
+        agentId: context.agentId,
         payload: { toolName, params },
       })
     );
@@ -136,7 +136,7 @@ export class ToolExecutor {
       this.bus.emit(
         createEvent(ET.TOOL_CALL_COMPLETED, {
           source: "tools.executor",
-          taskId: context.agentId,
+          agentId: context.agentId,
           payload: { toolName, result: result.result, durationMs: result.durationMs },
         })
       );
@@ -144,7 +144,7 @@ export class ToolExecutor {
       this.bus.emit(
         createEvent(ET.TOOL_CALL_FAILED, {
           source: "tools.executor",
-          taskId: context.agentId,
+          agentId: context.agentId,
           payload: { toolName, error: result.error },
         })
       );

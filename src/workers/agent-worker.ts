@@ -296,7 +296,7 @@ export function notificationToText(notification: SubagentNotification): string {
     case "completed": {
       const result = notification.result;
       if (result && typeof result === "object") {
-        // _compileResult returns { taskId, input, response, iterations }
+        // _compileResult returns { agentId, input, response, iterations }
         // Extract the response text — that's the actual LLM output
         const response = (result as Record<string, unknown>).response;
         if (typeof response === "string") return response;

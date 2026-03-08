@@ -51,7 +51,7 @@ function createErrorModel(): LanguageModel {
  * called outside processStep's inner try/catch.
  */
 class BeforeLLMErrorAgent extends Agent {
-  protected override async beforeLLMCall(_taskId: string): Promise<void> {
+  protected override async beforeLLMCall(_agentId: string): Promise<void> {
     throw new Error("beforeLLMCall exploded");
   }
 }
@@ -330,7 +330,7 @@ describe("Agent coverage", () => {
       await eventBus.emit(
         createEvent(EventType.TASK_COMPLETED, {
           source: "child-agent",
-          taskId: childId,
+          agentId: childId,
           payload: { result: "child result data" },
         }),
       );
@@ -367,7 +367,7 @@ describe("Agent coverage", () => {
       await eventBus.emit(
         createEvent(EventType.TASK_FAILED, {
           source: "child-agent",
-          taskId: childId,
+          agentId: childId,
           payload: { error: "child crashed" },
         }),
       );

@@ -16,7 +16,7 @@ import { AgentState } from "../../../../src/agents/base/agent-state.ts";
 import type { Event } from "../../../../src/agents/events/types.ts";
 import { EventType, createEvent } from "../../../../src/agents/events/types.ts";
 import type { LanguageModel, Message } from "../../../../src/infra/llm-types.ts";
-import type { TaskExecutionState, CreateTaskStateOptions } from "../../../../src/agents/base/task-execution-state.ts";
+import type { AgentExecutionState, CreateAgentStateOptions } from "../../../../src/agents/base/execution-state.ts";
 import { ToolRegistry } from "../../../../src/agents/tools/registry.ts";
 import { EventBus } from "../../../../src/agents/events/bus.ts";
 import { z } from "zod";
@@ -53,7 +53,7 @@ class TestAgent extends Agent {
   public handleEventMock = mock(async (_event: Event) => {});
   public subscribeEventsMock = mock(() => {});
   public onTaskCompleteMock = mock(
-    async (_taskId: string, _text: string, _reason: string) => {},
+    async (_agentId: string, _text: string, _reason: string) => {},
   );
 
   protected override subscribeEvents(): void {
@@ -67,11 +67,11 @@ class TestAgent extends Agent {
   }
 
   protected override async onTaskComplete(
-    taskId: string,
+    agentId: string,
     text: string,
     finishReason: "complete" | "max_iterations" | "interrupted" | "error",
   ): Promise<void> {
-    await this.onTaskCompleteMock(taskId, text, finishReason);
+    await this.onTaskCompleteMock(agentId, text, finishReason);
   }
 
   /** Expose protected queueEvent for testing. */
@@ -85,27 +85,27 @@ class TestAgent extends Agent {
   }
 
   /** Expose protected processStep for testing. */
-  testProcessStep(taskId: string): Promise<void> {
-    return this.processStep(taskId);
+  testProcessStep(agentId: string): Promise<void> {
+    return this.processStep(agentId);
   }
 
   /** Expose protected createTaskExecutionState for testing. */
   testCreateTaskState(
-    taskId: string,
+    agentId: string,
     messages: Message[],
-    opts?: CreateTaskStateOptions,
-  ): TaskExecutionState {
-    return this.createTaskExecutionState(taskId, messages, opts);
+    opts?: CreateAgentStateOptions,
+  ): AgentExecutionState {
+    return this.createAgentExecutionState(agentId, messages, opts);
   }
 
   /** Expose protected removeTaskState for testing. */
-  testRemoveTaskState(taskId: string): void {
-    this.removeTaskState(taskId);
+  testRemoveTaskState(agentId: string): void {
+    this.removeAgentState(agentId);
   }
 
   /** Expose taskStates for assertions. */
-  getTaskStates(): Map<string, TaskExecutionState> {
-    return this.taskStates;
+  getTaskStates(): Map<string, AgentExecutionState> {
+    return this.subagentStates;
   }
 
   /** Expose sessionStore for assertions. */
@@ -114,13 +114,13 @@ class TestAgent extends Agent {
   }
 
   /** Expose beforeLLMCall for testing. */
-  testBeforeLLMCall(taskId: string): Promise<void> {
-    return this.beforeLLMCall(taskId);
+  testBeforeLLMCall(agentId: string): Promise<void> {
+    return this.beforeLLMCall(agentId);
   }
 
   /** Expose onLLMError for testing. */
-  testOnLLMError(taskId: string, error: unknown): Promise<boolean> {
-    return this.onLLMError(taskId, error);
+  testOnLLMError(agentId: string, error: unknown): Promise<boolean> {
+    return this.onLLMError(agentId, error);
   }
 }
 
@@ -569,7 +569,7 @@ describe("Agent", () => {
 
       expect(emittedEvents).toHaveLength(1);
       expect(emittedEvents[0]!.type).toBe(EventType.STEP_COMPLETED);
-      expect(emittedEvents[0]!.taskId).toBe("task-1");
+      expect(emittedEvents[0]!.agentId).toBe("task-1");
       expect(emittedEvents[0]!.payload.hasToolCalls).toBe(false);
       expect(emittedEvents[0]!.payload.iteration).toBe(1);
 
@@ -872,7 +872,7 @@ describe("Agent", () => {
 
       let onLLMErrorCallCount = 0;
       class RetryAgent extends TestAgent {
-        protected override async onLLMError(_taskId: string, _error: unknown): Promise<boolean> {
+        protected override async onLLMError(_agentId: string, _error: unknown): Promise<boolean> {
           onLLMErrorCallCount++;
           // Retry on first call, fail on second
           return onLLMErrorCallCount === 1;
@@ -914,10 +914,10 @@ describe("Agent", () => {
         })),
       });
 
-      const appendedCalls: { taskId: string; messages: Message[] }[] = [];
+      const appendedCalls: { agentId: string; messages: Message[] }[] = [];
       class HookAgent extends TestAgent {
-        protected override async onMessagesAppended(taskId: string, newMessages: Message[]): Promise<void> {
-          appendedCalls.push({ taskId, messages: [...newMessages] });
+        protected override async onMessagesAppended(agentId: string, newMessages: Message[]): Promise<void> {
+          appendedCalls.push({ agentId, messages: [...newMessages] });
         }
       }
 
@@ -935,7 +935,7 @@ describe("Agent", () => {
       await agent.testProcessStep("task-1");
 
       expect(appendedCalls).toHaveLength(1);
-      expect(appendedCalls[0]!.taskId).toBe("task-1");
+      expect(appendedCalls[0]!.agentId).toBe("task-1");
       expect(appendedCalls[0]!.messages).toHaveLength(1);
       expect(appendedCalls[0]!.messages[0]!.role).toBe("assistant");
       expect(appendedCalls[0]!.messages[0]!.content).toBe("hello response");
@@ -964,7 +964,7 @@ describe("Agent", () => {
         }),
       });
 
-      const appendedCalls: { taskId: string; messages: Message[] }[] = [];
+      const appendedCalls: { agentId: string; messages: Message[] }[] = [];
 
       // Register tool so it can be executed
       const registry = createMockRegistry();
@@ -981,8 +981,8 @@ describe("Agent", () => {
       });
 
       class HookToolAgent extends TestAgent {
-        protected override async onMessagesAppended(taskId: string, newMessages: Message[]): Promise<void> {
-          appendedCalls.push({ taskId, messages: [...newMessages] });
+        protected override async onMessagesAppended(agentId: string, newMessages: Message[]): Promise<void> {
+          appendedCalls.push({ agentId, messages: [...newMessages] });
         }
       }
 
@@ -1026,7 +1026,7 @@ describe("Agent", () => {
         { role: "user", content: "hello" },
       ]);
 
-      expect(state.taskId).toBe("task-1");
+      expect(state.agentId).toBe("task-1");
       expect(state.messages).toHaveLength(1);
       expect(state.iteration).toBe(0);
       expect(state.maxIterations).toBe(25); // from agent default

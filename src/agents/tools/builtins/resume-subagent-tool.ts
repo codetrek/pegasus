@@ -1,8 +1,8 @@
 /**
  * resume_subagent tool — resume a completed sub-agent with new input.
  *
- * Self-executing: calls subagentRegistry.resume() and tickManager.start()
- * directly, eliminating the need for MainAgent signal interception.
+ * Self-executing: calls subagentRegistry.resume().
+ * Tick is handled automatically by Agent when subagents are spawned.
  */
 
 import { z } from "zod";
@@ -42,10 +42,6 @@ export const resume_subagent: Tool = {
 
     try {
       await registry.resume(subagent_id, input);
-
-      // Start tick manager to poll for task completion
-      const tick = context.tickManager;
-      if (tick) tick.start();
 
       logger.info({ subagentId: subagent_id }, "subagent_resumed");
 

@@ -9,7 +9,6 @@ import type { BackgroundTaskManager } from "./background.ts";
 import type { ImageAttachment } from "../../media/types.ts";
 import type {
   SubagentRegistryLike,
-  TickManagerLike,
   OwnerStoreLike,
   SkillRegistryLike,
   ProjectManagerLike,
@@ -98,8 +97,6 @@ export interface ToolContext {
   resolveImage?: ResolveImageFn;
   /** SkillRegistry for skill lookup and body loading. */
   skillRegistry?: SkillRegistryLike;
-  /** TickManager for starting periodic status checks after spawning work. */
-  tickManager?: TickManagerLike;
   /** Get memory snapshot for SubAgent context injection. */
   getMemorySnapshot?: GetMemorySnapshotFn;
   /** Callback when skills are reloaded — triggers prompt rebuild + worker broadcast. Returns new skill count. */

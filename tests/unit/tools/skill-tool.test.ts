@@ -37,7 +37,6 @@ describe("use_skill tool", () => {
         resume: async () => "",
         ...registryStubs,
       },
-      tickManager: { start: () => {} },
       ...overrides,
     };
   }
@@ -78,26 +77,6 @@ describe("use_skill tool", () => {
 
     // Verify submit was called correctly
     expect(capturedArgs).toEqual(["Deploy to production...", "skill:deploy", "general", "Skill: deploy"]);
-  });
-
-  it("should start tickManager for fork skills", async () => {
-    let tickStarted = false;
-    const ctx = makeContext({
-      tickManager: { start: () => { tickStarted = true; } },
-    });
-
-    await use_skill.execute({ skill: "deploy" }, ctx);
-    expect(tickStarted).toBe(true);
-  });
-
-  it("should NOT start tickManager for inline skills", async () => {
-    let tickStarted = false;
-    const ctx = makeContext({
-      tickManager: { start: () => { tickStarted = true; } },
-    });
-
-    await use_skill.execute({ skill: "code-review" }, ctx);
-    expect(tickStarted).toBe(false);
   });
 
   it("should return error for unknown skill", async () => {

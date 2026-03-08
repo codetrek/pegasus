@@ -15,7 +15,7 @@ describe("subagent_status", () => {
   describe("SubagentRegistry interface", () => {
     function createMockRegistry(subagents: Array<{
       subagentId: string;
-      taskType: string;
+      agentType: string;
       description: string;
       source: string;
       startedAt: number;
@@ -37,8 +37,8 @@ describe("subagent_status", () => {
 
     it("should list all active subagents when no subagentId is specified", async () => {
       const registry = createMockRegistry([
-        { subagentId: "tr-1", taskType: "web_search", description: "Search weather", source: "main-agent", startedAt: 1000 },
-        { subagentId: "tr-2", taskType: "general", description: "Do something", source: "skill:test", startedAt: 2000 },
+        { subagentId: "tr-1", agentType: "web_search", description: "Search weather", source: "main-agent", startedAt: 1000 },
+        { subagentId: "tr-2", agentType: "general", description: "Do something", source: "skill:test", startedAt: 2000 },
       ]);
 
       const result = await subagent_status.execute(
@@ -46,20 +46,20 @@ describe("subagent_status", () => {
         { agentId: "test", subagentRegistry: registry },
       );
       expect(result.success).toBe(true);
-      const data = result.result as { subagents: Array<{ subagentId: string; state: string; description: string; taskType: string }>; activeCount: number; totalCount: number };
+      const data = result.result as { subagents: Array<{ subagentId: string; state: string; description: string; agentType: string }>; activeCount: number; totalCount: number };
       expect(data.activeCount).toBe(2);
       expect(data.totalCount).toBe(2);
       expect(data.subagents).toHaveLength(2);
       expect(data.subagents[0]!.subagentId).toBe("tr-1");
       expect(data.subagents[0]!.state).toBe("running");
       expect(data.subagents[0]!.description).toBe("Search weather");
-      expect(data.subagents[0]!.taskType).toBe("web_search");
+      expect(data.subagents[0]!.agentType).toBe("web_search");
       expect(data.subagents[1]!.subagentId).toBe("tr-2");
     });
 
     it("should query a specific active subagent by subagentId", async () => {
       const registry = createMockRegistry([
-        { subagentId: "tr-42", taskType: "general", description: "Active subagent", source: "main-agent", startedAt: 5000 },
+        { subagentId: "tr-42", agentType: "general", description: "Active subagent", source: "main-agent", startedAt: 5000 },
       ]);
 
       const result = await subagent_status.execute(
@@ -67,11 +67,11 @@ describe("subagent_status", () => {
         { agentId: "test", subagentRegistry: registry },
       );
       expect(result.success).toBe(true);
-      const data = result.result as { subagentId: string; state: string; description: string; taskType: string; source: string; startedAt: number };
+      const data = result.result as { subagentId: string; state: string; description: string; agentType: string; source: string; startedAt: number };
       expect(data.subagentId).toBe("tr-42");
       expect(data.state).toBe("running");
       expect(data.description).toBe("Active subagent");
-      expect(data.taskType).toBe("general");
+      expect(data.agentType).toBe("general");
       expect(data.source).toBe("main-agent");
       expect(data.startedAt).toBe(5000);
     });
@@ -90,7 +90,7 @@ describe("subagent_status", () => {
 
     it("should show activeCount from registry", async () => {
       const registry = createMockRegistry([
-        { subagentId: "tr-a", taskType: "general", description: "Subagent A", source: "main", startedAt: 100 },
+        { subagentId: "tr-a", agentType: "general", description: "Subagent A", source: "main", startedAt: 100 },
       ]);
 
       const result = await subagent_status.execute(

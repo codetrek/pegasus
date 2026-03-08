@@ -55,7 +55,7 @@ export const subagent_status: Tool = {
             subagentId: info.subagentId,
             state: "running",
             description: info.description,
-            taskType: info.taskType,
+            agentType: info.agentType,
             source: info.source,
             startedAt: info.startedAt,
           },
@@ -69,7 +69,7 @@ export const subagent_status: Tool = {
         subagentId: info.subagentId,
         state: "running",
         description: info.description,
-        taskType: info.taskType,
+        agentType: info.agentType,
         source: info.source,
         startedAt: info.startedAt,
       }));

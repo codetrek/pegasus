@@ -19,7 +19,6 @@ describe("spawn_subagent tool", () => {
         resume: async () => "",
         ...registryStubs,
       },
-      tickManager: { start: () => {} },
       getMemorySnapshot: async () => undefined,
       ...overrides,
     };
@@ -53,7 +52,7 @@ describe("spawn_subagent tool", () => {
 
     // Verify submit was called with correct args including memory and depth
     expect(capturedArgs[0]).toBe("Extract helpers"); // input
-    expect(capturedArgs[1]).toBe("main-agent"); // source (context.taskId)
+    expect(capturedArgs[1]).toBe("main-agent"); // source (context.agentId)
     expect(capturedArgs[2]).toBe("general"); // type
     expect(capturedArgs[3]).toBe("refactor module"); // description
     const opts = capturedArgs[4] as { memorySnapshot?: string; depth?: number };
@@ -80,20 +79,6 @@ describe("spawn_subagent tool", () => {
     );
 
     expect(capturedType).toBe("explore");
-  });
-
-  it("should start tickManager after spawning", async () => {
-    let tickStarted = false;
-    const ctx = makeContext({
-      tickManager: { start: () => { tickStarted = true; } },
-    });
-
-    await spawn_subagent.execute(
-      { description: "test", input: "test" },
-      ctx,
-    );
-
-    expect(tickStarted).toBe(true);
   });
 
   it("should return error when subagentRegistry is not available", async () => {
@@ -144,16 +129,6 @@ describe("spawn_subagent tool", () => {
     const opts = capturedOpts as { memorySnapshot?: string; depth?: number };
     expect(opts.memorySnapshot).toBeUndefined();
     expect(opts.depth).toBe(1);
-  });
-
-  it("should work without tickManager", async () => {
-    const ctx = makeContext({ tickManager: undefined });
-
-    const result = await spawn_subagent.execute(
-      { description: "test", input: "test" },
-      ctx,
-    );
-    expect(result.success).toBe(true);
   });
 
   it("should include timing information", async () => {

@@ -112,11 +112,11 @@ export class BrowserManager {
   }
 
   /**
-   * Get or create a BrowserSession for the given taskId.
+   * Get or create a BrowserSession for the given agentId.
    * Each task gets its own BrowserContext + Page + refMap.
    */
-  async getSession(taskId: string): Promise<BrowserSession> {
-    let session = this.sessions.get(taskId);
+  async getSession(agentId: string): Promise<BrowserSession> {
+    let session = this.sessions.get(agentId);
     if (session) {
       return session;
     }
@@ -138,22 +138,22 @@ export class BrowserManager {
       : await context.newPage();
 
     session = { context, page, refMap: new Map() };
-    this.sessions.set(taskId, session);
+    this.sessions.set(agentId, session);
     return session;
   }
 
   /** Close a single task's session (its BrowserContext). */
-  async closeSession(taskId: string): Promise<void> {
-    const session = this.sessions.get(taskId);
+  async closeSession(agentId: string): Promise<void> {
+    const session = this.sessions.get(agentId);
     if (session) {
       await session.context.close().catch(() => {});
-      this.sessions.delete(taskId);
-      logger.info({ taskId }, "browser_session_closed");
+      this.sessions.delete(agentId);
+      logger.info({ agentId }, "browser_session_closed");
     }
   }
 
   /** Navigate to URL and return ARIA snapshot. Only http/https URLs allowed. */
-  async navigate(taskId: string, url: string): Promise<{ snapshot: string; truncated: boolean }> {
+  async navigate(agentId: string, url: string): Promise<{ snapshot: string; truncated: boolean }> {
     // SSRF protection: restrict to http/https schemes
     let parsed: URL;
     try {
@@ -167,7 +167,7 @@ export class BrowserManager {
       );
     }
 
-    const session = await this.getSession(taskId);
+    const session = await this.getSession(agentId);
     try {
       await session.page.goto(url, {
         timeout: this.config.timeout,
@@ -186,12 +186,12 @@ export class BrowserManager {
       }
       throw new Error(`Navigation to "${url}" failed: ${msg.split('\n')[0]}`);
     }
-    return this.takeSnapshot(taskId);
+    return this.takeSnapshot(agentId);
   }
 
   /** Take ARIA snapshot of current page, refreshing ref map. */
-  async takeSnapshot(taskId: string): Promise<{ snapshot: string; truncated: boolean }> {
-    const session = await this.getSession(taskId);
+  async takeSnapshot(agentId: string): Promise<{ snapshot: string; truncated: boolean }> {
+    const session = await this.getSession(agentId);
     const url = session.page.url();
     const rawSnapshot = await session.page.locator('body').ariaSnapshot();
     const result = addRefsToSnapshot(rawSnapshot, url);
@@ -201,8 +201,8 @@ export class BrowserManager {
   }
 
   /** Click element by ref. Returns new snapshot. */
-  async click(taskId: string, ref: string): Promise<{ snapshot: string; truncated: boolean }> {
-    const session = await this.getSession(taskId);
+  async click(agentId: string, ref: string): Promise<{ snapshot: string; truncated: boolean }> {
+    const session = await this.getSession(agentId);
     const selector = this.resolveRef(session, ref);
     try {
       await session.page.locator(selector).click({ timeout: this.config.timeout });
@@ -215,17 +215,17 @@ export class BrowserManager {
     }
     // Wait for potential navigation/re-render
     await session.page.waitForTimeout(500);
-    return this.takeSnapshot(taskId);
+    return this.takeSnapshot(agentId);
   }
 
   /** Type text into element by ref. Optionally press Enter. Returns new snapshot. */
   async type(
-    taskId: string,
+    agentId: string,
     ref: string,
     text: string,
     submit: boolean = false,
   ): Promise<{ snapshot: string; truncated: boolean }> {
-    const session = await this.getSession(taskId);
+    const session = await this.getSession(agentId);
     const selector = this.resolveRef(session, ref);
     const locator = session.page.locator(selector);
     try {
@@ -241,16 +241,16 @@ export class BrowserManager {
       }
       throw new Error(`Type into ref "${ref}" failed: ${msg.split('\n')[0]}`);
     }
-    return this.takeSnapshot(taskId);
+    return this.takeSnapshot(agentId);
   }
 
   /** Scroll the page by viewport-height multiples. Returns new snapshot. */
   async scroll(
-    taskId: string,
+    agentId: string,
     direction: "up" | "down",
     amount: number = 3,
   ): Promise<{ snapshot: string; truncated: boolean }> {
-    const session = await this.getSession(taskId);
+    const session = await this.getSession(agentId);
     const viewportHeight = this.config.viewport.height;
     const delta =
       direction === "down"
@@ -258,18 +258,18 @@ export class BrowserManager {
         : -(amount * viewportHeight);
     await session.page.mouse.wheel(0, delta);
     await session.page.waitForTimeout(300);
-    return this.takeSnapshot(taskId);
+    return this.takeSnapshot(agentId);
   }
 
   /** Take screenshot, saving to /tmp/. Returns file path + snapshot. */
   async screenshot(
-    taskId: string,
+    agentId: string,
     fullPage: boolean = false,
   ): Promise<{ screenshotPath: string; snapshot: string; truncated: boolean }> {
-    const session = await this.getSession(taskId);
+    const session = await this.getSession(agentId);
     const screenshotPath = `/tmp/pegasus-browser-${Date.now()}.png`;
     await session.page.screenshot({ path: screenshotPath, fullPage });
-    const { snapshot, truncated } = await this.takeSnapshot(taskId);
+    const { snapshot, truncated } = await this.takeSnapshot(agentId);
     return { screenshotPath, snapshot, truncated };
   }
 

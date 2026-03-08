@@ -1,7 +1,7 @@
 /**
  * Tests for subagent_list tool.
  *
- * Uses enriched index.jsonl (with description, taskType, source).
+ * Uses enriched index.jsonl (with description, agentType, source).
  */
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { subagent_list } from "../../../src/agents/tools/builtins/subagent-list-tool.ts";
@@ -15,7 +15,7 @@ async function writeIndex(entry: {
   subagentId: string;
   date: string;
   description?: string;
-  taskType?: string;
+  agentType?: string;
   source?: string;
 }): Promise<void> {
   await mkdir(subagentsDir, { recursive: true });
@@ -37,22 +37,22 @@ describe("subagent_list", () => {
   });
 
   it("should list subagents for a date from enriched index", async () => {
-    await writeIndex({ subagentId: "t1", date: "2026-02-25", description: "Greeting task", taskType: "general", source: "user" });
-    await writeIndex({ subagentId: "t2", date: "2026-02-25", description: "Search task", taskType: "web_search", source: "main-agent" });
+    await writeIndex({ subagentId: "t1", date: "2026-02-25", description: "Greeting task", agentType: "general", source: "user" });
+    await writeIndex({ subagentId: "t2", date: "2026-02-25", description: "Search task", agentType: "web_search", source: "main-agent" });
 
     const context = { agentId: "test", subagentsDir };
     const result = await subagent_list.execute({ date: "2026-02-25" }, context);
 
     expect(result.success).toBe(true);
-    const subagents = result.result as Array<{ subagentId: string; description: string; taskType: string; source: string }>;
+    const subagents = result.result as Array<{ subagentId: string; description: string; agentType: string; source: string }>;
     expect(subagents).toHaveLength(2);
     expect(subagents[0]!.subagentId).toBe("t1");
     expect(subagents[0]!.description).toBe("Greeting task");
-    expect(subagents[0]!.taskType).toBe("general");
+    expect(subagents[0]!.agentType).toBe("general");
     expect(subagents[0]!.source).toBe("user");
     expect(subagents[1]!.subagentId).toBe("t2");
     expect(subagents[1]!.description).toBe("Search task");
-    expect(subagents[1]!.taskType).toBe("web_search");
+    expect(subagents[1]!.agentType).toBe("web_search");
   }, 5000);
 
   it("should handle legacy index entries without metadata", async () => {
@@ -62,11 +62,11 @@ describe("subagent_list", () => {
     const result = await subagent_list.execute({ date: "2026-02-25" }, context);
 
     expect(result.success).toBe(true);
-    const subagents = result.result as Array<{ subagentId: string; description: string; taskType: string }>;
+    const subagents = result.result as Array<{ subagentId: string; description: string; agentType: string }>;
     expect(subagents).toHaveLength(1);
     expect(subagents[0]!.subagentId).toBe("old1");
     expect(subagents[0]!.description).toBe("");
-    expect(subagents[0]!.taskType).toBe("general");
+    expect(subagents[0]!.agentType).toBe("general");
   }, 5000);
 
   it("should return empty list when no subagents exist for date", async () => {

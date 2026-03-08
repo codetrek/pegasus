@@ -93,7 +93,7 @@ export class PostTaskReflector {
     existingFacts: Array<{ path: string; content: string }>,
     episodeIndex: Array<{ path: string; summary: string }>,
   ): Promise<PostTaskReflection> {
-    logger.info({ taskId: context.id, iteration: context.iteration }, "post_task_reflect_start");
+    logger.info({ agentId: context.id, iteration: context.iteration }, "post_task_reflect_start");
 
     const system = buildReflectionPrompt(this.deps.persona, existingFacts, episodeIndex);
     const messages = this._buildMessages(context);
@@ -124,7 +124,7 @@ export class PostTaskReflector {
       });
 
       if (!toolCalls?.length) {
-        logger.info({ taskId: context.id, toolCalls: totalToolCalls }, "post_task_reflect_done");
+        logger.info({ agentId: context.id, toolCalls: totalToolCalls }, "post_task_reflect_done");
         return { assessment: text, toolCallsCount: totalToolCalls };
       }
 
@@ -145,7 +145,7 @@ export class PostTaskReflector {
       }
     }
 
-    logger.warn({ taskId: context.id }, "post_task_reflect_max_rounds");
+    logger.warn({ agentId: context.id }, "post_task_reflect_max_rounds");
     return { assessment: "Max reflection rounds reached", toolCallsCount: totalToolCalls };
   }
 

@@ -1,8 +1,8 @@
 /**
  * spawn_subagent tool — launch a sub-agent.
  *
- * Self-executing: collects memory snapshot, calls subagentRegistry.submit(),
- * and starts tickManager directly, eliminating signal interception.
+ * Self-executing: collects memory snapshot, calls subagentRegistry.submit().
+ * Tick is handled automatically by Agent when subagents are spawned.
  */
 
 import { z } from "zod";
@@ -59,10 +59,6 @@ export const spawn_subagent: Tool = {
         memorySnapshot,
         depth: 1,
       });
-
-      // Start tick manager to poll for task completion
-      const tick = context.tickManager;
-      if (tick) tick.start();
 
       logger.info({ subagentId, description, type }, "subagent_spawned");
 

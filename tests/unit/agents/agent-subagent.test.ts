@@ -7,12 +7,12 @@
  * through Agent with subagentConfig.
  *
  * Exercises:
- *   - submit returns taskId and increments activeCount
+ *   - submit returns agentId and increments activeCount
  *   - submit runs agent and notifies "completed" on success
  *   - submit notifies "failed" on LLM error
  *   - activeCount decrements after task completion
  *   - getStatus returns running task info
- *   - getStatus returns null for unknown taskId
+ *   - getStatus returns null for unknown agentId
  *   - listAll returns all active tasks
  *   - per-type tool registry uses allSubagentTools by default
  *   - concurrent tasks — submit 2 tasks, both complete independently
@@ -128,16 +128,16 @@ describe("Agent subagent management", () => {
     await Promise.all(allTempDirs.map(d => rm(d, { recursive: true, force: true }).catch(() => {})));
   });
 
-  describe("submit returns taskId and increments activeCount", () => {
-    test("returns a non-empty taskId string", () => {
+  describe("submit returns agentId and increments activeCount", () => {
+    test("returns a non-empty agentId string", () => {
       const [model] = createBlockingModel();
       const agent = createAgentWithSubagents({ model });
 
-      const taskId = agent.submit("do stuff", "user", "general", "Test task");
+      const agentId = agent.submit("do stuff", "user", "general", "Test task");
 
-      expect(taskId).toBeTruthy();
-      expect(typeof taskId).toBe("string");
-      expect(taskId.length).toBe(16); // shortId returns 16-char hex
+      expect(agentId).toBeTruthy();
+      expect(typeof agentId).toBe("string");
+      expect(agentId.length).toBe(16); // shortId returns 16-char hex
     }, 5000);
 
     test("increments activeCount after submit", () => {
@@ -166,7 +166,7 @@ describe("Agent subagent management", () => {
       );
 
       const agent = createAgentWithSubagents({ model, onNotification });
-      const taskId = agent.submit("compute", "user", "general", "Compute task");
+      const agentId = agent.submit("compute", "user", "general", "Compute task");
 
       await waitForNotifications();
 
@@ -174,7 +174,7 @@ describe("Agent subagent management", () => {
       const calls = (onNotification as any).mock.calls as SubagentNotification[][];
       const completedCall = calls.find((c) => c[0]!.type === "completed");
       expect(completedCall).toBeDefined();
-      expect(completedCall![0]!.subagentId).toBe(taskId);
+      expect(completedCall![0]!.subagentId).toBe(agentId);
       expect((completedCall![0] as any).result).toBe("result: 42");
     }, 5000);
   });
@@ -189,7 +189,7 @@ describe("Agent subagent management", () => {
       );
 
       const agent = createAgentWithSubagents({ model, onNotification });
-      const taskId = agent.submit("do stuff", "user", "general", "Failing task");
+      const agentId = agent.submit("do stuff", "user", "general", "Failing task");
 
       await waitForNotifications();
 
@@ -197,7 +197,7 @@ describe("Agent subagent management", () => {
       const calls = (onNotification as any).mock.calls as SubagentNotification[][];
       const failedCall = calls.find((c) => c[0]!.type === "failed");
       expect(failedCall).toBeDefined();
-      expect(failedCall![0]!.subagentId).toBe(taskId);
+      expect(failedCall![0]!.subagentId).toBe(agentId);
       expect((failedCall![0] as any).error).toBeTruthy();
     }, 5000);
   });
@@ -220,21 +220,21 @@ describe("Agent subagent management", () => {
       const [model] = createBlockingModel();
       const agent = createAgentWithSubagents({ model });
 
-      const taskId = agent.submit("analyze data", "api", "explore", "Explore task");
-      const status = agent.getStatus(taskId);
+      const agentId = agent.submit("analyze data", "api", "explore", "Explore task");
+      const status = agent.getStatus(agentId);
 
       expect(status).not.toBeNull();
-      expect(status!.subagentId).toBe(taskId);
+      expect(status!.subagentId).toBe(agentId);
       expect(status!.input).toBe("analyze data");
-      expect(status!.taskType).toBe("explore");
+      expect(status!.agentType).toBe("explore");
       expect(status!.description).toBe("Explore task");
       expect(status!.source).toBe("api");
       expect(status!.startedAt).toBeGreaterThan(0);
     }, 5000);
   });
 
-  describe("getStatus returns null for unknown taskId", () => {
-    test("returns null for nonexistent taskId", () => {
+  describe("getStatus returns null for unknown agentId", () => {
+    test("returns null for nonexistent agentId", () => {
       const agent = createAgentWithSubagents();
       expect(agent.getStatus("nonexistent-id")).toBeNull();
     }, 5000);

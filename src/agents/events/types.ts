@@ -56,7 +56,7 @@ export interface Event {
   readonly type: EventType;
   readonly timestamp: number; // Unix ms
   readonly source: string;
-  readonly taskId: string | null;
+  readonly agentId: string | null;
   readonly payload: Readonly<Record<string, unknown>>;
   readonly priority: number | null; // null → use EventType value
   readonly parentEventId: string | null;
@@ -69,7 +69,7 @@ export function createEvent(
   type: EventType,
   opts: {
     source?: string;
-    taskId?: string | null;
+    agentId?: string | null;
     payload?: Record<string, unknown>;
     priority?: number | null;
     parentEventId?: string | null;
@@ -80,7 +80,7 @@ export function createEvent(
     type,
     timestamp: Date.now(),
     source: opts.source ?? "",
-    taskId: opts.taskId ?? null,
+    agentId: opts.agentId ?? null,
     payload: Object.freeze({ ...opts.payload }),
     priority: opts.priority ?? null,
     parentEventId: opts.parentEventId ?? null,
@@ -98,14 +98,14 @@ export function deriveEvent(
   type: EventType,
   overrides: {
     source?: string;
-    taskId?: string | null;
+    agentId?: string | null;
     payload?: Record<string, unknown>;
     priority?: number | null;
   } = {},
 ): Event {
   return createEvent(type, {
     source: overrides.source ?? parent.source,
-    taskId: overrides.taskId ?? parent.taskId,
+    agentId: overrides.agentId ?? parent.agentId,
     payload: overrides.payload,
     priority: overrides.priority,
     parentEventId: parent.id,
