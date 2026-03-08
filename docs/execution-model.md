@@ -1,7 +1,7 @@
 # Execution Model: MainAgent, SubAgent, AITask, Project
 
 > **Status**: Implemented
-> **Supersedes**: Parts of [AITask Types](./aitask-types.md) (renames "subagent" → "AITask") and extends [Project System](./project-system.md)
+> **Supersedes**: Parts of [SubAgent Types](./subagent-types.md) (renames "subagent" → "AITask") and extends [Project System](./project-system.md)
 
 ## Problem Statement
 
@@ -631,16 +631,16 @@ All existing "subagent" references that mean "one-off task executor" are renamed
 
 | File | Changes |
 |------|---------|
-| `src/subagents/` → `src/aitask-types/` | Rename directory |
-| `src/subagents/types.ts` → `src/aitask-types/types.ts` | `SubagentDefinition` → `AITaskTypeDefinition` |
-| `src/subagents/registry.ts` → `src/aitask-types/registry.ts` | `SubagentRegistry` → `AITaskTypeRegistry` |
-| `src/subagents/loader.ts` → `src/aitask-types/loader.ts` | `loadSubagentDefinitions` → `loadAITaskTypeDefinitions`, `SUBAGENT.md` → `AITASK.md` |
-| `src/subagents/index.ts` → `src/aitask-types/index.ts` | Re-export updated names |
+| `src/subagents/` → `src/agents/subagents/` | Rename directory |
+| `src/subagents/types.ts` → `src/agents/subagents/types.ts` | `SubagentDefinition` → `SubAgentTypeDefinition` |
+| `src/subagents/registry.ts` → `src/agents/subagents/registry.ts` | `SubagentRegistry` → `SubAgentTypeRegistry` |
+| `src/subagents/loader.ts` → `src/agents/subagents/loader.ts` | `loadSubagentDefinitions` → `loadSubAgentTypeDefinitions`, `SUBAGENT.md` → `SUBAGENT.md` |
+| `src/subagents/index.ts` → `src/agents/subagents/index.ts` | Re-export updated names |
 | `src/tools/builtins/spawn-subagent-tool.ts` → `src/tools/builtins/spawn-task-tool.ts` | Tool name `spawn_subagent` → `spawn_task` |
 | `src/tools/builtins/index.ts` | Import path + export name updates |
-| `src/agents/agent.ts` | `SubagentRegistry` → `AITaskTypeRegistry`, `subagentRegistry` → `aiTaskTypeRegistry` |
+| `src/agents/agent.ts` | `SubagentRegistry` → `SubAgentTypeRegistry`, `subagentRegistry` → `subAgentTypeRegistry` |
 | `src/agents/main-agent.ts` | `_handleSpawnSubagent` → `_handleSpawnTask`, tool name matching |
-| `src/prompts/main-agent.ts` | `subagentMetadata` → `aiTaskMetadata`, `subagentPrompt` → `aiTaskPrompt`, prompt text |
+| `src/prompts/main-agent.ts` | `subagentMetadata` → `subAgentMetadata`, `subagentPrompt` → `subAgentPrompt`, prompt text |
 | `src/cognitive/think.ts` | `subagentPrompt` parameter rename |
 | `src/task/context.ts` | Comment updates only |
 | `src/task/task-type.ts` | Comment updates only |
@@ -652,17 +652,17 @@ All existing "subagent" references that mean "one-off task executor" are renamed
 
 | File | Changes |
 |------|---------|
-| `subagents/` → `aitask-types/` | Rename top-level directory |
-| `subagents/*/SUBAGENT.md` → `aitask-types/*/AITASK.md` | Rename definition files (3 files) |
+| `subagents/` → `subagents/` | Rename top-level directory |
+| `subagents/*/SUBAGENT.md` → `subagents/*/SUBAGENT.md` | Rename definition files (3 files) |
 
 **Test files** (4 files):
 
 | File | Changes |
 |------|---------|
 | `tests/unit/tools/spawn-subagent-tool.test.ts` → `spawn-task-tool.test.ts` | Rename + update tool name references |
-| `tests/unit/task-type.test.ts` | `SubagentRegistry` → `AITaskTypeRegistry` |
+| `tests/unit/task-type.test.ts` | `SubagentRegistry` → `SubAgentTypeRegistry` |
 | `tests/unit/main-agent.test.ts` | `spawn_subagent` → `spawn_task` in tool call mocks |
-| `tests/unit/identity.test.ts` | `subagentMetadata` → `aiTaskMetadata` |
+| `tests/unit/identity.test.ts` | `subagentMetadata` → `subAgentMetadata` |
 
 **Documentation** (11 files — excluding this document):
 
@@ -671,7 +671,7 @@ All existing "subagent" references that mean "one-off task executor" are renamed
 | `docs/README.md` | Update references |
 | `docs/architecture.md` | Update diagram + text |
 | `docs/main-agent.md` | `spawn_subagent` → `spawn_task` throughout |
-| `docs/task-types.md` | Rename to `aitask-types.md`; update all "subagent" → "AITask" |
+| `docs/task-types.md` | Rename to `subagent-types.md`; update all "subagent" → "AITask" |
 | `docs/project-system.md` | Update references |
 | `docs/tools.md` | Update tool name |
 | `docs/project-structure.md` | Update directory references |
@@ -748,7 +748,7 @@ data/agents/subagents/       ← runtime SubAgent sessions (created at runtime)
 |----------|-------------|
 | [Architecture](./architecture.md) | Updated to show four execution tiers |
 | [Main Agent](./main-agent.md) | Updated tool set (spawn_task + spawn_subagent) |
-| [AITask Types](./aitask-types.md) | Renamed to "AITask Types"; content mostly unchanged |
+| [SubAgent Types](./subagent-types.md) | Renamed to "AITask Types"; content mostly unchanged |
 | [Project System](./project-system.md) | Worker threading model shared; ProjectAdapter → WorkerAdapter |
 | [Agent Core](./agent.md) | Unchanged — Agent class used by MainAgent, SubAgent, and Project |
 | [Cognitive Processors](./cognitive.md) | Unchanged — same pipeline for all tiers |

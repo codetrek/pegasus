@@ -30,7 +30,7 @@ import type { MCPServerConfig } from "./mcp/index.ts";
 import { TokenRefreshMonitor } from "./mcp/auth/refresh-monitor.ts";
 import type { DeviceCodeAuthConfig } from "./mcp/auth/types.ts";
 import { SkillRegistry } from "./skills/index.ts";
-import { AITaskTypeRegistry, loadAITaskTypeDefinitions } from "./aitask-types/index.ts";
+import { SubAgentTypeRegistry, loadSubAgentTypeDefinitions } from "./agents/subagents/index.ts";
 import { TaskRunner } from "./agents/task-runner.ts";
 import type { TaskNotification } from "./agents/task-runner.ts";
 import { ProjectManager } from "./projects/manager.ts";
@@ -72,7 +72,7 @@ export class PegasusApp {
   private tokenRefreshMonitor: TokenRefreshMonitor | null = null;
   private skillRegistry!: SkillRegistry;
   private skillDirs: Array<{ dir: string; source: "builtin" | "user" }> = [];
-  private aiTaskTypeRegistry!: AITaskTypeRegistry;
+  private subAgentTypeRegistry!: SubAgentTypeRegistry;
   private taskRunner!: TaskRunner;
   private projectManager!: ProjectManager;
   private projectAdapter!: ProjectAdapter;
@@ -326,12 +326,12 @@ export class PegasusApp {
     this.skillRegistry.reloadFromDirs(this.skillDirs);
     logger.info({ skillCount: this.skillRegistry.listAll().length }, "skills_loaded");
 
-    // 6. AI Task Types
-    const builtinAITaskTypeDir = path.join(process.cwd(), "aitask-types");
-    const userAITaskTypeDir = path.join(this.settings.dataDir, "aitask-types");
-    this.aiTaskTypeRegistry = new AITaskTypeRegistry();
-    this.aiTaskTypeRegistry.registerMany(loadAITaskTypeDefinitions(builtinAITaskTypeDir, userAITaskTypeDir));
-    logger.info({ aiTaskTypeCount: this.aiTaskTypeRegistry.listAll().length }, "aitask_types_loaded");
+    // 6. Sub-Agent Types
+    const builtinSubAgentTypeDir = path.join(process.cwd(), "subagents");
+    const userSubAgentTypeDir = path.join(this.settings.dataDir, "subagents");
+    this.subAgentTypeRegistry = new SubAgentTypeRegistry();
+    this.subAgentTypeRegistry.registerMany(loadSubAgentTypeDefinitions(builtinSubAgentTypeDir, userSubAgentTypeDir));
+    logger.info({ subAgentTypeCount: this.subAgentTypeRegistry.listAll().length }, "subagent_types_loaded");
 
     // 7. Vision: create ImageManager if enabled
     const visionConfig = this.settings.vision;
@@ -346,7 +346,7 @@ export class PegasusApp {
     // 8. TaskRunner
     this.taskRunner = new TaskRunner({
       model: this.models.getForTier("balanced"),
-      taskTypeRegistry: this.aiTaskTypeRegistry,
+      taskTypeRegistry: this.subAgentTypeRegistry,
       tasksDir: mainStorePaths.tasks,
       storeImage: this._getStoreImageCallback(),
       contextWindow: this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
@@ -399,7 +399,7 @@ export class PegasusApp {
       tokenRefreshMonitor: this.tokenRefreshMonitor,
       skillRegistry: this.skillRegistry,
       skillDirs: this.skillDirs,
-      aiTaskTypeRegistry: this.aiTaskTypeRegistry,
+      aiTaskTypeRegistry: this.subAgentTypeRegistry,
       taskRunner: this.taskRunner,
       projectManager: this.projectManager,
       projectAdapter: this.projectAdapter,

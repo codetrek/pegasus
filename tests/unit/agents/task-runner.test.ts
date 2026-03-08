@@ -20,7 +20,7 @@ import { describe, test, expect, mock, beforeEach, afterEach, afterAll } from "b
 import { TaskRunner, type TaskRunnerDeps } from "../../../src/agents/task-runner.ts";
 import type { TaskNotification } from "../../../src/agents/task-runner.ts";
 import type { LanguageModel } from "../../../src/infra/llm-types.ts";
-import { AITaskTypeRegistry } from "../../../src/aitask-types/registry.ts";
+import { SubAgentTypeRegistry } from "../../../src/agents/subagents/registry.ts";
 import { allTaskTools } from "../../../src/tools/builtins/index.ts";
 import { Agent } from "../../../src/agents/agent.ts";
 import type { Tool, ToolContext, ToolResult } from "../../../src/tools/types.ts";
@@ -78,7 +78,7 @@ let tempDir: string;
 function createDeps(overrides?: Partial<TaskRunnerDeps>): TaskRunnerDeps {
   return {
     model: createMockModel(),
-    taskTypeRegistry: new AITaskTypeRegistry(),
+    taskTypeRegistry: new SubAgentTypeRegistry(),
     tasksDir: tempDir,
     onNotification: mock((_n: TaskNotification) => {}),
     ...overrides,
@@ -243,7 +243,7 @@ describe("TaskRunner", () => {
   describe("per-type tool registry uses allTaskTools by default", () => {
     test("unknown task type gets all task tools", () => {
       const [model] = createBlockingModel();
-      const registry = new AITaskTypeRegistry();
+      const registry = new SubAgentTypeRegistry();
       // No types registered — getToolNames("unknown") returns all tool names
       const runner = new TaskRunner(createDeps({ model, taskTypeRegistry: registry }));
 
@@ -261,7 +261,7 @@ describe("TaskRunner", () => {
 
     test("registered type with specific tools only gets those tools", () => {
       const [model] = createBlockingModel();
-      const registry = new AITaskTypeRegistry();
+      const registry = new SubAgentTypeRegistry();
       registry.registerMany([
         {
           name: "readonly",

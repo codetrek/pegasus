@@ -13,8 +13,8 @@ import type { ToolExecutor } from "../tools/executor.ts";
 import type { Settings } from "../infra/config.ts";
 import { ToolRegistry } from "../tools/registry.ts";
 import { reflectionTools } from "../tools/builtins/index.ts";
-import { PostTaskReflector } from "../cognitive/reflect.ts";
-import { createTaskContext } from "../task/context.ts";
+import { PostTaskReflector } from "./cognitive/reflect.ts";
+import { createReflectionContext } from "./cognitive/reflect.ts";
 import { computeTokenBudget, type ModelLimitsCache } from "../context/index.ts";
 import { getLogger } from "../infra/logger.ts";
 
@@ -68,12 +68,10 @@ export class ReflectionOrchestrator {
   async runReflection(sessionMessages: Message[]): Promise<void> {
     logger.info({ messageCount: sessionMessages.length }, "main_reflection_start");
 
-    // 1. Build a TaskContext from session messages
-    const context = createTaskContext({
+    // 1. Build a ReflectionContext from session messages
+    const context = createReflectionContext({
       id: `main-reflection-${Date.now()}`,
       inputText: "MainAgent conversation session (compact triggered)",
-      source: "main-agent",
-      taskType: "main-reflection",
     });
     context.messages = sessionMessages;
     context.iteration = sessionMessages.length; // rough proxy

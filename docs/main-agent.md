@@ -362,7 +362,7 @@ The prompt builder (`src/prompts/main-agent.ts`) supports two modes via `buildSy
 | Tools | Per-tool descriptions for all 15 MainAgent tools |
 | Thinking Style | When to narrate vs silently call tools |
 | When to Reply vs Spawn | Decision guidelines for direct reply vs task |
-| AITask Types | Injected from AITaskTypeRegistry |
+| SubAgent Types | Injected from SubAgentTypeRegistry |
 | Channels and reply() | Channel metadata format + per-channel style guidelines |
 | Session History | Compact info + archive access |
 | Available Skills | Injected from SkillRegistry (2% of context window budget) |
@@ -373,7 +373,7 @@ The prompt builder (`src/prompts/main-agent.ts`) supports two modes via `buildSy
 |---------|---------|
 | Identity | Same persona identity |
 | Safety | Same safety guardrails |
-| AITASK.md body | Type-specific instructions (explore/plan/general) |
+| SUBAGENT.md body | Type-specific instructions (explore/plan/general) |
 
 Task Agents skip How You Think, Tools, Thinking Style, Reply vs Spawn, Channels, Session History, and Skills — saving ~100 lines of irrelevant tokens per LLM call.
 

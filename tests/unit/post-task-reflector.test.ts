@@ -1,7 +1,7 @@
 import { describe, expect, test, afterEach } from "bun:test";
-import { PostTaskReflector, shouldReflect } from "@pegasus/cognitive/reflect.ts";
-import type { ReflectionDeps } from "@pegasus/cognitive/reflect.ts";
-import { createTaskContext } from "@pegasus/task/context.ts";
+import { PostTaskReflector, shouldReflect } from "@pegasus/agents/cognitive/reflect.ts";
+import type { ReflectionDeps } from "@pegasus/agents/cognitive/reflect.ts";
+import { createReflectionContext } from "@pegasus/agents/cognitive/reflect.ts";
 import type { LanguageModel, GenerateTextResult } from "@pegasus/infra/llm-types.ts";
 import type { Persona } from "@pegasus/identity/persona.ts";
 import { ToolRegistry } from "@pegasus/tools/registry.ts";
@@ -38,7 +38,7 @@ function createReflectionDeps(model: LanguageModel): ReflectionDeps {
 
 describe("shouldReflect", () => {
   test("returns false for trivial single-iteration task with short response", () => {
-    const ctx = createTaskContext({ inputText: "what time?" });
+    const ctx = createReflectionContext({ inputText: "what time?" });
     ctx.iteration = 1;
     ctx.actionsDone = [
       { stepIndex: 0, actionType: "respond", actionInput: {}, success: true, startedAt: Date.now() },
@@ -48,7 +48,7 @@ describe("shouldReflect", () => {
   });
 
   test("returns true for multi-iteration task", () => {
-    const ctx = createTaskContext({ inputText: "search" });
+    const ctx = createReflectionContext({ inputText: "search" });
     ctx.iteration = 2;
     ctx.actionsDone = [
       { stepIndex: 0, actionType: "tool_call", actionInput: {}, success: true, startedAt: Date.now() },
@@ -59,7 +59,7 @@ describe("shouldReflect", () => {
   });
 
   test("returns false for zero tool calls with single iteration", () => {
-    const ctx = createTaskContext({ inputText: "hello" });
+    const ctx = createReflectionContext({ inputText: "hello" });
     ctx.iteration = 1;
     ctx.actionsDone = [];
     ctx.finalResult = { response: "Hi there!" };
@@ -67,7 +67,7 @@ describe("shouldReflect", () => {
   });
 
   test("returns false for single-iteration task with result under 500 chars", () => {
-    const ctx = createTaskContext({ inputText: "what time?" });
+    const ctx = createReflectionContext({ inputText: "what time?" });
     ctx.iteration = 1;
     ctx.actionsDone = [
       { stepIndex: 0, actionType: "respond", actionInput: {}, success: true, startedAt: Date.now() },
@@ -77,7 +77,7 @@ describe("shouldReflect", () => {
   });
 
   test("returns true for single-iteration task with result over 500 chars", () => {
-    const ctx = createTaskContext({ inputText: "explain" });
+    const ctx = createReflectionContext({ inputText: "explain" });
     ctx.iteration = 1;
     ctx.actionsDone = [
       { stepIndex: 0, actionType: "respond", actionInput: {}, success: true, startedAt: Date.now() },
@@ -87,7 +87,7 @@ describe("shouldReflect", () => {
   });
 
   test("returns true when multiple actions done", () => {
-    const ctx = createTaskContext({ inputText: "complex" });
+    const ctx = createReflectionContext({ inputText: "complex" });
     ctx.iteration = 1;
     ctx.actionsDone = [
       { stepIndex: 0, actionType: "tool_call", actionInput: {}, success: true, startedAt: Date.now() },
@@ -118,7 +118,7 @@ describe("PostTaskReflector", () => {
     };
 
     const reflector = new PostTaskReflector(createReflectionDeps(model));
-    const ctx = createTaskContext({ inputText: "simple task" });
+    const ctx = createReflectionContext({ inputText: "simple task" });
     ctx.iteration = 2;
     ctx.finalResult = { response: "Done" };
 
@@ -160,7 +160,7 @@ describe("PostTaskReflector", () => {
     };
 
     const reflector = new PostTaskReflector(createReflectionDeps(model));
-    const ctx = createTaskContext({ inputText: "learned something" });
+    const ctx = createReflectionContext({ inputText: "learned something" });
     ctx.iteration = 2;
     ctx.finalResult = { response: "Done" };
 
@@ -183,7 +183,7 @@ describe("PostTaskReflector", () => {
     };
 
     const reflector = new PostTaskReflector(createReflectionDeps(model));
-    const ctx = createTaskContext({ inputText: "task" });
+    const ctx = createReflectionContext({ inputText: "task" });
     ctx.iteration = 2;
     ctx.finalResult = { response: "Done" };
 
@@ -207,7 +207,7 @@ describe("PostTaskReflector", () => {
     };
 
     const reflector = new PostTaskReflector(createReflectionDeps(model));
-    const ctx = createTaskContext({ inputText: "task" });
+    const ctx = createReflectionContext({ inputText: "task" });
     ctx.iteration = 2;
     ctx.finalResult = { response: "Done" };
 
@@ -242,7 +242,7 @@ describe("PostTaskReflector", () => {
     };
 
     const reflector = new PostTaskReflector(createReflectionDeps(model));
-    const ctx = createTaskContext({ inputText: "search for papers" });
+    const ctx = createReflectionContext({ inputText: "search for papers" });
     ctx.iteration = 2;
     ctx.messages = [
       { role: "user", content: "search for papers" },
@@ -275,7 +275,7 @@ describe("PostTaskReflector", () => {
     };
 
     const reflector = new PostTaskReflector(createReflectionDeps(model));
-    const ctx = createTaskContext({ inputText: "task" });
+    const ctx = createReflectionContext({ inputText: "task" });
     ctx.iteration = 2;
     ctx.finalResult = { response: "Done" };
 
@@ -302,7 +302,7 @@ describe("PostTaskReflector", () => {
     };
 
     const reflector = new PostTaskReflector(createReflectionDeps(model));
-    const ctx = createTaskContext({ inputText: "task" });
+    const ctx = createReflectionContext({ inputText: "task" });
     ctx.iteration = 2;
     ctx.finalResult = { response: "Done" };
 
@@ -330,7 +330,7 @@ describe("PostTaskReflector", () => {
     };
 
     const reflector = new PostTaskReflector(createReflectionDeps(model));
-    const ctx = createTaskContext({ inputText: "task" });
+    const ctx = createReflectionContext({ inputText: "task" });
     ctx.iteration = 2;
     ctx.finalResult = { response: "Done" };
 
@@ -369,7 +369,7 @@ describe("PostTaskReflector", () => {
     await Bun.write(`${testMemoryDir}/facts/user.md`, "# User\n- Name: test");
 
     const reflector = new PostTaskReflector(createReflectionDeps(model));
-    const ctx = createTaskContext({ inputText: "task" });
+    const ctx = createReflectionContext({ inputText: "task" });
     ctx.iteration = 2;
     ctx.finalResult = { response: "Done" };
 

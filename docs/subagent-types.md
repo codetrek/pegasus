@@ -1,24 +1,24 @@
-# AITask Types (Task Specialization)
+# SubAgent Types (Task Specialization)
 
-> Source code: `src/aitask-types/`, `aitask-types/*/AITASK.md`
+> Source code: `src/agents/subagents/`, `subagents/*/SUBAGENT.md`
 
 ## Core Idea
 
 Not every background task needs the same tools or instructions. A web search should not have write_file. A planning task should not be calling web_search. AITask Types let the MainAgent spawn **specialized tasks** with per-type tool sets and system prompts.
 
-AITask types are defined as **files** (AITASK.md), not hardcoded. Users can add custom task types by creating files in `data/aitask-types/`.
+AITask types are defined as **files** (SUBAGENT.md), not hardcoded. Users can add custom task types by creating files in `data/subagents/`.
 
 ## File Format
 
-Each task type is a directory containing `AITASK.md` with YAML frontmatter + markdown body:
+Each task type is a directory containing `SUBAGENT.md` with YAML frontmatter + markdown body:
 
 ```
-aitask-types/
-  general/AITASK.md    # builtin, git tracked
-  explore/AITASK.md
-  plan/AITASK.md
-data/aitask-types/           # user-created, runtime (overrides builtin)
-  deepresearch/AITASK.md
+subagents/
+  general/SUBAGENT.md    # builtin, git tracked
+  explore/SUBAGENT.md
+  plan/SUBAGENT.md
+data/subagents/           # user-created, runtime (overrides builtin)
+  deepresearch/SUBAGENT.md
 ```
 
 ```yaml

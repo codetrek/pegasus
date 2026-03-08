@@ -2,7 +2,7 @@
 
 ## Why
 
-Users shouldn't need to understand Pegasus's internal roles (compact, reflection, AITask). Those are implementation details. Instead, the config exposes **tiers** — semantic capability levels that map to how powerful a model you want for each class of work:
+Users shouldn't need to understand Pegasus's internal roles (compact, reflection, subagent). Those are implementation details. Instead, the config exposes **tiers** — semantic capability levels that map to how powerful a model you want for each class of work:
 
 | Tier | Intent | Typical use |
 |------|--------|-------------|
@@ -49,7 +49,7 @@ tiers:
 When the system needs a model, resolution follows this chain:
 
 ```
-AITASK.md `model` field   (e.g. "fast" or "openai/gpt-4o")
+SUBAGENT.md `model` field   (e.g. "fast" or "openai/gpt-4o")
         ↓ (if set)
   contains "/"? → direct model spec → create/cache
   no "/"?       → treat as tier name
@@ -75,9 +75,9 @@ Internal tasks map to tiers automatically — users don't configure these indivi
 | Compact (`_generateSummary`) | `fast` | Summarization is simple, cost-sensitive |
 | Reflection (post-task) | `fast` | Fire-and-forget memory extraction |
 | Extract (memory index) | `fast` | Cheap factual extraction |
-| AITask (explore) | AITASK.md `model` field → `fast` | Read-only research |
-| AITask (general) | AITASK.md `model` field → `balanced` | Full-capability worker |
-| AITask (plan) | AITASK.md `model` field → `balanced` | Analysis and planning |
+| SubAgent (explore) | SUBAGENT.md `model` field → `fast` | Read-only research |
+| SubAgent (general) | SUBAGENT.md `model` field → `balanced` | Full-capability worker |
+| SubAgent (plan) | SUBAGENT.md `model` field → `balanced` | Analysis and planning |
 
 ## ModelRegistry API
 
@@ -111,9 +111,9 @@ class ModelRegistry {
 }
 ```
 
-## AITASK.md Model Field
+## SUBAGENT.md Model Field
 
-Each AI task type can declare its preferred tier or model in the frontmatter:
+Each sub-agent type can declare its preferred tier or model in the frontmatter:
 
 ```yaml
 ---
@@ -128,7 +128,7 @@ The `model` field accepts:
 - **Tier name** (`fast`, `balanced`, `powerful`) — resolved via `ModelRegistry.resolve()`, falls back to `default`
 - **Direct model spec** (`openai/gpt-4o`) — used as-is, bypassing tier lookup
 
-If `model` is omitted, the AI task type uses the Agent's default model (the one passed at construction, typically `tiers.balanced` or `default`).
+If `model` is omitted, the sub-agent type uses the Agent's default model (the one passed at construction, typically `tiers.balanced` or `default`).
 
 ## Config Examples
 

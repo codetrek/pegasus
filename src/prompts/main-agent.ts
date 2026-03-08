@@ -29,10 +29,10 @@ export type PromptMode = "main" | "task";
 export interface PromptOptions {
   mode?: PromptMode;
   persona: Persona;
-  /** Task mode: AI task type-specific prompt from AITASK.md body */
-  aiTaskPrompt?: string;
-  /** Main mode: AI task type metadata from AITaskTypeRegistry */
-  aiTaskMetadata?: string;
+  /** Task mode: sub-agent type-specific prompt from SUBAGENT.md body */
+  subAgentPrompt?: string;
+  /** Main mode: sub-agent type metadata from SubAgentTypeRegistry */
+  subAgentMetadata?: string;
   /** Main mode: skill metadata from SkillRegistry */
   skillMetadata?: string;
   /** Main mode: active/disabled project metadata */
@@ -242,8 +242,8 @@ export function buildSystemPrompt(options: PromptOptions): string {
     lines.push("", ...buildToolsSection());
     lines.push("", ...buildDelegationSection());
 
-    if (options.aiTaskMetadata) {
-      lines.push("", options.aiTaskMetadata);
+    if (options.subAgentMetadata) {
+      lines.push("", options.subAgentMetadata);
     }
 
     if (options.projectMetadata) {
@@ -257,9 +257,9 @@ export function buildSystemPrompt(options: PromptOptions): string {
       lines.push("", options.skillMetadata);
     }
   } else {
-    // Task Agent: append AI task type-specific prompt
-    if (options.aiTaskPrompt) {
-      lines.push("", options.aiTaskPrompt);
+    // Task Agent: append sub-agent type-specific prompt
+    if (options.subAgentPrompt) {
+      lines.push("", options.subAgentPrompt);
     }
 
     // Task Agent: append skill metadata (if available, e.g. for Project agents)

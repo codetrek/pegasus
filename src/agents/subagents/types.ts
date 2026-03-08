@@ -1,5 +1,5 @@
 /** Metadata + prompt for a discovered AI task type. */
-export interface AITaskTypeDefinition {
+export interface SubAgentTypeDefinition {
   name: string;           // "explore", "plan", "general"
   description: string;    // injected into MainAgent system prompt
   tools: string[];        // tool name list, ["*"] means all task tools
@@ -8,8 +8,8 @@ export interface AITaskTypeDefinition {
   model?: string;         // tier name ("fast") or model spec ("openai/gpt-4o")
 }
 
-/** Raw parsed frontmatter from AITASK.md. */
-export interface AITaskTypeFrontmatter {
+/** Raw parsed frontmatter from SUBAGENT.md. */
+export interface SubAgentTypeFrontmatter {
   name?: string;
   description?: string;
   tools?: string;

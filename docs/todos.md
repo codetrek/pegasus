@@ -10,7 +10,7 @@ Tracked features, improvements, and ideas — what's done and what's next.
 - [x] Skill triggering: LLM-driven (description in context) + user `/` command
 - [x] Skill injection: inline (MainAgent/TaskAgent context) + fork (spawn_task)
 
-### AITask Types (Task Specialization)
+### SubAgent Types (Task Specialization)
 - [x] Task type system: explore, plan, general
 - [x] Per-type tool sets: explore (read-only), plan (read-only + write plans), general (all tools)
 - [x] Per-type system prompts: specialized instructions for each type
@@ -73,7 +73,7 @@ Tracked features, improvements, and ideas — what's done and what's next.
 ## Planned
 
 ### System Prompt — Remaining
-- [ ] AITASK.md verification: confirm explore/plan/general prompts match design constraints
+- [ ] SUBAGENT.md verification: confirm explore/plan/general prompts match design constraints
 
 ### Skill System — Remaining
 - [ ] LLM-created skills: PostTaskReflector creates new skills from repeated patterns

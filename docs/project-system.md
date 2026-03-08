@@ -106,7 +106,7 @@ data/agents/projects/
 
 ## PROJECT.md Format
 
-Follows the same frontmatter + markdown body pattern as AITASK.md and SKILL.md.
+Follows the same frontmatter + markdown body pattern as SUBAGENT.md and SKILL.md.
 
 ```yaml
 ---

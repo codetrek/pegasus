@@ -11,7 +11,7 @@ import type { Settings } from "@pegasus/infra/config.ts";
 import type { ModelRegistry } from "@pegasus/infra/model-registry.ts";
 import type { Persona } from "@pegasus/identity/persona.ts";
 import { SkillRegistry } from "@pegasus/skills/index.ts";
-import { AITaskTypeRegistry } from "@pegasus/aitask-types/index.ts";
+import { SubAgentTypeRegistry } from "@pegasus/agents/subagents/index.ts";
 import { TaskRunner } from "@pegasus/agents/task-runner.ts";
 import { ProjectManager } from "@pegasus/projects/manager.ts";
 import { ProjectAdapter } from "@pegasus/projects/project-adapter.ts";
@@ -70,13 +70,13 @@ export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubs
   ];
   skillRegistry.reloadFromDirs(skillDirs);
 
-  // AI task types
-  const aiTaskTypeRegistry = new AITaskTypeRegistry();
+  // Sub-agent types
+  const subAgentTypeRegistry = new SubAgentTypeRegistry();
 
   // TaskRunner — uses the mock model
   const taskRunner = new TaskRunner({
     model: models.getForTier("balanced"),
-    taskTypeRegistry: aiTaskTypeRegistry,
+    taskTypeRegistry: subAgentTypeRegistry,
     tasksDir: mainStorePaths.tasks,
     storeImage: undefined,
     contextWindow: settings.llm.contextWindow,
@@ -138,7 +138,7 @@ export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubs
     tokenRefreshMonitor: null,
     skillRegistry,
     skillDirs,
-    aiTaskTypeRegistry,
+    aiTaskTypeRegistry: subAgentTypeRegistry,
     taskRunner,
     projectManager,
     projectAdapter,

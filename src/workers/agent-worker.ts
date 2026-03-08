@@ -14,8 +14,8 @@ declare var self: Worker;
 import path from "node:path";
 import { TaskRunner } from "../agents/task-runner.ts";
 import type { TaskNotification } from "../agents/task-runner.ts";
-import { AITaskTypeRegistry } from "../aitask-types/registry.ts";
-import { loadAITaskTypeDefinitions } from "../aitask-types/loader.ts";
+import { SubAgentTypeRegistry } from "../agents/subagents/registry.ts";
+import { loadSubAgentTypeDefinitions } from "../agents/subagents/loader.ts";
 import { getSettings, setSettings } from "../infra/config.ts";
 import type { Settings } from "../infra/config.ts";
 import type { GenerateTextResult } from "../infra/llm-types.ts";
@@ -200,18 +200,18 @@ export async function initProject(config: ProjectConfig): Promise<void> {
   workerChannelType = "project";
   workerChannelId = projectDef.name;
 
-  // 8. Build AI task type registry (same pattern as MainAgent)
-  const aiTaskTypeRegistry = new AITaskTypeRegistry();
-  const builtinAITaskTypeDir = path.join(process.cwd(), "aitask-types");
-  const userAITaskTypeDir = path.join(settings.dataDir, "aitask-types");
-  aiTaskTypeRegistry.registerMany(loadAITaskTypeDefinitions(builtinAITaskTypeDir, userAITaskTypeDir));
+  // 8. Build sub-agent type registry (same pattern as MainAgent)
+  const subAgentTypeRegistry = new SubAgentTypeRegistry();
+  const builtinSubAgentTypeDir = path.join(process.cwd(), "subagents");
+  const userSubAgentTypeDir = path.join(settings.dataDir, "subagents");
+  subAgentTypeRegistry.registerMany(loadSubAgentTypeDefinitions(builtinSubAgentTypeDir, userSubAgentTypeDir));
 
   const storePaths = buildProjectAgentPaths(projectPath);
 
   // 9. Create TaskRunner (replaces old Agent)
   projectTaskRunner = _createTaskRunner({
     model: proxyModel,
-    taskTypeRegistry: aiTaskTypeRegistry,
+    taskTypeRegistry: subAgentTypeRegistry,
     tasksDir: storePaths.tasks,
     onNotification: (notification: TaskNotification) => {
       sendNotify(notificationToText(notification));

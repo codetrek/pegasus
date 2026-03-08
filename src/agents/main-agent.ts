@@ -35,7 +35,7 @@ import { computeTokenBudget, calculateMaxToolResultChars, ModelLimitsCache } fro
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import path from "node:path";
 import { SkillRegistry } from "../skills/index.ts";
-import { AITaskTypeRegistry } from "../aitask-types/index.ts";
+import { SubAgentTypeRegistry } from "./subagents/index.ts";
 import { ProjectManager } from "../projects/manager.ts";
 import { ProjectAdapter } from "../projects/project-adapter.ts";
 import { OwnerStore } from "../security/owner-store.ts";
@@ -66,7 +66,7 @@ export interface InjectedSubsystems {
   tokenRefreshMonitor: TokenRefreshMonitor | null;
   skillRegistry: SkillRegistry;
   skillDirs: Array<{ dir: string; source: "builtin" | "user" }>;
-  aiTaskTypeRegistry: AITaskTypeRegistry;
+  aiTaskTypeRegistry: SubAgentTypeRegistry;
   taskRunner: TaskRunner;
   projectManager: ProjectManager;
   projectAdapter: ProjectAdapter;
@@ -93,7 +93,7 @@ export class MainAgent extends Agent {
   private taskRunner!: TaskRunner;
   private skillRegistry!: SkillRegistry;
   private skillDirs: Array<{ dir: string; source: "builtin" | "user" }> = [];
-  private aiTaskTypeRegistry!: AITaskTypeRegistry;
+  private subAgentTypeRegistry!: SubAgentTypeRegistry;
   private projectManager!: ProjectManager;
   private projectAdapter!: ProjectAdapter;
   private mainStorePaths: AgentStorePaths;
@@ -140,7 +140,7 @@ export class MainAgent extends Agent {
     this.ownerStore = inj.ownerStore;
     this.skillRegistry = inj.skillRegistry;
     this.skillDirs = inj.skillDirs;
-    this.aiTaskTypeRegistry = inj.aiTaskTypeRegistry;
+    this.subAgentTypeRegistry = inj.aiTaskTypeRegistry;
     this.taskRunner = inj.taskRunner;
     this.projectManager = inj.projectManager;
     this.projectAdapter = inj.projectAdapter;
@@ -292,7 +292,7 @@ export class MainAgent extends Agent {
 
   private _buildSystemPrompt(): string {
     // Get AI task type metadata for prompt
-    const aiTaskMetadata = this.aiTaskTypeRegistry.getMetadataForPrompt();
+    const subAgentMetadata = this.subAgentTypeRegistry.getMetadataForPrompt();
 
     // Build project metadata for prompt
     const projectMetadata = this._buildProjectMetadata();
@@ -310,7 +310,7 @@ export class MainAgent extends Agent {
     return buildSystemPrompt({
       mode: "main",
       persona: this.persona!,
-      aiTaskMetadata: aiTaskMetadata || undefined,
+      subAgentMetadata: subAgentMetadata || undefined,
       skillMetadata: skillMetadata || undefined,
       projectMetadata: projectMetadata || undefined,
     });
