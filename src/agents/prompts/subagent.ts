@@ -22,7 +22,6 @@ You have a full set of tools for direct execution:
 - **Browser**: browser_navigate, browser_click, browser_type, browser_scroll, browser_close
   (navigate returns an accessibility snapshot with refs; each action returns fresh refs — previous refs are invalidated)
 - **Background**: bg_run(tool, params) to run tools asynchronously, bg_output(bgTaskId) to get results
-- **Data**: base64_encode, base64_decode
 
 ## Delegation via spawn_subagent
 

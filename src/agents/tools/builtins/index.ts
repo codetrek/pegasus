@@ -38,13 +38,6 @@ const web_fetch = networkToolsModule.web_fetch;
 
 export { http_get, http_post, http_request, web_search, web_fetch };
 
-// Data tools
-import * as dataToolsModule from "./data-tools.ts";
-const base64_encode = dataToolsModule.base64_encode;
-const base64_decode = dataToolsModule.base64_decode;
-
-export { base64_encode, base64_decode };
-
 // Memory tools
 import * as memoryToolsModule from "./memory-tools.ts";
 const memory_list = memoryToolsModule.memory_list;
@@ -179,11 +172,6 @@ export const networkTools: Tool[] = [
   web_search,
 ];
 
-export const dataTools: Tool[] = [
-  base64_encode,
-  base64_decode,
-];
-
 export const memoryTools: Tool[] = [
   memory_list,
   memory_read,
@@ -209,7 +197,6 @@ export const allSubagentTools: Tool[] = [
   ...systemTools,
   ...fileTools,
   ...networkTools,
-  ...dataTools,
   ...memoryTools,
   ...subagentTools,
   ...backgroundTools,
@@ -224,23 +211,31 @@ export const subAgentWorkerTools: Tool[] = [
   subagent_status,
 ];
 
-/** Tools for Main Agent — file tools + memory + delegation + projects + security. */
+/** Tools for Main Agent — direct operations + background + delegation + projects + security. */
 export const mainAgentTools: Tool[] = [
   current_time,
-  // File tools — fast local operations, MainAgent handles directly
+  // File tools — fast local operations
   read_file,
   write_file,
   list_files,
   edit_file,
   grep_files,
   glob_files,
+  // Shell & network — use bg_run for long-running commands
+  shell_exec,
+  web_fetch,
+  web_search,
+  // Background execution — for long-running shell/network operations
+  bg_run,
+  bg_output,
+  bg_stop,
   // Memory
   memory_list,
   memory_read,
   memory_write,
   memory_patch,
   memory_append,
-  // Subagent management
+  // Subagent management — for multi-step reasoning tasks
   subagent_list,
   subagent_status,
   session_archive_read,
