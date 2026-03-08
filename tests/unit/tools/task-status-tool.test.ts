@@ -4,6 +4,7 @@
  */
 import { describe, it, expect } from "bun:test";
 import { task_status } from "../../../src/tools/builtins/task-status-tool.ts";
+import type { TaskRegistryLike } from "../../../src/tools/tool-context.ts";
 
 describe("task_status", () => {
   it("should return error when taskRegistry is not in context", async () => {
@@ -21,7 +22,7 @@ describe("task_status", () => {
       description: string;
       source: string;
       startedAt: number;
-    }> = []) {
+    }> = []): TaskRegistryLike {
       return {
         getStatus(taskId: string) {
           return tasks.find((t) => t.taskId === taskId) ?? null;
@@ -32,6 +33,8 @@ describe("task_status", () => {
         get activeCount() {
           return tasks.length;
         },
+        submit() { return "mock-id"; },
+        async resume() { return "mock-result"; },
       };
     }
 
@@ -118,10 +121,12 @@ describe("task_status", () => {
     });
 
     it("should handle runner errors gracefully", async () => {
-      const brokenRunner = {
+      const brokenRunner: TaskRegistryLike = {
         getStatus() { throw new Error("Runner crashed"); },
         listAll() { throw new Error("Runner crashed"); },
         get activeCount() { return 0; },
+        submit() { return "mock-id"; },
+        async resume() { return "mock-result"; },
       };
 
       const result = await task_status.execute(
@@ -131,18 +136,5 @@ describe("task_status", () => {
       expect(result.success).toBe(false);
       expect(result.error).toContain("Runner crashed");
     });
-  });
-
-  // ── Unknown registry type ──
-
-  it("should return error for unknown registry type", async () => {
-    const unknownRegistry = { someOtherMethod: () => {} };
-
-    const result = await task_status.execute(
-      {},
-      { taskId: "test", taskRegistry: unknownRegistry },
-    );
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("Unknown task registry type");
   });
 });

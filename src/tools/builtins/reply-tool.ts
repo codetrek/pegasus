@@ -13,16 +13,6 @@ import { getLogger } from "../../infra/logger.ts";
 
 const logger = getLogger("reply");
 
-/** Loose type for the onReply callback. */
-type OnReplyFn = (msg: {
-  text: string;
-  channel: { type: string; channelId: string; replyTo?: string };
-  content?: { text: string; images: Array<{ id: string; data: string; mimeType: string }> };
-}) => void;
-
-/** Loose type for the resolveImage callback. */
-type ResolveImageFn = (idOrPath: string) => Promise<{ id: string; data: string; mimeType: string } | null>;
-
 export const reply: Tool = {
   name: "reply",
   description:
@@ -59,7 +49,7 @@ export const reply: Tool = {
       imageIds?: string[];
     };
 
-    const onReply = context.onReply as OnReplyFn | undefined;
+    const onReply = context.onReply;
     if (!onReply) {
       return {
         success: false,
@@ -76,7 +66,7 @@ export const reply: Tool = {
       const failures: string[] = [];
 
       if (imageIds?.length) {
-        const resolveImage = context.resolveImage as ResolveImageFn | undefined;
+        const resolveImage = context.resolveImage;
         if (resolveImage) {
           for (const idOrPath of imageIds) {
             const img = await resolveImage(idOrPath);

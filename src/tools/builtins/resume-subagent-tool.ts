@@ -14,16 +14,6 @@ import { getLogger } from "../../infra/logger.ts";
 
 const logger = getLogger("resume_subagent");
 
-/** Loose interface for TaskRunner methods used by this tool. */
-export interface TaskRegistryLike {
-  resume(taskId: string, input: string): Promise<string>;
-}
-
-/** Loose interface for TickManager methods used by this tool. */
-interface TickManagerLike {
-  start(): void;
-}
-
 export const resume_subagent: Tool = {
   name: "resume_subagent",
   description:
@@ -41,7 +31,7 @@ export const resume_subagent: Tool = {
       input: string;
     };
 
-    const registry = context.taskRegistry as TaskRegistryLike | undefined;
+    const registry = context.taskRegistry;
     if (!registry) {
       return {
         success: false,
@@ -56,7 +46,7 @@ export const resume_subagent: Tool = {
       await registry.resume(subagent_id, input);
 
       // Start tick manager to poll for task completion
-      const tick = context.tickManager as TickManagerLike | undefined;
+      const tick = context.tickManager;
       if (tick) tick.start();
 
       logger.info({ subagentId: subagent_id }, "subagent_resumed");

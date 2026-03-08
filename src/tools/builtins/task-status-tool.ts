@@ -9,14 +9,6 @@ import { z } from "zod";
 import type { Tool, ToolResult, ToolContext } from "../types.ts";
 import { ToolCategory } from "../types.ts";
 
-function isTaskRunner(registry: unknown): registry is {
-  getStatus(taskId: string): { taskId: string; taskType: string; description: string; source: string; startedAt: number } | null;
-  listAll(): Array<{ taskId: string; taskType: string; description: string; source: string; startedAt: number }>;
-  activeCount: number;
-} {
-  return typeof (registry as Record<string, unknown>).getStatus === "function";
-}
-
 export const task_status: Tool = {
   name: "task_status",
   description:
@@ -46,56 +38,45 @@ export const task_status: Tool = {
     }
 
     try {
-      if (isTaskRunner(registry)) {
-        if (taskId) {
-          const info = registry.getStatus(taskId);
-          if (!info) {
-            return {
-              success: true,
-              result: { taskId, status: "not_found", message: "Task not in registry (may have been cleaned up or never existed)" },
-              startedAt,
-              completedAt: Date.now(),
-              durationMs: Date.now() - startedAt,
-            };
-          }
+      if (taskId) {
+        const info = registry.getStatus(taskId);
+        if (!info) {
           return {
             success: true,
-            result: {
-              taskId: info.taskId,
-              state: "running",
-              description: info.description,
-              taskType: info.taskType,
-              source: info.source,
-              startedAt: info.startedAt,
-            },
+            result: { taskId, status: "not_found", message: "Task not in registry (may have been cleaned up or never existed)" },
             startedAt,
             completedAt: Date.now(),
             durationMs: Date.now() - startedAt,
           };
         }
-
-        const tasks = registry.listAll().map((info) => ({
-          taskId: info.taskId,
-          state: "running",
-          description: info.description,
-          taskType: info.taskType,
-          source: info.source,
-          startedAt: info.startedAt,
-        }));
-
         return {
           success: true,
-          result: { tasks, activeCount: registry.activeCount, totalCount: tasks.length },
+          result: {
+            taskId: info.taskId,
+            state: "running",
+            description: info.description,
+            taskType: info.taskType,
+            source: info.source,
+            startedAt: info.startedAt,
+          },
           startedAt,
           completedAt: Date.now(),
           durationMs: Date.now() - startedAt,
         };
       }
 
-      // Unknown registry type
+      const tasks = registry.listAll().map((info) => ({
+        taskId: info.taskId,
+        state: "running",
+        description: info.description,
+        taskType: info.taskType,
+        source: info.source,
+        startedAt: info.startedAt,
+      }));
+
       return {
-        success: false,
-        error: "Unknown task registry type",
+        success: true,
+        result: { tasks, activeCount: registry.activeCount, totalCount: tasks.length },
         startedAt,
         completedAt: Date.now(),
         durationMs: Date.now() - startedAt,

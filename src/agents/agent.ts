@@ -498,7 +498,8 @@ export class Agent {
     }
     // Always inject onReply if available
     if (this._onReply) {
-      ctx.onReply = (msg: unknown) => this._onReply!(msg as OutboundMessage);
+      const reply = this._onReply;
+      ctx.onReply = (msg) => reply(msg as OutboundMessage);
     }
     // Auto-inject getMemorySnapshot when memoryDir is set
     if (this._memoryDir && !ctx.getMemorySnapshot) {

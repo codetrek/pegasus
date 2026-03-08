@@ -4,11 +4,20 @@ import { ToolCategory } from "../../../src/tools/types.ts";
 import type { ToolContext } from "../../../src/tools/types.ts";
 
 describe("spawn_subagent tool", () => {
+  /** Stub methods that task_status needs but spawn_subagent tests don't care about. */
+  const registryStubs = {
+    getStatus: () => null,
+    listAll: () => [],
+    get activeCount() { return 0; },
+  } as const;
+
   function makeContext(overrides?: Partial<ToolContext>): ToolContext {
     return {
       taskId: "main-agent",
       taskRegistry: {
         submit: (_input: string, _source: string, _type: string, _desc: string, _opts?: unknown) => "sa-001",
+        resume: async () => "",
+        ...registryStubs,
       },
       tickManager: { start: () => {} },
       getMemorySnapshot: async () => undefined,
@@ -24,6 +33,8 @@ describe("spawn_subagent tool", () => {
           capturedArgs = [input, source, type, desc, opts];
           return "sa-xyz";
         },
+        resume: async () => "",
+        ...registryStubs,
       },
       getMemorySnapshot: async () => "memory content here",
     });
@@ -58,6 +69,8 @@ describe("spawn_subagent tool", () => {
           capturedType = type;
           return "sa-typed";
         },
+        resume: async () => "",
+        ...registryStubs,
       },
     });
 
@@ -96,6 +109,8 @@ describe("spawn_subagent tool", () => {
     const ctx = makeContext({
       taskRegistry: {
         submit: () => { throw new Error("task limit reached"); },
+        resume: async () => "",
+        ...registryStubs,
       },
     });
 
@@ -116,6 +131,8 @@ describe("spawn_subagent tool", () => {
           capturedOpts = opts;
           return "sa-1";
         },
+        resume: async () => "",
+        ...registryStubs,
       },
     });
 
