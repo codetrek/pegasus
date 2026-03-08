@@ -142,8 +142,6 @@ interface ToolStats {
 |------|-------------|------------|--------|
 | `current_time` | Get the current time | `{ timezone?: string }` | `{ timestamp, iso, timezone }` |
 | `sleep` | Delay execution | `{ duration: number }` (seconds) | `{ slept: number }` |
-| `get_env` | Read an environment variable | `{ key: string }` | `{ value: string \| null }` |
-| `set_env` | Set an environment variable | `{ key: string, value: string }` | `{ previous: string \| null }` |
 
 ### File Tools (FILE)
 
@@ -226,7 +224,7 @@ Different subsystems receive different tool subsets via pre-built arrays:
 | Collection | Contents | Used By |
 |------------|----------|---------|
 | `allTaskTools` | systemTools + fileTools + networkTools + dataTools + memoryTools + taskTools + `notify` | Task System — `general` type (default) |
-| `exploreTools` | Read-only subset: `current_time`, `get_env`, `read_file`, `list_files`, `glob_files`, `grep_files`, `http_get`, `web_search`, `base64_decode`, `memory_list`, `memory_read`, `task_list`, `task_replay`, `notify` | Task System — `explore` type |
+| `exploreTools` | Read-only subset: `current_time`, `read_file`, `list_files`, `glob_files`, `grep_files`, `http_get`, `web_search`, `base64_decode`, `memory_list`, `memory_read`, `task_list`, `task_replay`, `notify` | Task System — `explore` type |
 | `planTools` | exploreTools + `memory_write`, `memory_append` | Task System — `plan` type |
 | `mainAgentTools` | `current_time`, `memory_list`, `memory_read`, `memory_write`, `memory_patch`, `memory_append`, `task_list`, `task_replay`, `session_archive_read`, `spawn_task`, `resume_task`, `reply`, `use_skill` | Main Agent |
 | `reflectionTools` | `memory_read`, `memory_write`, `memory_patch`, `memory_append` | PostTaskReflector |

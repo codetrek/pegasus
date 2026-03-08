@@ -67,6 +67,7 @@ import { sanitizeForPrompt } from "../infra/sanitize.ts";
 import { formatSize } from "./prompts/index.ts";
 import type { Reflection } from "./reflection.ts";
 import type { SubAgentTypeRegistry } from "./subagents/registry.ts";
+import { BackgroundTaskManager } from "./tools/background.ts";
 import { allSubagentTools } from "./tools/builtins/index.ts";
 import { spawn_subagent } from "./tools/builtins/spawn-subagent-tool.ts";
 import { resume_subagent } from "./tools/builtins/resume-subagent-tool.ts";
@@ -297,6 +298,9 @@ export class Agent {
   private static readonly TICK_FIRST_MS = 30_000;
   private static readonly TICK_INTERVAL_MS = 60_000;
 
+  // ── Background task manager (bg_run/bg_output/bg_stop) ──
+  private _backgroundManager: BackgroundTaskManager;
+
   constructor(deps: AgentDeps) {
     this.agentId = deps.agentId;
     this.model = deps.model;
@@ -319,6 +323,8 @@ export class Agent {
       this.eventBus,
       deps.toolTimeout ?? 30000,
     );
+
+    this._backgroundManager = new BackgroundTaskManager(this.toolExecutor);
 
     this.persona = deps.persona;
     this._systemPromptSource = deps.systemPrompt;
@@ -343,6 +349,7 @@ export class Agent {
   async stop(): Promise<void> {
     this._running = false;
     this._stopTick();
+    this._backgroundManager.cleanup(0); // Clear all background tasks on shutdown
     await this.onStop();
     await this.eventBus.stop();
     logger.info({ agentId: this.agentId }, "agent_stopped");
@@ -581,6 +588,10 @@ export class Agent {
     // Auto-inject subagentRegistry when subagentConfig is set
     if (this._subagentConfig && !ctx.subagentRegistry) {
       ctx.subagentRegistry = this;
+    }
+    // Auto-inject backgroundManager for bg_run/bg_output/bg_stop tools
+    if (!ctx.backgroundManager) {
+      ctx.backgroundManager = this._backgroundManager;
     }
     return ctx;
   }
