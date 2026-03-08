@@ -1,6 +1,6 @@
 /** Types for the Project system — long-lived task spaces. */
 
-export type ProjectStatus = "active" | "suspended" | "completed" | "archived";
+export type ProjectStatus = "active" | "disabled" | "archived";
 
 /** Parsed definition from a PROJECT.md file. */
 export interface ProjectDefinition {
@@ -9,8 +9,7 @@ export interface ProjectDefinition {
   model?: string;
   workdir?: string;
   created: string;
-  suspended?: string;
-  completed?: string;
+  disabled?: string;
   prompt: string;       // markdown body — injected as system prompt
   projectDir: string;   // absolute path to data/projects/<name>/
 }
@@ -22,6 +21,5 @@ export interface ProjectFrontmatter {
   model?: string;
   workdir?: string;
   created?: string;
-  suspended?: string;
-  completed?: string;
+  disabled?: string;
 }

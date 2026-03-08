@@ -43,7 +43,7 @@ status: active
 Alpha project.`);
     writeProjectFile(dir, "beta", `---
 name: beta
-status: suspended
+status: disabled
 ---
 Beta project.`);
 
@@ -53,7 +53,7 @@ Beta project.`);
     expect(mgr.get("alpha")).not.toBeNull();
     expect(mgr.get("alpha")!.status).toBe("active");
     expect(mgr.get("beta")).not.toBeNull();
-    expect(mgr.get("beta")!.status).toBe("suspended");
+    expect(mgr.get("beta")!.status).toBe("disabled");
   });
 });
 
@@ -160,77 +160,74 @@ describe("ProjectManager.create", () => {
 
 // ── status transitions ──────────────────────────────────────
 
-describe("ProjectManager.suspend", () => {
-  it("should transition active → suspended, updates PROJECT.md file", () => {
+describe("ProjectManager.disable", () => {
+  it("should transition active → disabled, updates PROJECT.md file", () => {
     const dir = makeTmpDir();
     const mgr = new ProjectManager(dir);
-    mgr.create({ name: "to-suspend", goal: "Test suspend" });
+    mgr.create({ name: "to-disable", goal: "Test disable" });
 
-    mgr.suspend("to-suspend");
+    mgr.disable("to-disable");
 
     // In-memory state updated
-    const def = mgr.get("to-suspend")!;
-    expect(def.status).toBe("suspended");
-    expect(def.suspended).toBeDefined();
+    const def = mgr.get("to-disable")!;
+    expect(def.status).toBe("disabled");
+    expect(def.disabled).toBeDefined();
 
     // PROJECT.md on disk updated
-    const content = readFileSync(path.join(dir, "to-suspend", "PROJECT.md"), "utf-8");
+    const content = readFileSync(path.join(dir, "to-disable", "PROJECT.md"), "utf-8");
     const { frontmatter, body } = splitFrontmatter(content);
     const fm = yaml.load(frontmatter!) as Record<string, string>;
-    expect(fm.status).toBe("suspended");
-    expect(fm.suspended).toBeDefined();
+    expect(fm.status).toBe("disabled");
+    expect(fm.disabled).toBeDefined();
 
     // Body preserved
     expect(body).toContain("## Goal");
-    expect(body).toContain("Test suspend");
+    expect(body).toContain("Test disable");
   });
 });
 
-describe("ProjectManager.resume", () => {
-  it("should transition suspended → active", () => {
+describe("ProjectManager.enable", () => {
+  it("should transition disabled → active", () => {
     const dir = makeTmpDir();
     const mgr = new ProjectManager(dir);
-    mgr.create({ name: "to-resume", goal: "Test resume" });
-    mgr.suspend("to-resume");
+    mgr.create({ name: "to-enable", goal: "Test enable" });
+    mgr.disable("to-enable");
 
-    mgr.resume("to-resume");
+    mgr.enable("to-enable");
 
-    const def = mgr.get("to-resume")!;
+    const def = mgr.get("to-enable")!;
     expect(def.status).toBe("active");
-    expect(def.suspended).toBeUndefined();
+    expect(def.disabled).toBeUndefined();
 
     // Verify on disk
-    const content = readFileSync(path.join(dir, "to-resume", "PROJECT.md"), "utf-8");
+    const content = readFileSync(path.join(dir, "to-enable", "PROJECT.md"), "utf-8");
     const fm = yaml.load(splitFrontmatter(content).frontmatter!) as Record<string, string>;
     expect(fm.status).toBe("active");
-    expect(fm.suspended).toBeUndefined();
-  });
-});
-
-describe("ProjectManager.complete", () => {
-  it("should transition active → completed", () => {
-    const dir = makeTmpDir();
-    const mgr = new ProjectManager(dir);
-    mgr.create({ name: "to-complete", goal: "Test complete" });
-
-    mgr.complete("to-complete");
-
-    const def = mgr.get("to-complete")!;
-    expect(def.status).toBe("completed");
-    expect(def.completed).toBeDefined();
+    expect(fm.disabled).toBeUndefined();
   });
 });
 
 describe("ProjectManager.archive", () => {
-  it("should transition completed → archived", () => {
+  it("should transition active → archived", () => {
     const dir = makeTmpDir();
     const mgr = new ProjectManager(dir);
     mgr.create({ name: "to-archive", goal: "Test archive" });
-    mgr.complete("to-archive");
 
     mgr.archive("to-archive");
 
     const def = mgr.get("to-archive")!;
+    expect(def.status).toBe("archived");
+  });
+
+  it("should transition disabled → archived", () => {
+    const dir = makeTmpDir();
+    const mgr = new ProjectManager(dir);
+    mgr.create({ name: "to-archive-disabled", goal: "Test archive from disabled" });
+    mgr.disable("to-archive-disabled");
+
+    mgr.archive("to-archive-disabled");
+
+    const def = mgr.get("to-archive-disabled")!;
     expect(def.status).toBe("archived");
   });
 });
@@ -238,26 +235,25 @@ describe("ProjectManager.archive", () => {
 // ── invalid transitions ─────────────────────────────────────
 
 describe("ProjectManager invalid transitions", () => {
-  it("should throw for suspended → completed", () => {
-    const dir = makeTmpDir();
-    const mgr = new ProjectManager(dir);
-    mgr.create({ name: "bad-transition", goal: "Test" });
-    mgr.suspend("bad-transition");
-
-    expect(() => mgr.complete("bad-transition")).toThrow(
-      'Invalid transition: cannot move project "bad-transition" from "suspended" to "completed"',
-    );
-  });
-
   it("should throw for archived → active", () => {
     const dir = makeTmpDir();
     const mgr = new ProjectManager(dir);
     mgr.create({ name: "archived-project", goal: "Test" });
-    mgr.complete("archived-project");
     mgr.archive("archived-project");
 
-    expect(() => mgr.resume("archived-project")).toThrow(
+    expect(() => mgr.enable("archived-project")).toThrow(
       'Invalid transition: cannot move project "archived-project" from "archived" to "active"',
+    );
+  });
+
+  it("should throw for archived → disabled", () => {
+    const dir = makeTmpDir();
+    const mgr = new ProjectManager(dir);
+    mgr.create({ name: "archived-project2", goal: "Test" });
+    mgr.archive("archived-project2");
+
+    expect(() => mgr.disable("archived-project2")).toThrow(
+      'Invalid transition: cannot move project "archived-project2" from "archived" to "disabled"',
     );
   });
 
@@ -265,7 +261,7 @@ describe("ProjectManager invalid transitions", () => {
     const dir = makeTmpDir();
     const mgr = new ProjectManager(dir);
 
-    expect(() => mgr.suspend("nonexistent")).toThrow(
+    expect(() => mgr.disable("nonexistent")).toThrow(
       'Project "nonexistent" not found',
     );
   });
@@ -278,16 +274,16 @@ describe("ProjectManager.list", () => {
     const dir = makeTmpDir();
     const mgr = new ProjectManager(dir);
     mgr.create({ name: "proj-active", goal: "Active" });
-    mgr.create({ name: "proj-suspended", goal: "Suspended" });
-    mgr.suspend("proj-suspended");
+    mgr.create({ name: "proj-disabled", goal: "Disabled" });
+    mgr.disable("proj-disabled");
 
     const active = mgr.list("active");
     expect(active.length).toBe(1);
     expect(active[0]!.name).toBe("proj-active");
 
-    const suspended = mgr.list("suspended");
-    expect(suspended.length).toBe(1);
-    expect(suspended[0]!.name).toBe("proj-suspended");
+    const disabled = mgr.list("disabled");
+    expect(disabled.length).toBe(1);
+    expect(disabled[0]!.name).toBe("proj-disabled");
 
     const all = mgr.list();
     expect(all.length).toBe(2);
