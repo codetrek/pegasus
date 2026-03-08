@@ -14,7 +14,7 @@
  *   - getStatus returns running task info
  *   - getStatus returns null for unknown taskId
  *   - listAll returns all active tasks
- *   - per-type tool registry uses allTaskTools by default
+ *   - per-type tool registry uses allSubagentTools by default
  *   - concurrent tasks — submit 2 tasks, both complete independently
  *   - onNotify callback forwarded from Agent
  *   - setAdditionalTools clears tool registry cache
@@ -24,10 +24,10 @@
  */
 
 import { describe, test, expect, mock, beforeEach, afterEach, afterAll } from "bun:test";
-import { Agent, type TaskNotification } from "../../../src/agents/agent.ts";
+import { Agent, type SubagentNotification } from "../../../src/agents/agent.ts";
 import type { LanguageModel } from "../../../src/infra/llm-types.ts";
 import { SubAgentTypeRegistry } from "../../../src/agents/subagents/registry.ts";
-import { allTaskTools } from "../../../src/agents/tools/builtins/index.ts";
+import { allSubagentTools } from "../../../src/agents/tools/builtins/index.ts";
 import { ToolRegistry } from "../../../src/agents/tools/registry.ts";
 import type { Tool, ToolContext, ToolResult } from "../../../src/agents/tools/types.ts";
 import { ToolCategory } from "../../../src/agents/tools/types.ts";
@@ -83,7 +83,7 @@ let tempDir: string;
 
 interface CreateAgentOpts {
   model?: LanguageModel;
-  onNotification?: (n: TaskNotification) => void;
+  onNotification?: (n: SubagentNotification) => void;
   storeImage?: ToolContext["storeImage"];
   resolveModel?: (tierOrSpec: string) => LanguageModel;
   subagentTypeRegistry?: SubAgentTypeRegistry;
@@ -98,7 +98,7 @@ function createAgentWithSubagents(overrides?: CreateAgentOpts): Agent {
     sessionDir: path.join(tempDir, "session"),
     subagentConfig: {
       subagentTypeRegistry: overrides?.subagentTypeRegistry ?? new SubAgentTypeRegistry(),
-      tasksDir: path.join(tempDir, "tasks"),
+      subagentsDir: path.join(tempDir, "tasks"),
       onNotification: overrides?.onNotification ?? (() => {}),
       storeImage: overrides?.storeImage,
       resolveModel: overrides?.resolveModel,
@@ -156,7 +156,7 @@ describe("Agent subagent management", () => {
 
   describe("submit runs agent and notifies completed on success", () => {
     test("sends completed notification with result", async () => {
-      const onNotification = mock((_n: TaskNotification) => {});
+      const onNotification = mock((_n: SubagentNotification) => {});
       const model = createMockModel(
         mock(async () => ({
           text: "result: 42",
@@ -171,17 +171,17 @@ describe("Agent subagent management", () => {
       await waitForNotifications();
 
       expect(onNotification).toHaveBeenCalled();
-      const calls = (onNotification as any).mock.calls as TaskNotification[][];
+      const calls = (onNotification as any).mock.calls as SubagentNotification[][];
       const completedCall = calls.find((c) => c[0]!.type === "completed");
       expect(completedCall).toBeDefined();
-      expect(completedCall![0]!.taskId).toBe(taskId);
+      expect(completedCall![0]!.subagentId).toBe(taskId);
       expect((completedCall![0] as any).result).toBe("result: 42");
     }, 5000);
   });
 
   describe("submit notifies failed on LLM error", () => {
     test("sends failed notification with error message", async () => {
-      const onNotification = mock((_n: TaskNotification) => {});
+      const onNotification = mock((_n: SubagentNotification) => {});
       const model = createMockModel(
         mock(async () => {
           throw new Error("LLM connection refused");
@@ -194,10 +194,10 @@ describe("Agent subagent management", () => {
       await waitForNotifications();
 
       expect(onNotification).toHaveBeenCalled();
-      const calls = (onNotification as any).mock.calls as TaskNotification[][];
+      const calls = (onNotification as any).mock.calls as SubagentNotification[][];
       const failedCall = calls.find((c) => c[0]!.type === "failed");
       expect(failedCall).toBeDefined();
-      expect(failedCall![0]!.taskId).toBe(taskId);
+      expect(failedCall![0]!.subagentId).toBe(taskId);
       expect((failedCall![0] as any).error).toBeTruthy();
     }, 5000);
   });
@@ -224,7 +224,7 @@ describe("Agent subagent management", () => {
       const status = agent.getStatus(taskId);
 
       expect(status).not.toBeNull();
-      expect(status!.taskId).toBe(taskId);
+      expect(status!.subagentId).toBe(taskId);
       expect(status!.input).toBe("analyze data");
       expect(status!.taskType).toBe("explore");
       expect(status!.description).toBe("Explore task");
@@ -251,7 +251,7 @@ describe("Agent subagent management", () => {
       const all = agent.listAll();
       expect(all.length).toBe(2);
 
-      const ids = all.map((t) => t.taskId);
+      const ids = all.map((t) => t.subagentId);
       expect(ids).toContain(id1);
       expect(ids).toContain(id2);
     }, 5000);
@@ -262,7 +262,7 @@ describe("Agent subagent management", () => {
     }, 5000);
   });
 
-  describe("per-type tool registry uses allTaskTools by default", () => {
+  describe("per-type tool registry uses allSubagentTools by default", () => {
     test("unknown task type gets all task tools", () => {
       const [model] = createBlockingModel();
       const registry = new SubAgentTypeRegistry();
@@ -277,8 +277,8 @@ describe("Agent subagent management", () => {
       expect(cachedRegistry).toBeDefined();
 
       const registeredTools = cachedRegistry.list();
-      // depth=0 adds spawn_subagent + resume_subagent to the base allTaskTools
-      expect(registeredTools.length).toBe(allTaskTools.length + 2);
+      // depth=0 adds spawn_subagent + resume_subagent to the base allSubagentTools
+      expect(registeredTools.length).toBe(allSubagentTools.length + 2);
     }, 5000);
 
     test("registered type with specific tools only gets those tools", () => {
@@ -314,8 +314,8 @@ describe("Agent subagent management", () => {
 
   describe("concurrent tasks complete independently", () => {
     test("submit 2 tasks, both complete with correct notifications", async () => {
-      const notifications: TaskNotification[] = [];
-      const onNotification = mock((n: TaskNotification) => {
+      const notifications: SubagentNotification[] = [];
+      const onNotification = mock((n: SubagentNotification) => {
         notifications.push(n);
       });
 
@@ -346,7 +346,7 @@ describe("Agent subagent management", () => {
       const completedNotifs = notifications.filter((n) => n.type === "completed");
       expect(completedNotifs.length).toBe(2);
 
-      const completedIds = completedNotifs.map((n) => n.taskId);
+      const completedIds = completedNotifs.map((n) => n.subagentId);
       expect(completedIds).toContain(id1);
       expect(completedIds).toContain(id2);
     }, 5000);
@@ -354,8 +354,8 @@ describe("Agent subagent management", () => {
 
   describe("onNotify callback forwarded from Agent", () => {
     test("sends notify notification when LLM returns notify tool call", async () => {
-      const notifications: TaskNotification[] = [];
-      const onNotification = mock((n: TaskNotification) => {
+      const notifications: SubagentNotification[] = [];
+      const onNotification = mock((n: SubagentNotification) => {
         notifications.push(n);
       });
 
@@ -418,8 +418,8 @@ describe("Agent subagent management", () => {
 
   describe("run() promise rejection triggers failed notification", () => {
     test("catches thrown error from agent.run() in the .catch() branch", async () => {
-      const notifications: TaskNotification[] = [];
-      const onNotification = mock((n: TaskNotification) => {
+      const notifications: SubagentNotification[] = [];
+      const onNotification = mock((n: SubagentNotification) => {
         notifications.push(n);
       });
 
@@ -450,8 +450,8 @@ describe("Agent subagent management", () => {
     }, 5000);
 
     test("handles non-Error thrown from run() via String(err) path", async () => {
-      const notifications: TaskNotification[] = [];
-      const onNotification = mock((n: TaskNotification) => {
+      const notifications: SubagentNotification[] = [];
+      const onNotification = mock((n: SubagentNotification) => {
         notifications.push(n);
       });
 
@@ -584,8 +584,8 @@ describe("Agent subagent management", () => {
 
   describe("imageRefs flow from subagent through notification", () => {
     test("completed notification includes imageRefs when tool returns images", async () => {
-      const notifications: TaskNotification[] = [];
-      const onNotification = mock((n: TaskNotification) => {
+      const notifications: SubagentNotification[] = [];
+      const onNotification = mock((n: SubagentNotification) => {
         notifications.push(n);
       });
 
@@ -650,8 +650,8 @@ describe("Agent subagent management", () => {
     }, 5000);
 
     test("completed notification has no imageRefs when no images produced", async () => {
-      const notifications: TaskNotification[] = [];
-      const onNotification = mock((n: TaskNotification) => {
+      const notifications: SubagentNotification[] = [];
+      const onNotification = mock((n: SubagentNotification) => {
         notifications.push(n);
       });
 
@@ -737,7 +737,7 @@ describe("Agent subagent management", () => {
     }, 5000);
 
     test("subagent works without storeImage (undefined)", async () => {
-      const notifications: TaskNotification[] = [];
+      const notifications: SubagentNotification[] = [];
       const agent = createAgentWithSubagents({
         onNotification: (n) => notifications.push(n),
         // storeImage not provided
@@ -776,7 +776,7 @@ describe("Agent subagent management", () => {
         model: "fast",  // SubAgentType declares model tier
       }]);
 
-      const notifications: TaskNotification[] = [];
+      const notifications: SubagentNotification[] = [];
       const agent = createAgentWithSubagents({
         onNotification: (n) => notifications.push(n),
         subagentTypeRegistry: registry,
@@ -815,7 +815,7 @@ describe("Agent subagent management", () => {
 
       const resolveModel = mock((_tier: string) => parentModel);
 
-      const notifications: TaskNotification[] = [];
+      const notifications: SubagentNotification[] = [];
       const agent = createAgentWithSubagents({
         model: parentModel,
         onNotification: (n) => notifications.push(n),

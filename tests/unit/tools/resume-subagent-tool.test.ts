@@ -13,8 +13,8 @@ describe("resume_subagent tool", () => {
 
   function makeContext(overrides?: Partial<ToolContext>): ToolContext {
     return {
-      taskId: "main-agent",
-      taskRegistry: {
+      agentId: "main-agent",
+      subagentRegistry: {
         submit: () => "",
         resume: async (_id: string, _input: string) => "sa-001",
         ...registryStubs,
@@ -27,7 +27,7 @@ describe("resume_subagent tool", () => {
   it("should resume a subagent and return status", async () => {
     let capturedArgs: unknown[] = [];
     const ctx = makeContext({
-      taskRegistry: {
+      subagentRegistry: {
         submit: () => "",
         resume: async (id: string, input: string) => {
           capturedArgs = [id, input];
@@ -65,18 +65,18 @@ describe("resume_subagent tool", () => {
     expect(tickStarted).toBe(true);
   });
 
-  it("should return error when taskRegistry is not available", async () => {
+  it("should return error when subagentRegistry is not available", async () => {
     const result = await resume_subagent.execute(
       { subagent_id: "sa-1", input: "go" },
-      { taskId: "test" },
+      { agentId: "test" },
     );
     expect(result.success).toBe(false);
-    expect(result.error).toContain("taskRegistry not available");
+    expect(result.error).toContain("subagentRegistry not available");
   });
 
   it("should handle subagent not found error", async () => {
     const ctx = makeContext({
-      taskRegistry: {
+      subagentRegistry: {
         submit: () => "",
         resume: async () => { throw new Error("Task sa-999 not found in task index"); },
         ...registryStubs,
@@ -93,7 +93,7 @@ describe("resume_subagent tool", () => {
 
   it("should handle subagent still running error", async () => {
     const ctx = makeContext({
-      taskRegistry: {
+      subagentRegistry: {
         submit: () => "",
         resume: async () => { throw new Error("Task is still running, cannot resume"); },
         ...registryStubs,
@@ -121,7 +121,7 @@ describe("resume_subagent tool", () => {
   it("should not start tickManager on error", async () => {
     let tickStarted = false;
     const ctx = makeContext({
-      taskRegistry: {
+      subagentRegistry: {
         submit: () => "",
         resume: async () => { throw new Error("fail"); },
         ...registryStubs,

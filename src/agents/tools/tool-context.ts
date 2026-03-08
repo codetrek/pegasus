@@ -5,14 +5,14 @@
  * Tools depend on these interfaces instead of importing concrete classes,
  * breaking circular import chains while preserving full type safety.
  *
- * Each concrete class (TaskRunner, OwnerStore, SkillRegistry, etc.)
+ * Each concrete class (Agent, OwnerStore, SkillRegistry, etc.)
  * satisfies its Like interface via TypeScript structural typing —
  * no `implements` clause needed.
  */
 
-// ── TaskRegistry (TaskRunner) ────────────────────────────
+// ── SubagentRegistry (Agent) ────────────────────────────
 
-export interface TaskRegistryLike {
+export interface SubagentRegistryLike {
   submit(
     input: string,
     source: string,
@@ -20,9 +20,9 @@ export interface TaskRegistryLike {
     description: string,
     opts?: { memorySnapshot?: string; depth?: number },
   ): string;
-  resume(taskId: string, input: string): Promise<string>;
-  getStatus(taskId: string): { taskId: string; taskType: string; description: string; source: string; startedAt: number } | null;
-  listAll(): Array<{ taskId: string; taskType: string; description: string; source: string; startedAt: number }>;
+  resume(subagentId: string, input: string): Promise<string>;
+  getStatus(subagentId: string): { subagentId: string; taskType: string; description: string; source: string; startedAt: number } | null;
+  listAll(): Array<{ subagentId: string; taskType: string; description: string; source: string; startedAt: number }>;
   readonly activeCount: number;
 }
 
@@ -75,25 +75,25 @@ export interface ProjectAdapterLike {
 // ── BrowserManager ───────────────────────────────────────
 
 export interface BrowserManagerLike {
-  navigate(taskId: string, url: string): Promise<{ snapshot: string; truncated: boolean }>;
-  takeSnapshot(taskId: string): Promise<{ snapshot: string; truncated: boolean }>;
+  navigate(agentId: string, url: string): Promise<{ snapshot: string; truncated: boolean }>;
+  takeSnapshot(agentId: string): Promise<{ snapshot: string; truncated: boolean }>;
   screenshot(
-    taskId: string,
+    agentId: string,
     fullPage?: boolean,
   ): Promise<{ screenshotPath: string; snapshot: string; truncated: boolean }>;
-  click(taskId: string, ref: string): Promise<{ snapshot: string; truncated: boolean }>;
+  click(agentId: string, ref: string): Promise<{ snapshot: string; truncated: boolean }>;
   type(
-    taskId: string,
+    agentId: string,
     ref: string,
     text: string,
     submit?: boolean,
   ): Promise<{ snapshot: string; truncated: boolean }>;
   scroll(
-    taskId: string,
+    agentId: string,
     direction: string,
     amount?: number,
   ): Promise<{ snapshot: string; truncated: boolean }>;
-  closeSession(taskId: string): Promise<void>;
+  closeSession(agentId: string): Promise<void>;
 }
 
 // ── Callback types ───────────────────────────────────────

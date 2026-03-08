@@ -27,12 +27,12 @@ describe("use_skill tool", () => {
 
   function makeContext(overrides?: Partial<ToolContext>): ToolContext {
     return {
-      taskId: "main-agent",
+      agentId: "main-agent",
       skillRegistry: makeSkillRegistry({
         "code-review": { body: "Review the code for quality..." },
         "deploy": { context: "fork", agent: "general", body: "Deploy to production..." },
       }),
-      taskRegistry: {
+      subagentRegistry: {
         submit: (_input: string, _source: string, _type: string, _desc: string) => "task-skill-1",
         resume: async () => "",
         ...registryStubs,
@@ -55,7 +55,7 @@ describe("use_skill tool", () => {
   it("should fork skill as background task", async () => {
     let capturedArgs: unknown[] = [];
     const ctx = makeContext({
-      taskRegistry: {
+      subagentRegistry: {
         submit: (input: string, source: string, type: string, desc: string) => {
           capturedArgs = [input, source, type, desc];
           return "task-fork-1";
@@ -71,8 +71,8 @@ describe("use_skill tool", () => {
     );
 
     expect(result.success).toBe(true);
-    const data = result.result as { taskId: string; status: string; skill: string };
-    expect(data.taskId).toBe("task-fork-1");
+    const data = result.result as { subagentId: string; status: string; skill: string };
+    expect(data.subagentId).toBe("task-fork-1");
     expect(data.status).toBe("spawned");
     expect(data.skill).toBe("deploy");
 
@@ -114,21 +114,21 @@ describe("use_skill tool", () => {
   it("should return error when skillRegistry is not available", async () => {
     const result = await use_skill.execute(
       { skill: "test" },
-      { taskId: "test" },
+      { agentId: "test" },
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain("skillRegistry not available");
   });
 
-  it("should return error when taskRegistry missing for fork skill", async () => {
-    const ctx = makeContext({ taskRegistry: undefined });
+  it("should return error when subagentRegistry missing for fork skill", async () => {
+    const ctx = makeContext({ subagentRegistry: undefined });
 
     const result = await use_skill.execute(
       { skill: "deploy" },
       ctx,
     );
     expect(result.success).toBe(false);
-    expect(result.error).toContain("taskRegistry not available");
+    expect(result.error).toContain("subagentRegistry not available");
   });
 
   it("should handle null body for inline skill", async () => {
@@ -152,7 +152,7 @@ describe("use_skill tool", () => {
       skillRegistry: makeSkillRegistry({
         "explore-skill": { context: "fork", agent: "explore", body: "go" },
       }),
-      taskRegistry: {
+      subagentRegistry: {
         submit: (_input: string, _source: string, type: string, _desc: string) => {
           capturedType = type;
           return "t-1";
@@ -172,7 +172,7 @@ describe("use_skill tool", () => {
       skillRegistry: makeSkillRegistry({
         "no-agent-skill": { context: "fork", body: "go" },
       }),
-      taskRegistry: {
+      subagentRegistry: {
         submit: (_input: string, _source: string, type: string, _desc: string) => {
           capturedType = type;
           return "t-1";

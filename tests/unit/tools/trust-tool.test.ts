@@ -18,7 +18,7 @@ describe("trust tool", () => {
   it("should return error when ownerStore is not in context", async () => {
     const result = await trust.execute(
       { action: "list" },
-      { taskId: "test" },
+      { agentId: "test" },
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain("ownerStore not available");
@@ -28,7 +28,7 @@ describe("trust tool", () => {
     const store = makeTempStore();
     const result = await trust.execute(
       { action: "add", channel: "discord", userId: "user123" },
-      { taskId: "test", ownerStore: store },
+      { agentId: "test", ownerStore: store },
     );
     expect(result.success).toBe(true);
     const data = result.result as { action: string; channel: string; userId: string; status: string };
@@ -47,7 +47,7 @@ describe("trust tool", () => {
 
     const result = await trust.execute(
       { action: "remove", channel: "discord", userId: "user123" },
-      { taskId: "test", ownerStore: store },
+      { agentId: "test", ownerStore: store },
     );
     expect(result.success).toBe(true);
     const data = result.result as { action: string; channel: string; userId: string; status: string };
@@ -68,7 +68,7 @@ describe("trust tool", () => {
 
     const result = await trust.execute(
       { action: "list" },
-      { taskId: "test", ownerStore: store },
+      { agentId: "test", ownerStore: store },
     );
     expect(result.success).toBe(true);
     const data = result.result as { action: string; channels: Record<string, string[]> };
@@ -84,7 +84,7 @@ describe("trust tool", () => {
 
     const result = await trust.execute(
       { action: "list" },
-      { taskId: "test", ownerStore: store },
+      { agentId: "test", ownerStore: store },
     );
     expect(result.success).toBe(true);
     const data = result.result as { action: string; channels: Record<string, string[]> };
@@ -96,7 +96,7 @@ describe("trust tool", () => {
     const store = makeTempStore();
     const result = await trust.execute(
       { action: "add", userId: "user123" },
-      { taskId: "test", ownerStore: store },
+      { agentId: "test", ownerStore: store },
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain("channel");
@@ -106,7 +106,7 @@ describe("trust tool", () => {
     const store = makeTempStore();
     const result = await trust.execute(
       { action: "add", channel: "discord" },
-      { taskId: "test", ownerStore: store },
+      { agentId: "test", ownerStore: store },
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain("userId");
@@ -116,7 +116,7 @@ describe("trust tool", () => {
     const store = makeTempStore();
     const result = await trust.execute(
       { action: "remove", userId: "user123" },
-      { taskId: "test", ownerStore: store },
+      { agentId: "test", ownerStore: store },
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain("channel");
@@ -126,7 +126,7 @@ describe("trust tool", () => {
     const store = makeTempStore();
     const result = await trust.execute(
       { action: "remove", channel: "discord" },
-      { taskId: "test", ownerStore: store },
+      { agentId: "test", ownerStore: store },
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain("userId");
@@ -141,7 +141,7 @@ describe("trust tool", () => {
 
     const result = await trust.execute(
       { action: "list" },
-      { taskId: "test", ownerStore: brokenStore },
+      { agentId: "test", ownerStore: brokenStore },
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain("storage failure");

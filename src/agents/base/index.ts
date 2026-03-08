@@ -37,7 +37,7 @@ export {
   type ReplyCallback,
   type QueueItem,
   type CustomQueueItem,
-  type TaskNotificationPayload,
+  type SubagentNotificationPayload,
   formatChannelMeta,
   formatToolResult,
   mechanicalSummary,

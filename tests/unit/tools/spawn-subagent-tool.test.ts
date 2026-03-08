@@ -13,8 +13,8 @@ describe("spawn_subagent tool", () => {
 
   function makeContext(overrides?: Partial<ToolContext>): ToolContext {
     return {
-      taskId: "main-agent",
-      taskRegistry: {
+      agentId: "main-agent",
+      subagentRegistry: {
         submit: (_input: string, _source: string, _type: string, _desc: string, _opts?: unknown) => "sa-001",
         resume: async () => "",
         ...registryStubs,
@@ -28,7 +28,7 @@ describe("spawn_subagent tool", () => {
   it("should spawn a subagent and return subagentId", async () => {
     let capturedArgs: unknown[] = [];
     const ctx = makeContext({
-      taskRegistry: {
+      subagentRegistry: {
         submit: (input: string, source: string, type: string, desc: string, opts?: { memorySnapshot?: string; depth?: number }) => {
           capturedArgs = [input, source, type, desc, opts];
           return "sa-xyz";
@@ -61,10 +61,10 @@ describe("spawn_subagent tool", () => {
     expect(opts.depth).toBe(1);
   });
 
-  it("should pass type parameter to taskRegistry.submit", async () => {
+  it("should pass type parameter to subagentRegistry.submit", async () => {
     let capturedType: string | undefined;
     const ctx = makeContext({
-      taskRegistry: {
+      subagentRegistry: {
         submit: (_input: string, _source: string, type: string, _desc: string) => {
           capturedType = type;
           return "sa-typed";
@@ -96,18 +96,18 @@ describe("spawn_subagent tool", () => {
     expect(tickStarted).toBe(true);
   });
 
-  it("should return error when taskRegistry is not available", async () => {
+  it("should return error when subagentRegistry is not available", async () => {
     const result = await spawn_subagent.execute(
       { description: "test", input: "test" },
-      { taskId: "test" },
+      { agentId: "test" },
     );
     expect(result.success).toBe(false);
-    expect(result.error).toContain("taskRegistry not available");
+    expect(result.error).toContain("subagentRegistry not available");
   });
 
   it("should handle submit errors gracefully", async () => {
     const ctx = makeContext({
-      taskRegistry: {
+      subagentRegistry: {
         submit: () => { throw new Error("task limit reached"); },
         resume: async () => "",
         ...registryStubs,
@@ -126,7 +126,7 @@ describe("spawn_subagent tool", () => {
     let capturedOpts: unknown = "NOT_SET";
     const ctx = makeContext({
       getMemorySnapshot: undefined,
-      taskRegistry: {
+      subagentRegistry: {
         submit: (_input: string, _source: string, _type: string, _desc: string, opts?: unknown) => {
           capturedOpts = opts;
           return "sa-1";

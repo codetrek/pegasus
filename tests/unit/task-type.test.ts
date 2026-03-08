@@ -4,7 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { SubAgentTypeRegistry } from "@pegasus/agents/subagents/registry.ts";
 import { parseSubAgentTypeFile, scanSubAgentTypeDir, loadSubAgentTypeDefinitions } from "@pegasus/agents/subagents/loader.ts";
 import type { SubAgentTypeDefinition } from "@pegasus/agents/subagents/types.ts";
-import { allTaskTools } from "@pegasus/agents/tools/builtins";
+import { allSubagentTools } from "@pegasus/agents/tools/builtins";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
@@ -231,7 +231,7 @@ describe("SubAgentTypeRegistry", () => {
     const reg = new SubAgentTypeRegistry();
     reg.registerMany([makeDef("general")]);
     const names = reg.getToolNames("general");
-    expect(names.length).toBe(allTaskTools.length);
+    expect(names.length).toBe(allSubagentTools.length);
     expect(names).toContain("read_file");
     expect(names).toContain("notify");
   });
@@ -245,7 +245,7 @@ describe("SubAgentTypeRegistry", () => {
   test("getToolNames falls back to * for unknown type", () => {
     const reg = new SubAgentTypeRegistry();
     const names = reg.getToolNames("unknown");
-    expect(names.length).toBe(allTaskTools.length);
+    expect(names.length).toBe(allSubagentTools.length);
   });
 
   test("getPrompt returns prompt body", () => {

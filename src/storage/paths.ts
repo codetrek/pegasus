@@ -9,8 +9,8 @@ import path from "node:path";
 export interface AgentStorePaths {
   /** Absolute path to session directory (contains current.jsonl + archives). */
   session: string;
-  /** Absolute path to tasks directory (contains index.jsonl, pending.json, date dirs). */
-  tasks: string;
+  /** Absolute path to subagents directory (contains index.jsonl, date dirs). */
+  subagents: string;
   /** Absolute path to memory directory. Undefined = agent has no persistent memory. */
   memory?: string;
 }
@@ -20,7 +20,7 @@ export function buildMainAgentPaths(dataDir: string): AgentStorePaths {
   const root = path.join(dataDir, "agents", "main");
   return {
     session: path.join(root, "session"),
-    tasks: path.join(root, "tasks"),
+    subagents: path.join(root, "subagents"),
     memory: path.join(root, "memory"),
   };
 }
@@ -29,7 +29,7 @@ export function buildMainAgentPaths(dataDir: string): AgentStorePaths {
 export function buildSubAgentPaths(subagentDir: string): AgentStorePaths {
   return {
     session: path.join(subagentDir, "session"),
-    tasks: path.join(subagentDir, "tasks"),
+    subagents: path.join(subagentDir, "subagents"),
   };
 }
 
@@ -37,7 +37,7 @@ export function buildSubAgentPaths(subagentDir: string): AgentStorePaths {
 export function buildProjectAgentPaths(projectDir: string): AgentStorePaths {
   return {
     session: path.join(projectDir, "session"),
-    tasks: path.join(projectDir, "tasks"),
+    subagents: path.join(projectDir, "subagents"),
     memory: path.join(projectDir, "memory"),
   };
 }

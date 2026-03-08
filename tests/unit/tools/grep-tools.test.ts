@@ -27,7 +27,7 @@ describe("grep_files JS fallback", () => {
   });
 
   it("should produce identical output format to rg for single file search", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const filePath = `${testDir}/fallback-single.txt`;
     await Bun.write(filePath, "first line\nsecond match here\nthird line\nfourth match here");
 
@@ -45,7 +45,7 @@ describe("grep_files JS fallback", () => {
   });
 
   it("should skip blacklisted directories", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const nodeModules = `${testDir}/node_modules`;
     const dist = `${testDir}/dist`;
     const src = `${testDir}/src`;
@@ -70,7 +70,7 @@ describe("grep_files JS fallback", () => {
   });
 
   it("should skip files larger than configured maxFileSize", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     // Set a small maxFileSize for testing (500KB)
     const settings = SettingsSchema.parse({ dataDir: "/tmp/test", authDir: "/tmp/test-auth", tools: { maxFileSize: 500_000 } });
     setSettings(settings);
@@ -97,7 +97,7 @@ describe("grep_files JS fallback", () => {
   }, 10000);
 
   it("should respect .gitignore patterns", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const ignored = `${testDir}/ignored`;
     const kept = `${testDir}/kept`;
     await mkdir(ignored, { recursive: true });
@@ -118,7 +118,7 @@ describe("grep_files JS fallback", () => {
   });
 
   it("should work with context_lines in fallback mode", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const filePath = `${testDir}/fallback-context.txt`;
     await Bun.write(filePath, "line1\nline2\nMATCH_HERE\nline4\nline5");
 
@@ -137,7 +137,7 @@ describe("grep_files JS fallback", () => {
   });
 
   it("should handle files_with_matches mode in fallback", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     await Bun.write(`${testDir}/fb-a.txt`, "match_target");
     await Bun.write(`${testDir}/fb-b.txt`, "no hit");
 
@@ -154,7 +154,7 @@ describe("grep_files JS fallback", () => {
   });
 
   it("should handle count mode in fallback", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     await Bun.write(`${testDir}/fb-count.txt`, "x\nx\nx");
 
     const result = await grep_files.execute({
@@ -185,7 +185,7 @@ describe("grep_files with rg", () => {
     // Skip if rg is not available
     if (!isRgAvailable()) return;
 
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const filePath = `${testDir}/rg-test.txt`;
     await Bun.write(filePath, "alpha\nbeta match_rg\ngamma\ndelta match_rg");
 
@@ -204,7 +204,7 @@ describe("grep_files with rg", () => {
   it("should handle rg context mode correctly", async () => {
     if (!isRgAvailable()) return;
 
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const filePath = `${testDir}/rg-context.txt`;
     await Bun.write(filePath, "aa\nbb\ncc MATCH_RG\ndd\nee");
 
@@ -225,7 +225,7 @@ describe("grep_files with rg", () => {
   it("should handle rg files_with_matches mode", async () => {
     if (!isRgAvailable()) return;
 
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     await Bun.write(`${testDir}/rg-fwm-a.txt`, "rg_fwm_target");
     await Bun.write(`${testDir}/rg-fwm-b.txt`, "nothing here");
 
@@ -244,7 +244,7 @@ describe("grep_files with rg", () => {
   it("should handle rg count mode", async () => {
     if (!isRgAvailable()) return;
 
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     await Bun.write(`${testDir}/rg-count.txt`, "x\nx\nx");
 
     const result = await grep_files.execute({
@@ -300,7 +300,7 @@ describe("grep_files JS fallback — binary file skipping", () => {
   });
 
   it("should skip binary files (files containing null bytes)", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     // Create a binary file with null bytes in the first 8KB
     const binaryContent = Buffer.from([0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x77, 0x6f, 0x72, 0x6c, 0x64]); // "hello\0world"
     await Bun.write(`${testDir}/binary.dat`, binaryContent);
@@ -319,7 +319,7 @@ describe("grep_files JS fallback — binary file skipping", () => {
   });
 
   it("should skip binary files in single-file mode", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const binaryContent = Buffer.from([0x74, 0x65, 0x73, 0x74, 0x00, 0x64, 0x61, 0x74, 0x61]); // "test\0data"
     const filePath = `${testDir}/single-binary.dat`;
     await Bun.write(filePath, binaryContent);
@@ -351,7 +351,7 @@ describe("grep_files JS fallback — include filter in directory search", () => 
   });
 
   it("should filter files by include glob with {a,b} alternation pattern", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     await Bun.write(`${testDir}/app.ts`, "include_target");
     await Bun.write(`${testDir}/app.js`, "include_target");
     await Bun.write(`${testDir}/data.json`, "include_target");
@@ -373,7 +373,7 @@ describe("grep_files JS fallback — include filter in directory search", () => 
   });
 
   it("should filter files by simple include glob in directory search", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const subDir = `${testDir}/sub-include`;
     await mkdir(subDir, { recursive: true });
     await Bun.write(`${subDir}/code.ts`, "filter_target");
@@ -408,7 +408,7 @@ describe("grep_files JS fallback — multiline mode", () => {
   });
 
   it("should search with multiline content mode in JS fallback", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const filePath = `${testDir}/ml-content.txt`;
     await Bun.write(filePath, "start\nmatch_this\nend");
 
@@ -425,7 +425,7 @@ describe("grep_files JS fallback — multiline mode", () => {
   });
 
   it("should search directory with multiline files_with_matches in JS fallback", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     await Bun.write(`${testDir}/ml-fwm-a.txt`, "foo\nbar_ml_target");
     await Bun.write(`${testDir}/ml-fwm-b.txt`, "no match at all");
 
@@ -443,7 +443,7 @@ describe("grep_files JS fallback — multiline mode", () => {
   });
 
   it("should search with multiline count mode in JS fallback", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const filePath = `${testDir}/ml-count.txt`;
     await Bun.write(filePath, "aa\nbb\naa\nbb");
 
@@ -460,7 +460,7 @@ describe("grep_files JS fallback — multiline mode", () => {
   });
 
   it("should skip binary files in multiline mode", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const binaryContent = Buffer.from([0x61, 0x61, 0x0a, 0x62, 0x62, 0x00, 0x63]); // "aa\nbb\0c"
     await Bun.write(`${testDir}/ml-binary.dat`, binaryContent);
     await Bun.write(`${testDir}/ml-text.txt`, "aa\nbb match");
@@ -478,7 +478,7 @@ describe("grep_files JS fallback — multiline mode", () => {
   });
 
   it("should skip large files in multiline mode", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     // Set a small maxFileSize for testing (500KB)
     const settings = SettingsSchema.parse({ dataDir: "/tmp/test", authDir: "/tmp/test-auth", tools: { maxFileSize: 500_000 } });
     setSettings(settings);
@@ -502,7 +502,7 @@ describe("grep_files JS fallback — multiline mode", () => {
   }, 10000);
 
   it("should truncate long multiline matches at 200 chars", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const filePath = `${testDir}/ml-long.txt`;
     const longLine = "A".repeat(250);
     await Bun.write(filePath, longLine);
@@ -519,7 +519,7 @@ describe("grep_files JS fallback — multiline mode", () => {
   });
 
   it("should handle zero-length multiline regex matches", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const filePath = `${testDir}/ml-zero.txt`;
     await Bun.write(filePath, "abc");
 
@@ -535,7 +535,7 @@ describe("grep_files JS fallback — multiline mode", () => {
   }, 5000);
 
   it("should handle multiline search on single file (not directory)", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const filePath = `${testDir}/ml-single.txt`;
     await Bun.write(filePath, "first\nsecond\nthird");
 
@@ -568,7 +568,7 @@ describe("grep_files JS fallback — .gitignore file-level ignore", () => {
   });
 
   it("should respect .gitignore file patterns (not just directories)", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     // Gitignore that ignores specific files
     await Bun.write(`${testDir}/.gitignore`, "*.log\n");
     await Bun.write(`${testDir}/app.ts`, "gi_file_target");
@@ -586,7 +586,7 @@ describe("grep_files JS fallback — .gitignore file-level ignore", () => {
   });
 
   it("should handle directory that cannot be read (permission error)", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     await Bun.write(`${testDir}/readable.txt`, "perm_target");
 
     // Try to search — even if some sub-path fails, should not crash
@@ -617,7 +617,7 @@ describe("grep_files JS fallback — max_results truncation for files_with_match
   });
 
   it("should truncate files_with_matches at max_results and show footer", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     // Create files with multiple match lines each so totalMatches > filesWithMatches.length
     for (let i = 0; i < 5; i++) {
       await Bun.write(`${testDir}/fwm-trunc-${i}.txt`, "fwm_trunc_target\nfwm_trunc_target\nfwm_trunc_target");
@@ -639,7 +639,7 @@ describe("grep_files JS fallback — max_results truncation for files_with_match
   });
 
   it("should truncate count mode at max_results", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     for (let i = 0; i < 5; i++) {
       await Bun.write(`${testDir}/cnt-trunc-${i}.txt`, "cnt_trunc_target");
     }
@@ -674,7 +674,7 @@ describe("grep_files JS fallback — multiline max_results truncation", () => {
   });
 
   it("should truncate multiline files_with_matches at max_results", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     for (let i = 0; i < 5; i++) {
       await Bun.write(`${testDir}/ml-fwm-t-${i}.txt`, "ml\ntarget");
     }
@@ -694,7 +694,7 @@ describe("grep_files JS fallback — multiline max_results truncation", () => {
   });
 
   it("should truncate multiline count mode at max_results", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     for (let i = 0; i < 5; i++) {
       await Bun.write(`${testDir}/ml-cnt-t-${i}.txt`, "ml\ntarget");
     }
@@ -714,7 +714,7 @@ describe("grep_files JS fallback — multiline max_results truncation", () => {
   });
 
   it("should truncate multiline content mode at max_results", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     // Create a file with many multiline matches
     const content = Array.from({ length: 20 }, (_, i) => `start${i}\nend${i}`).join("\n");
     await Bun.write(`${testDir}/ml-content-trunc.txt`, content);
@@ -747,7 +747,7 @@ describe("grep_files with rg — context block separators", () => {
   it("should handle rg context output with non-contiguous blocks (-- separators)", async () => {
     if (!isRgAvailable()) return;
 
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const filePath = `${testDir}/rg-blocks.txt`;
     // Create content with matches far apart to produce -- separators
     const lines = [
@@ -775,7 +775,7 @@ describe("grep_files with rg — context block separators", () => {
   it("should handle rg multiline mode", async () => {
     if (!isRgAvailable()) return;
 
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const filePath = `${testDir}/rg-multiline.txt`;
     await Bun.write(filePath, "alpha\nbeta\ngamma");
 
@@ -794,7 +794,7 @@ describe("grep_files with rg — context block separators", () => {
   it("should handle rg case_insensitive mode", async () => {
     if (!isRgAvailable()) return;
 
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const filePath = `${testDir}/rg-case.txt`;
     await Bun.write(filePath, "UPPER\nlower\nMixed");
 
@@ -812,7 +812,7 @@ describe("grep_files with rg — context block separators", () => {
   it("should handle rg with include glob filter", async () => {
     if (!isRgAvailable()) return;
 
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     await Bun.write(`${testDir}/rg-inc.ts`, "rg_include_target");
     await Bun.write(`${testDir}/rg-inc.py`, "rg_include_target");
 
@@ -831,7 +831,7 @@ describe("grep_files with rg — context block separators", () => {
   it("should handle rg max_results truncation in content mode", async () => {
     if (!isRgAvailable()) return;
 
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const lines = Array.from({ length: 20 }, (_, i) => `line ${i} rg_trunc_match`);
     await Bun.write(`${testDir}/rg-trunc.txt`, lines.join("\n"));
 
@@ -862,7 +862,7 @@ describe("grep_files — rg error handling", () => {
   it("should rethrow regex errors from rg", async () => {
     if (!isRgAvailable()) return;
 
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     await Bun.write(`${testDir}/rg-err.txt`, "content");
 
     // An invalid PCRE2 pattern that JS RegExp accepts but rg rejects
@@ -894,7 +894,7 @@ describe("grep_files JS fallback — context with multiple files and separators"
   });
 
   it("should produce -- block separator between non-contiguous ranges in same file", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const filePath = `${testDir}/fb-blocks.txt`;
     const lines = [
       "line1", "MATCH_A", "line3",
@@ -918,7 +918,7 @@ describe("grep_files JS fallback — context with multiple files and separators"
   });
 
   it("should handle context with multiple files", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     await Bun.write(`${testDir}/fb-ctx-a.txt`, "line1\nCTX_MULTI_MATCH\nline3");
     await Bun.write(`${testDir}/fb-ctx-b.txt`, "line1\nline2\nCTX_MULTI_MATCH\nline4");
 
@@ -964,7 +964,7 @@ describe("grep_files JS fallback — streaming and maxFileSize", () => {
   });
 
   it("should stream and find matches in files larger than 1MB", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     // Create a ~2MB file with a match near the end
     const padding = "x".repeat(999) + "\n"; // 1000 bytes per line
     const lineCount = 2000; // ~2MB total
@@ -988,7 +988,7 @@ describe("grep_files JS fallback — streaming and maxFileSize", () => {
   }, 15000);
 
   it("should stream with context_lines on files larger than 1MB", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     // Create a ~1.5MB file with match in the middle
     const lines: string[] = [];
     for (let i = 0; i < 1500; i++) {
@@ -1016,7 +1016,7 @@ describe("grep_files JS fallback — streaming and maxFileSize", () => {
   }, 15000);
 
   it("should respect configured maxFileSize and skip files exceeding it", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     // Set maxFileSize to 100KB
     const settings = SettingsSchema.parse({ dataDir: "/tmp/test", authDir: "/tmp/test-auth", tools: { maxFileSize: 100_000 } });
     setSettings(settings);

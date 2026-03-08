@@ -1,10 +1,8 @@
 /**
  * resume_subagent tool — resume a completed sub-agent with new input.
  *
- * Self-executing: calls taskRegistry.resume() and tickManager.start()
+ * Self-executing: calls subagentRegistry.resume() and tickManager.start()
  * directly, eliminating the need for MainAgent signal interception.
- *
- * Now backed by TaskRunner.resume() instead of SubAgentManager.
  */
 
 import { z } from "zod";
@@ -31,11 +29,11 @@ export const resume_subagent: Tool = {
       input: string;
     };
 
-    const registry = context.taskRegistry;
+    const registry = context.subagentRegistry;
     if (!registry) {
       return {
         success: false,
-        error: "taskRegistry not available in this context",
+        error: "subagentRegistry not available in this context",
         startedAt,
         completedAt: Date.now(),
         durationMs: Date.now() - startedAt,

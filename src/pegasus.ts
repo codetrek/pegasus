@@ -240,7 +240,7 @@ export class Pegasus {
    *   4. MCP (connect + register tools + token refresh)
    *   5. Skills
    *   6. AI Task Types
-   *   7. TaskRunner
+   *   7. (Subagent management — built into Agent)
    *   8. Projects (ProjectManager + ProjectAdapter)
    *   9. ImageManager (already created in constructor based on config)
    *  10. TickManager

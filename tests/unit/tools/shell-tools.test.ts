@@ -8,7 +8,7 @@ import { ToolCategory } from "../../../src/agents/tools/types.ts";
 import os from "node:os";
 import fs from "node:fs";
 
-const context = { taskId: "test-task-id" };
+const context = { agentId: "test-task-id" };
 
 type ShellResult = {
   exitCode: number;

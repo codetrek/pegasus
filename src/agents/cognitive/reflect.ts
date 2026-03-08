@@ -135,7 +135,7 @@ export class PostTaskReflector {
         const result = await this.deps.toolExecutor.execute(
           tc.name,
           tc.arguments,
-          { taskId: context.id, memoryDir: this.deps.memoryDir },
+          { agentId: context.id, memoryDir: this.deps.memoryDir },
         );
         messages.push({
           role: "tool",

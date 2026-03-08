@@ -53,7 +53,7 @@ function makeMockAdapter() {
 
 function makeContext(manager = mockManager, adapter?: ReturnType<typeof makeMockAdapter>): ToolContext {
   return {
-    taskId: "test",
+    agentId: "test",
     projectManager: manager,
     projectAdapter: adapter,
   } as unknown as ToolContext;
@@ -156,7 +156,7 @@ describe("create_project tool", () => {
   it("should return error when projectManager is missing", async () => {
     const result = await create_project.execute(
       { name: "fail", goal: "test" },
-      { taskId: "test" },
+      { agentId: "test" },
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain("projectManager not available");
@@ -202,7 +202,7 @@ describe("list_projects tool", () => {
   });
 
   it("should return error when projectManager is missing", async () => {
-    const result = await list_projects.execute({}, { taskId: "test" });
+    const result = await list_projects.execute({}, { agentId: "test" });
     expect(result.success).toBe(false);
     expect(result.error).toContain("projectManager not available");
   });

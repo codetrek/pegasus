@@ -819,7 +819,7 @@ describe("MainAgent", () => {
   });
 
   // ═══════════════════════════════════════════════════
-  // Coverage: onTaskNotificationHandled + pushTaskNotification
+  // Coverage: onSubagentNotificationHandled + pushSubagentNotification
   // Lines 207-216, 410
   // ═══════════════════════════════════════════════════
 
@@ -836,9 +836,9 @@ describe("MainAgent", () => {
       await Bun.sleep(100);
 
       // Push a completed task notification via the public API (line 410)
-      agent.pushTaskNotification({
+      agent.pushSubagentNotification({
         type: "completed",
-        taskId: "task-done-1",
+        subagentId: "task-done-1",
         result: "all done",
       });
 
@@ -848,7 +848,7 @@ describe("MainAgent", () => {
       const content = await Bun.file(
         `${testDataDir}/agents/main/session/current.jsonl`,
       ).text();
-      expect(content).toContain("[Task task-done-1 completed]");
+      expect(content).toContain("[Subagent task-done-1 completed]");
 
       await agent.stop();
     }, 10_000);
@@ -863,9 +863,9 @@ describe("MainAgent", () => {
       agent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
       await Bun.sleep(100);
 
-      agent.pushTaskNotification({
+      agent.pushSubagentNotification({
         type: "failed",
-        taskId: "task-fail-1",
+        subagentId: "task-fail-1",
         error: "boom",
       });
 
@@ -874,7 +874,7 @@ describe("MainAgent", () => {
       const content = await Bun.file(
         `${testDataDir}/agents/main/session/current.jsonl`,
       ).text();
-      expect(content).toContain("[Task task-fail-1 failed]");
+      expect(content).toContain("[Subagent task-fail-1 failed]");
 
       await agent.stop();
     }, 10_000);
@@ -889,9 +889,9 @@ describe("MainAgent", () => {
       agent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
       await Bun.sleep(100);
 
-      agent.pushTaskNotification({
+      agent.pushSubagentNotification({
         type: "notify",
-        taskId: "task-progress-1",
+        subagentId: "task-progress-1",
         message: "50% done",
       });
 
@@ -900,7 +900,7 @@ describe("MainAgent", () => {
       const content = await Bun.file(
         `${testDataDir}/agents/main/session/current.jsonl`,
       ).text();
-      expect(content).toContain("[Task task-progress-1 update]");
+      expect(content).toContain("[Subagent task-progress-1 update]");
 
       await agent.stop();
     }, 10_000);

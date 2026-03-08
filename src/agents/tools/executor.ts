@@ -47,7 +47,7 @@ export class ToolExecutor {
     const startedAt = Date.now();
 
     logger.info(
-      { toolName, taskId: context.taskId, params },
+      { toolName, agentId: context.agentId, params },
       "tool_execute_start",
     );
 
@@ -55,7 +55,7 @@ export class ToolExecutor {
     this.bus.emit(
       createEvent(ET.TOOL_CALL_REQUESTED, {
         source: "tools.executor",
-        taskId: context.taskId,
+        taskId: context.agentId,
         payload: { toolName, params },
       })
     );
@@ -92,7 +92,7 @@ export class ToolExecutor {
       );
 
       logger.info(
-        { toolName, taskId: context.taskId, success: true, durationMs },
+        { toolName, agentId: context.agentId, success: true, durationMs },
         "tool_execute_done",
       );
 
@@ -113,7 +113,7 @@ export class ToolExecutor {
       this.registry.updateCallStats(toolName, durationMs, false);
 
       logger.error(
-        { toolName, taskId: context.taskId, durationMs, error: errorMessage },
+        { toolName, agentId: context.agentId, durationMs, error: errorMessage },
         "tool_execute_error",
       );
 
@@ -136,7 +136,7 @@ export class ToolExecutor {
       this.bus.emit(
         createEvent(ET.TOOL_CALL_COMPLETED, {
           source: "tools.executor",
-          taskId: context.taskId,
+          taskId: context.agentId,
           payload: { toolName, result: result.result, durationMs: result.durationMs },
         })
       );
@@ -144,7 +144,7 @@ export class ToolExecutor {
       this.bus.emit(
         createEvent(ET.TOOL_CALL_FAILED, {
           source: "tools.executor",
-          taskId: context.taskId,
+          taskId: context.agentId,
           payload: { toolName, error: result.error },
         })
       );

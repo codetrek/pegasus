@@ -6,7 +6,7 @@ import type { ToolContext } from "../../../src/agents/tools/types.ts";
 describe("reload_skills tool", () => {
   function makeContext(overrides?: Partial<ToolContext>): ToolContext {
     return {
-      taskId: "main-agent",
+      agentId: "main-agent",
       onSkillsReloaded: () => 5,
       ...overrides,
     };
@@ -28,7 +28,7 @@ describe("reload_skills tool", () => {
   });
 
   it("should return error when onSkillsReloaded is not available", async () => {
-    const result = await reload_skills.execute({}, { taskId: "test" });
+    const result = await reload_skills.execute({}, { agentId: "test" });
     expect(result.success).toBe(false);
     expect(result.error).toContain("onSkillsReloaded not available");
   });

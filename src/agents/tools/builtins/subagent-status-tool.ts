@@ -1,36 +1,36 @@
 /**
- * task_status — query the runtime status of spawned tasks.
+ * subagent_status — query the runtime status of spawned subagents.
  *
- * Reads from the in-memory TaskRunner registry (via ToolContext) to show
- * currently active tasks. Use this when a spawned task's result hasn't
+ * Reads from the in-memory subagent registry (via ToolContext) to show
+ * currently active subagents. Use this when a spawned subagent's result hasn't
  * come back and you need to check on it.
  */
 import { z } from "zod";
 import type { Tool, ToolResult, ToolContext } from "../types.ts";
 import { ToolCategory } from "../types.ts";
 
-export const task_status: Tool = {
-  name: "task_status",
+export const subagent_status: Tool = {
+  name: "subagent_status",
   description:
-    "Check the runtime status of spawned tasks. Shows all in-memory tasks with their current state. " +
-    "IMPORTANT: Task results arrive automatically via notification — do NOT call this tool repeatedly to poll. " +
-    "Only use this for one-off diagnostics when you suspect a task may have failed silently after a long time.",
+    "Check the runtime status of spawned subagents. Shows all in-memory subagents with their current state. " +
+    "IMPORTANT: Subagent results arrive automatically via notification — do NOT call this tool repeatedly to poll. " +
+    "Only use this for one-off diagnostics when you suspect a subagent may have failed silently after a long time.",
   category: ToolCategory.DATA,
   parameters: z.object({
-    taskId: z
+    subagentId: z
       .string()
       .optional()
-      .describe("Optional: query a specific task by ID. If omitted, lists all tasks."),
+      .describe("Optional: query a specific subagent by ID. If omitted, lists all subagents."),
   }),
   async execute(params: unknown, context: ToolContext): Promise<ToolResult> {
     const startedAt = Date.now();
-    const { taskId } = params as { taskId?: string };
-    const registry = context.taskRegistry;
+    const { subagentId } = params as { subagentId?: string };
+    const registry = context.subagentRegistry;
 
     if (!registry) {
       return {
         success: false,
-        error: "TaskRunner not available in this context",
+        error: "subagent management not available in this context",
         startedAt,
         completedAt: Date.now(),
         durationMs: Date.now() - startedAt,
@@ -38,12 +38,12 @@ export const task_status: Tool = {
     }
 
     try {
-      if (taskId) {
-        const info = registry.getStatus(taskId);
+      if (subagentId) {
+        const info = registry.getStatus(subagentId);
         if (!info) {
           return {
             success: true,
-            result: { taskId, status: "not_found", message: "Task not in registry (may have been cleaned up or never existed)" },
+            result: { subagentId, status: "not_found", message: "Subagent not in registry (may have been cleaned up or never existed)" },
             startedAt,
             completedAt: Date.now(),
             durationMs: Date.now() - startedAt,
@@ -52,7 +52,7 @@ export const task_status: Tool = {
         return {
           success: true,
           result: {
-            taskId: info.taskId,
+            subagentId: info.subagentId,
             state: "running",
             description: info.description,
             taskType: info.taskType,
@@ -65,8 +65,8 @@ export const task_status: Tool = {
         };
       }
 
-      const tasks = registry.listAll().map((info) => ({
-        taskId: info.taskId,
+      const subagents = registry.listAll().map((info) => ({
+        subagentId: info.subagentId,
         state: "running",
         description: info.description,
         taskType: info.taskType,
@@ -76,7 +76,7 @@ export const task_status: Tool = {
 
       return {
         success: true,
-        result: { tasks, activeCount: registry.activeCount, totalCount: tasks.length },
+        result: { subagents, activeCount: registry.activeCount, totalCount: subagents.length },
         startedAt,
         completedAt: Date.now(),
         durationMs: Date.now() - startedAt,

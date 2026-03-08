@@ -71,7 +71,7 @@ function createMockManager() {
 }
 
 function makeContext(manager?: unknown) {
-  return { taskId: "test-task", browserManager: manager } as any;
+  return { agentId: "test-task", browserManager: manager } as any;
 }
 
 // ── browser_navigate ────────────────────────────

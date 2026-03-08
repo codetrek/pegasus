@@ -6,7 +6,7 @@
  */
 import { getLogger } from "../../infra/logger.ts";
 import type { SubAgentTypeDefinition } from "./types.ts";
-import { allTaskTools } from "../tools/builtins/index.ts";
+import { allSubagentTools } from "../tools/builtins/index.ts";
 
 const logger = getLogger("subagent_type_registry");
 
@@ -46,7 +46,7 @@ export class SubAgentTypeRegistry {
     const def = this.defs.get(name);
     const tools = def?.tools ?? ["*"];
     if (tools.length === 1 && tools[0] === "*") {
-      return allTaskTools.map((t) => t.name);
+      return allSubagentTools.map((t: { name: string }) => t.name);
     }
     return tools;
   }

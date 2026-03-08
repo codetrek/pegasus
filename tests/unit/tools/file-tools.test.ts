@@ -22,7 +22,7 @@ describe("file tools", () => {
 
   describe("read_file", () => {
     it("should read file content with line numbers", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const filePath = `${testDir}/test.txt`;
 
       await Bun.write(filePath, "test content");
@@ -39,7 +39,7 @@ describe("file tools", () => {
     });
 
     it("should fail on non-existent file", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const result = await read_file.execute({ path: `${testDir}/nonexistent.txt` }, context);
 
       expect(result.success).toBe(false);
@@ -48,7 +48,7 @@ describe("file tools", () => {
 
     it("should reject unauthorized paths", async () => {
       const allowedPaths = [testDir];
-      const context = { taskId: "test-task-id", allowedPaths };
+      const context = { agentId: "test-task-id", allowedPaths };
 
       const result = await read_file.execute({ path: "/etc/passwd" }, context);
 
@@ -57,7 +57,7 @@ describe("file tools", () => {
     });
 
     it("should read with offset and limit (line-numbered)", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const filePath = `${testDir}/lines.txt`;
       const lines = ["line0", "line1", "line2", "line3", "line4"];
       await Bun.write(filePath, lines.join("\n"));
@@ -74,7 +74,7 @@ describe("file tools", () => {
     });
 
     it("should read with offset only (to default max)", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const filePath = `${testDir}/lines-offset.txt`;
       const lines = ["a", "b", "c", "d"];
       await Bun.write(filePath, lines.join("\n"));
@@ -89,7 +89,7 @@ describe("file tools", () => {
     });
 
     it("should read with limit only (from start)", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const filePath = `${testDir}/lines-limit.txt`;
       const lines = ["x", "y", "z"];
       await Bun.write(filePath, lines.join("\n"));
@@ -105,7 +105,7 @@ describe("file tools", () => {
     });
 
     it("should always include totalLines and linesReturned", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const filePath = `${testDir}/full.txt`;
       await Bun.write(filePath, "full content here");
 
@@ -120,7 +120,7 @@ describe("file tools", () => {
     });
 
     it("should default to 2000-line limit for large files", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const filePath = `${testDir}/large.txt`;
       // Create a file with 3000 lines
       const lines = Array.from({ length: 3000 }, (_, i) => `line ${i}`);
@@ -138,7 +138,7 @@ describe("file tools", () => {
     });
 
     it("should truncate long lines at 2000 characters", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const filePath = `${testDir}/longline.txt`;
       const longLine = "x".repeat(3000);
       await Bun.write(filePath, longLine);
@@ -156,7 +156,7 @@ describe("file tools", () => {
     });
 
     it("should not include notice when file fits within limit", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const filePath = `${testDir}/small.txt`;
       await Bun.write(filePath, "short\nfile");
 
@@ -169,7 +169,7 @@ describe("file tools", () => {
     });
 
     it("should return empty content when offset is beyond file length", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const filePath = `${testDir}/small.txt`;
       await Bun.write(filePath, "one\ntwo");
 
@@ -185,7 +185,7 @@ describe("file tools", () => {
 
   describe("write_file", () => {
     it("should write file content", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const filePath = `${testDir}/write-test.txt`;
 
       const result = await write_file.execute({ path: filePath, content: "new content" }, context);
@@ -203,7 +203,7 @@ describe("file tools", () => {
 
     it("should reject unauthorized paths", async () => {
       const allowedPaths = [testDir];
-      const context = { taskId: "test-task-id", allowedPaths };
+      const context = { agentId: "test-task-id", allowedPaths };
 
       const result = await write_file.execute({ path: "/etc/unauthorized.txt", content: "test" }, context);
 
@@ -214,7 +214,7 @@ describe("file tools", () => {
 
   describe("list_files", () => {
     it("should list files in directory", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const filePath = `${testDir}/list-test.txt`;
 
       await Bun.write(filePath, "test");
@@ -230,7 +230,7 @@ describe("file tools", () => {
     });
 
     it("should handle recursive listing", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const subDir = `${testDir}/subdir`;
 
       // Create subdirectory with file
@@ -248,7 +248,7 @@ describe("file tools", () => {
     });
 
     it("should list directories in non-recursive mode", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const subDir = `${testDir}/visible-dir`;
 
       await mkdir(subDir, { recursive: true });
@@ -267,7 +267,7 @@ describe("file tools", () => {
     });
 
     it("should return message for non-existent directory", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const result = await list_files.execute({ path: `${testDir}/nonexistent-dir` }, context);
 
       expect(result.success).toBe(true);
@@ -275,7 +275,7 @@ describe("file tools", () => {
     });
 
     it("should filter files by pattern (non-recursive)", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
 
       // Create files with different extensions
       await Bun.write(`${testDir}/file1.ts`, "ts content");
@@ -292,7 +292,7 @@ describe("file tools", () => {
     });
 
     it("should filter files by pattern (recursive)", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const subDir = `${testDir}/sub-pattern`;
 
       // Create files in subdirectory
@@ -316,7 +316,7 @@ describe("file tools", () => {
 
     it("should reject unauthorized paths via allowedPaths", async () => {
       const allowedPaths = [testDir];
-      const context = { taskId: "test-task-id", allowedPaths };
+      const context = { agentId: "test-task-id", allowedPaths };
 
       const result = await list_files.execute({ path: "/etc" }, context);
 
@@ -327,7 +327,7 @@ describe("file tools", () => {
 
   describe("edit_file", () => {
     it("should replace a unique string in a file", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const filePath = `${testDir}/edit-test.txt`;
       await Bun.write(filePath, "Hello world, this is a test file.\nSecond line here.");
 
@@ -346,7 +346,7 @@ describe("file tools", () => {
     });
 
     it("should replace all occurrences with replace_all=true", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const filePath = `${testDir}/edit-all.txt`;
       await Bun.write(filePath, "foo bar foo baz foo");
 
@@ -366,7 +366,7 @@ describe("file tools", () => {
     });
 
     it("should error when old_string is not found", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const filePath = `${testDir}/edit-notfound.txt`;
       await Bun.write(filePath, "some content here");
 
@@ -381,7 +381,7 @@ describe("file tools", () => {
     });
 
     it("should error when old_string matches multiple times without replace_all", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const filePath = `${testDir}/edit-ambiguous.txt`;
       await Bun.write(filePath, "abc def abc ghi abc");
 
@@ -398,7 +398,7 @@ describe("file tools", () => {
 
     it("should reject unauthorized paths", async () => {
       const allowedPaths = [testDir];
-      const context = { taskId: "test-task-id", allowedPaths };
+      const context = { agentId: "test-task-id", allowedPaths };
 
       const result = await edit_file.execute({
         path: "/etc/passwd",
@@ -411,7 +411,7 @@ describe("file tools", () => {
     });
 
     it("should error on non-existent file", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
 
       const result = await edit_file.execute({
         path: `${testDir}/does-not-exist.txt`,
@@ -426,7 +426,7 @@ describe("file tools", () => {
 
   describe("grep_files", () => {
     it("should search a single file and return matches with line numbers", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const filePath = `${testDir}/grep-single.txt`;
       await Bun.write(filePath, "first line\nsecond match here\nthird line\nfourth match here");
 
@@ -447,7 +447,7 @@ describe("file tools", () => {
     });
 
     it("should search across multiple files in a directory", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       await Bun.write(`${testDir}/a.txt`, "hello world");
       await Bun.write(`${testDir}/b.txt`, "hello there");
       await Bun.write(`${testDir}/c.txt`, "goodbye");
@@ -467,7 +467,7 @@ describe("file tools", () => {
     });
 
     it("should filter files with include pattern", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       await Bun.write(`${testDir}/code.ts`, "const x = 1;");
       await Bun.write(`${testDir}/code.js`, "const x = 2;");
       await Bun.write(`${testDir}/data.json`, '{"x": 3}');
@@ -488,7 +488,7 @@ describe("file tools", () => {
     });
 
     it("should return empty string when no results found", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       await Bun.write(`${testDir}/nope.txt`, "nothing here");
 
       const result = await grep_files.execute({
@@ -502,7 +502,7 @@ describe("file tools", () => {
     });
 
     it("should respect max_results and report truncation", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const lines = Array.from({ length: 20 }, (_, i) => `line ${i} match`);
       await Bun.write(`${testDir}/many.txt`, lines.join("\n"));
 
@@ -525,7 +525,7 @@ describe("file tools", () => {
     });
 
     it("should error on invalid regex pattern", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       await Bun.write(`${testDir}/regex-test.txt`, "content");
 
       const result = await grep_files.execute({
@@ -539,7 +539,7 @@ describe("file tools", () => {
 
     it("should reject unauthorized paths", async () => {
       const allowedPaths = [testDir];
-      const context = { taskId: "test-task-id", allowedPaths };
+      const context = { agentId: "test-task-id", allowedPaths };
 
       const result = await grep_files.execute({
         pattern: "root",
@@ -551,7 +551,7 @@ describe("file tools", () => {
     });
 
     it("should search recursively in subdirectories", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const subDir = `${testDir}/sub`;
       await mkdir(subDir, { recursive: true });
       await Bun.write(`${testDir}/top.txt`, "find_me_here");
@@ -571,7 +571,7 @@ describe("file tools", () => {
     });
 
     it("should error on non-existent path", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
 
       const result = await grep_files.execute({
         pattern: "test",
@@ -585,7 +585,7 @@ describe("file tools", () => {
     // ── case_insensitive tests ──
 
     it("should match case-insensitively when case_insensitive=true", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const filePath = `${testDir}/case.txt`;
       await Bun.write(filePath, "Hello World\nhello world\nHELLO WORLD\ngoodbye");
 
@@ -609,7 +609,7 @@ describe("file tools", () => {
     });
 
     it("should be case-sensitive by default", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const filePath = `${testDir}/case-default.txt`;
       await Bun.write(filePath, "Hello World\nhello world\nHELLO WORLD");
 
@@ -632,7 +632,7 @@ describe("file tools", () => {
     // ── context_lines tests ──
 
     it("should include context lines when context_lines is set", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const filePath = `${testDir}/context.txt`;
       await Bun.write(filePath, "line1\nline2\nMATCH_HERE\nline4\nline5\nline6");
 
@@ -657,7 +657,7 @@ describe("file tools", () => {
     });
 
     it("should merge overlapping context ranges into single block", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const filePath = `${testDir}/context-merge.txt`;
       await Bun.write(filePath, "a\nb\nMATCH1\nd\nMATCH2\nf\ng");
 
@@ -687,7 +687,7 @@ describe("file tools", () => {
     });
 
     it("should handle context at file boundaries", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const filePath = `${testDir}/context-boundary.txt`;
       await Bun.write(filePath, "MATCH_FIRST\nsecond\nthird");
 
@@ -714,7 +714,7 @@ describe("file tools", () => {
     // ── output_mode tests ──
 
     it("should return only file paths with output_mode=files_with_matches", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       await Bun.write(`${testDir}/fwm-a.txt`, "target word here");
       await Bun.write(`${testDir}/fwm-b.txt`, "no match here");
       await Bun.write(`${testDir}/fwm-c.txt`, "another target line");
@@ -736,7 +736,7 @@ describe("file tools", () => {
     });
 
     it("should return match counts with output_mode=count", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       await Bun.write(`${testDir}/count-a.txt`, "x x x");
       await Bun.write(`${testDir}/count-b.txt`, "x");
       await Bun.write(`${testDir}/count-c.txt`, "no match");
@@ -763,7 +763,7 @@ describe("file tools", () => {
     // ── multiline tests ──
 
     it("should match patterns across lines with multiline=true", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const filePath = `${testDir}/multiline.txt`;
       await Bun.write(filePath, "function foo() {\n  return 1;\n}");
 
@@ -784,7 +784,7 @@ describe("file tools", () => {
     });
 
     it("should not match across lines without multiline", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const filePath = `${testDir}/no-multiline.txt`;
       await Bun.write(filePath, "foo\nbar");
 
@@ -800,7 +800,7 @@ describe("file tools", () => {
     });
 
     it("should match across lines with multiline=true using dotAll", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const filePath = `${testDir}/dotall.txt`;
       await Bun.write(filePath, "foo\nbar");
 
@@ -823,7 +823,7 @@ describe("file tools", () => {
 
   describe("glob_files", () => {
     it("should match files by pattern", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       await Bun.write(`${testDir}/file1.ts`, "ts");
       await Bun.write(`${testDir}/file2.ts`, "ts");
       await Bun.write(`${testDir}/file3.js`, "js");
@@ -841,7 +841,7 @@ describe("file tools", () => {
     }, 10000);
 
     it("should match files recursively", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       const subDir = `${testDir}/sub`;
       await mkdir(subDir, { recursive: true });
       await Bun.write(`${testDir}/top.ts`, "ts");
@@ -861,7 +861,7 @@ describe("file tools", () => {
     }, 10000);
 
     it("should return empty results for non-matching pattern", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       await Bun.write(`${testDir}/file.txt`, "txt");
 
       const result = await glob_files.execute({
@@ -875,7 +875,7 @@ describe("file tools", () => {
     }, 10000);
 
     it("should respect max_results limit", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       // Create more files than max_results
       for (let i = 0; i < 10; i++) {
         await Bun.write(`${testDir}/file${i}.ts`, `content ${i}`);
@@ -896,7 +896,7 @@ describe("file tools", () => {
     }, 10000);
 
     it("should sort by mtime (newest first)", async () => {
-      const context = { taskId: "test-task-id" };
+      const context = { agentId: "test-task-id" };
       // Create files with slight time gaps
       await Bun.write(`${testDir}/old.ts`, "old");
       // Small delay to ensure different mtime
@@ -917,7 +917,7 @@ describe("file tools", () => {
 
     it("should reject unauthorized paths", async () => {
       const allowedPaths = [testDir];
-      const context = { taskId: "test-task-id", allowedPaths };
+      const context = { agentId: "test-task-id", allowedPaths };
 
       const result = await glob_files.execute({
         pattern: "*.ts",

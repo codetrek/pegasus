@@ -34,7 +34,7 @@ describe("ToolExecutor", () => {
     };
 
     const executor = new ToolExecutor(registry, mockBus, 10000);
-    const context: ToolContext = { taskId: "test-task-id" };
+    const context: ToolContext = { agentId: "test-task-id" };
 
     const result = await executor.execute("test_tool", {}, context);
 
@@ -56,7 +56,7 @@ describe("ToolExecutor", () => {
     };
 
     const executor = new ToolExecutor(registry, mockBus, 10000);
-    const context: ToolContext = { taskId: "test-task-id" };
+    const context: ToolContext = { agentId: "test-task-id" };
 
     const result = await executor.execute("unknown_tool", {}, context);
 
@@ -92,7 +92,7 @@ describe("ToolExecutor", () => {
     };
 
     const executor = new ToolExecutor(registry, mockBus, 100); // 100ms timeout
-    const context: ToolContext = { taskId: "test-task-id" };
+    const context: ToolContext = { agentId: "test-task-id" };
 
     const result = await executor.execute("slow_tool", {}, context);
 
@@ -133,7 +133,7 @@ describe("ToolExecutor", () => {
     };
 
     const executor = new ToolExecutor(registry, mockBus, 10000);
-    const context: ToolContext = { taskId: "test-task-id" };
+    const context: ToolContext = { agentId: "test-task-id" };
 
     await executor.execute("test_tool", {}, context);
 
@@ -166,7 +166,7 @@ describe("ToolExecutor", () => {
     };
 
     const executor = new ToolExecutor(registry, mockBus, 10000);
-    const context: ToolContext = { taskId: "test-task-id" };
+    const context: ToolContext = { agentId: "test-task-id" };
 
     await executor.execute("failing_tool", {}, context);
 
@@ -188,7 +188,7 @@ describe("ToolExecutor", () => {
     executor.emitCompletion(
       "test_tool",
       { success: true, result: { data: 1 }, startedAt: 0, completedAt: 10, durationMs: 10 },
-      { taskId: "task-1" },
+      { agentId: "task-1" },
     );
 
     expect(events).toHaveLength(1);
@@ -211,7 +211,7 @@ describe("ToolExecutor", () => {
     executor.emitCompletion(
       "test_tool",
       { success: false, error: "boom", startedAt: 0, completedAt: 10, durationMs: 10 },
-      { taskId: "task-1" },
+      { agentId: "task-1" },
     );
 
     expect(events).toHaveLength(1);

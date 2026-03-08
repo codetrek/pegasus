@@ -7,7 +7,7 @@ import { current_time, sleep, get_env, set_env } from "../../../src/agents/tools
 
 describe("current_time tool", () => {
   it("should return current time", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const result = await current_time.execute({}, context);
 
     expect(result.success).toBe(true);
@@ -17,7 +17,7 @@ describe("current_time tool", () => {
   });
 
   it("should handle timezone parameter", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const result = await current_time.execute({ timezone: "UTC" }, context);
 
     expect(result.success).toBe(true);
@@ -25,7 +25,7 @@ describe("current_time tool", () => {
   });
 
   it("should fallback to UTC string on invalid timezone", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const result = await current_time.execute({ timezone: "Invalid/Timezone_XYZ" }, context);
 
     expect(result.success).toBe(true);
@@ -37,7 +37,7 @@ describe("current_time tool", () => {
   });
 
   it("should handle valid non-UTC timezone", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const result = await current_time.execute({ timezone: "America/New_York" }, context);
 
     expect(result.success).toBe(true);
@@ -48,7 +48,7 @@ describe("current_time tool", () => {
   });
 
   it("should return ISO format when no timezone is specified", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const result = await current_time.execute({}, context);
 
     expect(result.success).toBe(true);
@@ -59,7 +59,7 @@ describe("current_time tool", () => {
   });
 
   it("should include all expected result properties", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const result = await current_time.execute({ timezone: "Asia/Tokyo" }, context);
 
     expect(result.success).toBe(true);
@@ -77,7 +77,7 @@ describe("current_time tool", () => {
 
 describe("sleep tool", () => {
   it("should sleep for specified duration", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const start = Date.now();
     const result = await sleep.execute({ duration: 0.1 }, context);
     const elapsed = Date.now() - start;
@@ -89,7 +89,7 @@ describe("sleep tool", () => {
   });
 
   it("should include timing metadata", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const result = await sleep.execute({ duration: 0.05 }, context);
 
     expect(result.success).toBe(true);
@@ -102,7 +102,7 @@ describe("sleep tool", () => {
 describe("get_env tool", () => {
   it("should get environment variable", async () => {
     process.env.TEST_VAR = "test_value";
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const result = await get_env.execute({ key: "TEST_VAR" }, context);
 
     expect(result.success).toBe(true);
@@ -111,7 +111,7 @@ describe("get_env tool", () => {
 
   it("should return null for unset variable", async () => {
     delete process.env.UNSET_VAR;
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const result = await get_env.execute({ key: "UNSET_VAR" }, context);
 
     expect(result.success).toBe(true);
@@ -119,7 +119,7 @@ describe("get_env tool", () => {
   });
 
   it("should include key in result", async () => {
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const result = await get_env.execute({ key: "PATH" }, context);
 
     expect(result.success).toBe(true);
@@ -133,7 +133,7 @@ describe("get_env tool", () => {
 describe("set_env tool", () => {
   it("should set environment variable", async () => {
     delete process.env.NEW_VAR;
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const result = await set_env.execute({ key: "NEW_VAR", value: "new_value" }, context);
 
     expect(result.success).toBe(true);
@@ -143,7 +143,7 @@ describe("set_env tool", () => {
 
   it("should return previous value when overwriting", async () => {
     process.env.EXISTING_VAR = "old_value";
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const result = await set_env.execute({ key: "EXISTING_VAR", value: "new_value" }, context);
 
     expect(result.success).toBe(true);
@@ -153,7 +153,7 @@ describe("set_env tool", () => {
 
   it("should include all result properties", async () => {
     delete process.env.SET_ENV_TEST;
-    const context = { taskId: "test-task-id" };
+    const context = { agentId: "test-task-id" };
     const result = await set_env.execute({ key: "SET_ENV_TEST", value: "val123" }, context);
 
     expect(result.success).toBe(true);

@@ -1,4 +1,4 @@
-export type { TaskNotification } from "./agents/agent.ts";
+export type { SubagentNotification } from "./agents/agent.ts";
 export { EventBus, EventType, createEvent, deriveEvent, effectivePriority } from "./agents/events/index.ts";
 export type { Event, EventHandler } from "./agents/events/index.ts";
 export { loadPersona, PersonaSchema } from "./identity/index.ts";
