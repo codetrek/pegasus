@@ -54,13 +54,13 @@ import { formatChannelMeta } from "./agents/agent.ts";
 
 const logger = getLogger("pegasus_app");
 
-export interface PegasusAppDeps {
+export interface PegasusDeps {
   models: ModelRegistry;
   persona: Persona;
   settings?: Settings;
 }
 
-export class PegasusApp {
+export class Pegasus {
   private models: ModelRegistry;
   private persona: Persona;
   private settings: Settings;
@@ -90,7 +90,7 @@ export class PegasusApp {
   private ownerStore!: OwnerStore;
   private _channelNotifyTimes = new Map<string, number>();
 
-  constructor(deps: PegasusAppDeps) {
+  constructor(deps: PegasusDeps) {
     this.models = deps.models;
     this.persona = deps.persona;
     this.settings = deps.settings ?? getSettings();

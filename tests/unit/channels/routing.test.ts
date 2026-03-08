@@ -6,7 +6,7 @@
  * LLM reply tool call → routed outbound delivery via adapters.
  */
 import { describe, it, expect, afterEach, beforeEach } from "bun:test";
-import { PegasusApp } from "@pegasus/pegasus-app.ts";
+import { Pegasus } from "@pegasus/pegasus.ts";
 import { MainAgent } from "@pegasus/agents/main-agent.ts";
 import type {
   LanguageModel,
@@ -82,10 +82,10 @@ function createMockAdapter(
   return { adapter, delivered };
 }
 
-function createApp(model: LanguageModel): PegasusApp {
+function createApp(model: LanguageModel): Pegasus {
   const settings = testSettings();
   const models = createMockModelRegistry(model);
-  return new PegasusApp({ models, persona: testPersona, settings });
+  return new Pegasus({ models, persona: testPersona, settings });
 }
 
 describe("Multi-channel routing", () => {

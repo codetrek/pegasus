@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { PegasusApp } from "@pegasus/pegasus-app.ts";
+import { Pegasus } from "@pegasus/pegasus";
 import type {
   LanguageModel,
   GenerateTextResult,
@@ -116,7 +116,7 @@ describe("PegasusApp", () => {
 
   it("should start and stop without errors", async () => {
     const model = createMonologueModel("thinking...");
-    const app = new PegasusApp({
+    const app = new Pegasus({
       models: createMockModelRegistry(model),
       persona: testPersona,
       settings: testSettings(),
@@ -137,7 +137,7 @@ describe("PegasusApp", () => {
 
   it("should throw when accessing mainAgent before start", () => {
     const model = createMonologueModel("thinking...");
-    const app = new PegasusApp({
+    const app = new Pegasus({
       models: createMockModelRegistry(model),
       persona: testPersona,
       settings: testSettings(),
@@ -148,7 +148,7 @@ describe("PegasusApp", () => {
 
   it("should throw when started twice", async () => {
     const model = createMonologueModel("thinking...");
-    const app = new PegasusApp({
+    const app = new Pegasus({
       models: createMockModelRegistry(model),
       persona: testPersona,
       settings: testSettings(),
@@ -161,7 +161,7 @@ describe("PegasusApp", () => {
 
   it("should route messages through MainAgent and receive replies", async () => {
     const model = createReplyModel("Hello from PegasusApp!");
-    const app = new PegasusApp({
+    const app = new Pegasus({
       models: createMockModelRegistry(model),
       persona: testPersona,
       settings: testSettings(),
@@ -198,7 +198,7 @@ describe("PegasusApp", () => {
     const model = createMonologueModel("thinking...");
     const settings = testSettings();
     // Vision is enabled by default (when not explicitly disabled)
-    const app = new PegasusApp({
+    const app = new Pegasus({
       models: createMockModelRegistry(model),
       persona: testPersona,
       settings,
@@ -222,7 +222,7 @@ describe("PegasusApp", () => {
       authDir: `/tmp/pegasus-test-app-auth-${process.pid}-${testSeq}`,
       vision: { enabled: false },
     });
-    const app = new PegasusApp({
+    const app = new Pegasus({
       models: createMockModelRegistry(model),
       persona: testPersona,
       settings,
@@ -238,7 +238,7 @@ describe("PegasusApp", () => {
 
   it("should stop gracefully even when not started", async () => {
     const model = createMonologueModel("thinking...");
-    const app = new PegasusApp({
+    const app = new Pegasus({
       models: createMockModelRegistry(model),
       persona: testPersona,
       settings: testSettings(),
@@ -251,7 +251,7 @@ describe("PegasusApp", () => {
 
   it("should register adapters after start", async () => {
     const model = createReplyModel("Reply via late adapter");
-    const app = new PegasusApp({
+    const app = new Pegasus({
       models: createMockModelRegistry(model),
       persona: testPersona,
       settings: testSettings(),
@@ -281,7 +281,7 @@ describe("PegasusApp", () => {
 
   it("MainAgent in injected mode should still process messages correctly", async () => {
     const model = createReplyModel("Injected mode works!");
-    const app = new PegasusApp({
+    const app = new Pegasus({
       models: createMockModelRegistry(model),
       persona: testPersona,
       settings: testSettings(),
@@ -305,7 +305,7 @@ describe("PegasusApp", () => {
 
   it("should return undefined from getStoreImageFn before start", () => {
     const model = createMonologueModel("thinking...");
-    const app = new PegasusApp({
+    const app = new Pegasus({
       models: createMockModelRegistry(model),
       persona: testPersona,
       settings: testSettings(),
@@ -318,7 +318,7 @@ describe("PegasusApp", () => {
 
   it("should support multiple adapters", async () => {
     const model = createReplyModel("Multi-adapter reply!", "test", "cli");
-    const app = new PegasusApp({
+    const app = new Pegasus({
       models: createMockModelRegistry(model),
       persona: testPersona,
       settings: testSettings(),
@@ -354,7 +354,7 @@ describe("PegasusApp", () => {
 
   it("mainAgent should have skills, taskRunner, and projects accessible", async () => {
     const model = createMonologueModel("thinking...");
-    const app = new PegasusApp({
+    const app = new Pegasus({
       models: createMockModelRegistry(model),
       persona: testPersona,
       settings: testSettings(),
@@ -378,7 +378,7 @@ describe("PegasusApp", () => {
     it("should discard messages from no-owner-configured channels and inject notification", async () => {
       const model = createMonologueModel("thinking...");
       const settings = testSettings();
-      const app = new PegasusApp({
+      const app = new Pegasus({
         models: createMockModelRegistry(model),
         persona: testPersona,
         settings,
@@ -411,7 +411,7 @@ describe("PegasusApp", () => {
     it("should rate-limit no-owner notifications to once per hour", async () => {
       const model = createMonologueModel("thinking...");
       const settings = testSettings();
-      const app = new PegasusApp({
+      const app = new Pegasus({
         models: createMockModelRegistry(model),
         persona: testPersona,
         settings,
@@ -446,7 +446,7 @@ describe("PegasusApp", () => {
     it("should route untrusted messages to channel project (not reach MainAgent session)", async () => {
       const model = createMonologueModel("thinking...");
       const settings = testSettings();
-      const app = new PegasusApp({
+      const app = new Pegasus({
         models: createMockModelRegistry(model),
         persona: testPersona,
         settings,
@@ -486,7 +486,7 @@ describe("PegasusApp", () => {
     it("should allow owner messages through to MainAgent", async () => {
       const model = createMonologueModel("thinking...");
       const settings = testSettings();
-      const app = new PegasusApp({
+      const app = new Pegasus({
         models: createMockModelRegistry(model),
         persona: testPersona,
         settings,
@@ -518,7 +518,7 @@ describe("PegasusApp", () => {
 
     it("should always allow CLI messages (internal channel)", async () => {
       const model = createMonologueModel("thinking...");
-      const app = new PegasusApp({
+      const app = new Pegasus({
         models: createMockModelRegistry(model),
         persona: testPersona,
         settings: testSettings(),
@@ -590,7 +590,7 @@ describe("PegasusApp", () => {
         },
       };
 
-      const app = new PegasusApp({
+      const app = new Pegasus({
         models: createMockModelRegistry(model),
         persona: testPersona,
         settings: testSettings(),
@@ -622,7 +622,7 @@ describe("PegasusApp", () => {
   describe("TickManager integration (coverage)", () => {
     it("should fire tick callback through to MainAgent", async () => {
       const model = createMonologueModel("thinking...");
-      const app = new PegasusApp({
+      const app = new Pegasus({
         models: createMockModelRegistry(model),
         persona: testPersona,
         settings: testSettings(),
@@ -661,7 +661,7 @@ describe("PegasusApp", () => {
   describe("owner getter (coverage)", () => {
     it("should expose owner store via getter", async () => {
       const model = createMonologueModel("thinking...");
-      const app = new PegasusApp({
+      const app = new Pegasus({
         models: createMockModelRegistry(model),
         persona: testPersona,
         settings: testSettings(),
@@ -683,7 +683,7 @@ describe("PegasusApp", () => {
   describe("routeMessage before start (coverage)", () => {
     it("should gracefully handle routeMessage before start", async () => {
       const model = createMonologueModel("thinking...");
-      const app = new PegasusApp({
+      const app = new Pegasus({
         models: createMockModelRegistry(model),
         persona: testPersona,
         settings: testSettings(),
@@ -709,7 +709,7 @@ describe("PegasusApp", () => {
       const settings = testSettings();
 
       // Pre-register cli as internal channel
-      const app = new PegasusApp({
+      const app = new Pegasus({
         models: createMockModelRegistry(model),
         persona: testPersona,
         settings,
@@ -749,7 +749,7 @@ describe("PegasusApp", () => {
         authDir: `/tmp/pegasus-test-app-auth-${process.pid}-${testSeq}`,
         vision: { enabled: true },
       });
-      const app = new PegasusApp({
+      const app = new Pegasus({
         models: createMockModelRegistry(model),
         persona: testPersona,
         settings,

@@ -4,7 +4,7 @@
  * Uses CLIAdapter for terminal interaction. Telegram and other channel
  * adapters are managed by PegasusApp internally.
  */
-import { PegasusApp } from "./pegasus-app.ts";
+import { Pegasus } from "./pegasus.ts";
 import { loadPersona } from "./identity/persona.ts";
 import { setSettings } from "./infra/config.ts";
 import { loadSettings } from "./infra/config-loader.ts";
@@ -40,7 +40,7 @@ export async function startCLI(): Promise<void> {
   const persona = loadPersona(settings.identity.personaPath);
   const models = new ModelRegistry(settings.llm);
 
-  const app = new PegasusApp({ models, persona, settings });
+  const app = new Pegasus({ models, persona, settings });
 
   // Register CLI adapter
   const cliAdapter = new CLIAdapter(persona.name, async () => {

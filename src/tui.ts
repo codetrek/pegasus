@@ -8,7 +8,7 @@
  *   bun run tui      → this file (production: PegasusApp + TUI)
  *   bun run tui:dev  → src/tui/main.tsx (standalone: mock data only)
  */
-import { PegasusApp } from "./pegasus-app.ts";
+import { Pegasus } from "./pegasus.ts";
 import { loadPersona } from "./identity/persona.ts";
 import { setSettings } from "./infra/config.ts";
 import { loadSettings } from "./infra/config-loader.ts";
@@ -35,7 +35,7 @@ export async function startTUI(): Promise<void> {
   const persona = loadPersona(settings.identity.personaPath);
   const models = new ModelRegistry(settings.llm);
 
-  const app = new PegasusApp({ models, persona, settings });
+  const app = new Pegasus({ models, persona, settings });
 
   // Graceful shutdown
   const shutdown = async () => {
