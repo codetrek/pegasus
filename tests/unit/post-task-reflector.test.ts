@@ -6,7 +6,7 @@ import type { LanguageModel, GenerateTextResult } from "@pegasus/infra/llm-types
 import type { Persona } from "@pegasus/identity/persona.ts";
 import { ToolRegistry } from "@pegasus/tools/registry.ts";
 import { ToolExecutor } from "@pegasus/tools/executor.ts";
-import { EventBus } from "@pegasus/events/bus.ts";
+import { EventBus } from "@pegasus/agents/events/bus";
 import { reflectionTools } from "@pegasus/tools/builtins/index.ts";
 import { rm, mkdir } from "node:fs/promises";
 

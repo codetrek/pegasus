@@ -13,8 +13,8 @@ import { Agent, type AgentResult, type TaskNotificationPayload } from "@pegasus/
 import type { LanguageModel, GenerateTextResult } from "@pegasus/infra/llm-types.ts";
 import { ToolRegistry } from "@pegasus/tools/registry.ts";
 import { rm, mkdir, writeFile } from "node:fs/promises";
-import { EventBus } from "@pegasus/events/bus.ts";
-import { EventType, createEvent } from "@pegasus/events/types.ts";
+import { EventBus } from "@pegasus/agents/events/bus";
+import { EventType, createEvent } from "@pegasus/agents/events/types";
 import { mainAgentTools } from "@pegasus/tools/builtins/index.ts";
 
 let testSeq = 0;

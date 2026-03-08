@@ -13,12 +13,12 @@
 import { describe, test, expect, mock, afterEach } from "bun:test";
 import { Agent, type AgentDeps } from "../../../../src/agents/agent.ts";
 import { AgentState } from "../../../../src/agents/base/agent-state.ts";
-import type { Event } from "../../../../src/events/types.ts";
-import { EventType, createEvent } from "../../../../src/events/types.ts";
+import type { Event } from "../../../../src/agents/events/types.ts";
+import { EventType, createEvent } from "../../../../src/agents/events/types.ts";
 import type { LanguageModel, Message } from "../../../../src/infra/llm-types.ts";
 import type { TaskExecutionState, CreateTaskStateOptions } from "../../../../src/agents/base/task-execution-state.ts";
 import { ToolRegistry } from "../../../../src/tools/registry.ts";
-import { EventBus } from "../../../../src/events/bus.ts";
+import { EventBus } from "../../../../src/agents/events/bus.ts";
 import { z } from "zod";
 import { mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";

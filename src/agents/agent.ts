@@ -27,9 +27,9 @@
  */
 
 import type { LanguageModel, GenerateTextResult, Message } from "../infra/llm-types.ts";
-import type { Event } from "../events/types.ts";
-import { EventType, createEvent } from "../events/types.ts";
-import { EventBus } from "../events/bus.ts";
+import type { Event } from "./events/types.ts";
+import { EventType, createEvent } from "./events/types.ts";
+import { EventBus } from "./events/bus.ts";
 import { ToolRegistry } from "../tools/registry.ts";
 import { ToolExecutor } from "../tools/executor.ts";
 import type { ToolCall, ToolDefinition } from "../models/tool.ts";

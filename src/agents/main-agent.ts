@@ -43,7 +43,7 @@ import { TickManager } from "./tick-manager.ts";
 import { AuthManager } from "./auth-manager.ts";
 import { Reflection } from "./reflection.ts";
 import { Agent, type QueueItem, type TaskNotificationPayload } from "./agent.ts";
-import { EventBus } from "../events/bus.ts";
+import { EventBus } from "./events/bus.ts";
 
 // Main Agent's curated tool set
 import { mainAgentTools } from "../tools/builtins/index.ts";

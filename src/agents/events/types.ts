@@ -63,7 +63,7 @@ export interface Event {
 }
 
 /** Create an immutable Event. */
-import { shortId } from "../infra/id.ts";
+import { shortId } from "../../infra/id.ts";
 
 export function createEvent(
   type: EventType,

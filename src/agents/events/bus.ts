@@ -5,7 +5,7 @@
  */
 import type { Event } from "./types.ts";
 import { EventType, createEvent, effectivePriority } from "./types.ts";
-import { getLogger } from "../infra/logger.ts";
+import { getLogger } from "../../infra/logger.ts";
 
 export type EventHandler = (event: Event) => Promise<void>;
 
