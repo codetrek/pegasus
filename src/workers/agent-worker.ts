@@ -12,10 +12,11 @@
 declare var self: Worker;
 
 import path from "node:path";
-import { TaskRunner } from "../agents/task-runner.ts";
-import type { TaskNotification } from "../agents/task-runner.ts";
+import { Agent } from "../agents/agent.ts";
+import type { TaskNotification } from "../agents/agent.ts";
 import { SubAgentTypeRegistry } from "../agents/subagents/registry.ts";
 import { loadSubAgentTypeDefinitions } from "../agents/subagents/loader.ts";
+import { ToolRegistry } from "../agents/tools/registry.ts";
 import { getSettings, setSettings } from "../infra/config.ts";
 import type { Settings } from "../infra/config.ts";
 import type { GenerateTextResult } from "../infra/llm-types.ts";
@@ -42,7 +43,7 @@ export interface ProjectConfig extends BaseConfig {
 
 // ── Module-level state (initialized on "init") ──────
 
-let projectTaskRunner: TaskRunner | null = null;
+let projectAgent: Agent | null = null;
 let proxyModel: ProxyLanguageModel | null = null;
 
 // Skill registry for project Workers
@@ -58,10 +59,10 @@ let workerChannelId: string = "unknown";
  * Not used in production — only accessed by tests to verify state transitions.
  */
 export const _testState = {
-  getAgent: () => projectTaskRunner,           // backward compat (returns TaskRunner now)
-  setAgent: (a: TaskRunner | null) => { projectTaskRunner = a; },
-  getProjectAgent: () => projectTaskRunner,
-  setProjectAgent: (a: TaskRunner | null) => { projectTaskRunner = a; },
+  getAgent: () => projectAgent,
+  setAgent: (a: Agent | null) => { projectAgent = a; },
+  getProjectAgent: () => projectAgent,
+  setProjectAgent: (a: Agent | null) => { projectAgent = a; },
   getProxyModel: () => proxyModel,
   setProxyModel: (m: ProxyLanguageModel | null) => { proxyModel = m; },
   getChannelType: () => workerChannelType,
@@ -208,14 +209,18 @@ export async function initProject(config: ProjectConfig): Promise<void> {
 
   const storePaths = buildProjectAgentPaths(projectPath);
 
-  // 9. Create TaskRunner (replaces old Agent)
-  projectTaskRunner = _createTaskRunner({
+  // 9. Create dispatcher Agent with subagent management (replaces TaskRunner)
+  //    This Agent is never run() itself — it acts as a dispatcher that
+  //    creates child Agents via submit() for each incoming message.
+  projectAgent = _createProjectAgent({
     model: proxyModel,
-    taskTypeRegistry: subAgentTypeRegistry,
+    subagentTypeRegistry: subAgentTypeRegistry,
     tasksDir: storePaths.tasks,
     onNotification: (notification: TaskNotification) => {
       sendNotify(notificationToText(notification));
     },
+    sessionDir: storePaths.session,
+    channelId: projectDef.name,
   });
 
   // 10. Signal ready
@@ -225,9 +230,9 @@ export async function initProject(config: ProjectConfig): Promise<void> {
 // ── Message handling ─────────────────────────────────
 
 export function handleMessage(message: { text: string }): void {
-  if (!projectTaskRunner) return;
+  if (!projectAgent) return;
   const text = typeof message === "string" ? message : message.text;
-  projectTaskRunner.submit(text, "main-agent", "general", text.slice(0, 100));
+  projectAgent.submit(text, "main-agent", "general", text.slice(0, 100));
 }
 
 /** Re-scan skill directories and update the project's SkillRegistry. */
@@ -254,7 +259,7 @@ export async function handleShutdown(): Promise<void> {
   if (proxyModel) {
     proxyModel.cancelAll("Worker shutting down");
   }
-  // TaskRunner has no stop() — active ExecutionAgents complete on their own
+  // Agent-based dispatcher has no stop() — active child Agents complete on their own
   // or are abandoned when the Worker process exits.
   postToParent({ type: "shutdown-complete" });
   _exitProcess(0);
@@ -371,26 +376,36 @@ export function _setExitProcessForTest(fn: (code: number) => void): () => void {
 }
 
 // ── Factory overrides for testing ────────────────────
-// These allow unit tests to inject mock TaskRunner/ProxyLanguageModel constructors
+// These allow unit tests to inject mock Agent/ProxyLanguageModel constructors
 // WITHOUT using mock.module (which pollutes other test files globally in Bun).
 
-type TaskRunnerFactory = (deps: import("../agents/task-runner.ts").TaskRunnerDeps) => TaskRunner;
+export interface ProjectAgentFactoryDeps {
+  model: ProxyLanguageModel;
+  subagentTypeRegistry: SubAgentTypeRegistry;
+  tasksDir: string;
+  onNotification: (notification: TaskNotification) => void;
+  sessionDir: string;
+  channelId: string;
+}
+
+type ProjectAgentFactory = (deps: ProjectAgentFactoryDeps) => Agent;
 type ProxyModelFactory = (provider: string, modelId: string, send: (msg: unknown) => void) => ProxyLanguageModel;
 
-let _taskRunnerFactory: TaskRunnerFactory | null = null;
+let _projectAgentFactory: ProjectAgentFactory | null = null;
 let _proxyModelFactory: ProxyModelFactory | null = null;
 
-/** Override TaskRunner constructor for testing. Returns cleanup function. */
-export function _setTaskRunnerFactoryForTest(fn: TaskRunnerFactory): () => void {
-  _taskRunnerFactory = fn;
-  return () => { _taskRunnerFactory = null; };
+/** Override Agent constructor for testing. Returns cleanup function. */
+export function _setProjectAgentFactoryForTest(fn: ProjectAgentFactory): () => void {
+  _projectAgentFactory = fn;
+  return () => { _projectAgentFactory = null; };
 }
 
 /**
- * Backward-compat alias for tests that still import _setAgentFactoryForTest.
- * @deprecated Use _setTaskRunnerFactoryForTest instead.
+ * Backward-compat alias.
+ * @deprecated Use _setProjectAgentFactoryForTest instead.
  */
-export const _setAgentFactoryForTest = _setTaskRunnerFactoryForTest as any;
+export const _setTaskRunnerFactoryForTest = _setProjectAgentFactoryForTest;
+export const _setAgentFactoryForTest = _setProjectAgentFactoryForTest;
 
 /** Override ProxyLanguageModel constructor for testing. Returns cleanup function. */
 export function _setProxyModelFactoryForTest(fn: ProxyModelFactory): () => void {
@@ -398,9 +413,21 @@ export function _setProxyModelFactoryForTest(fn: ProxyModelFactory): () => void 
   return () => { _proxyModelFactory = null; };
 }
 
-function _createTaskRunner(deps: import("../agents/task-runner.ts").TaskRunnerDeps): TaskRunner {
-  if (_taskRunnerFactory) return _taskRunnerFactory(deps);
-  return new TaskRunner(deps);
+/** @internal Exported for testing only. */
+export function _createProjectAgent(deps: ProjectAgentFactoryDeps): Agent {
+  if (_projectAgentFactory) return _projectAgentFactory(deps);
+  return new Agent({
+    agentId: deps.channelId,
+    model: deps.model,
+    toolRegistry: new ToolRegistry(),
+    systemPrompt: "Project dispatcher",
+    sessionDir: deps.sessionDir,
+    subagentConfig: {
+      subagentTypeRegistry: deps.subagentTypeRegistry,
+      tasksDir: deps.tasksDir,
+      onNotification: deps.onNotification,
+    },
+  });
 }
 
 function _createProxyModel(provider: string, modelId: string, send: (msg: unknown) => void): ProxyLanguageModel {

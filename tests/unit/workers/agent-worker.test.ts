@@ -32,8 +32,9 @@ import {
   _setExitProcessForTest,
   _setAgentFactoryForTest,
   _setProxyModelFactoryForTest,
+  _createProjectAgent,
 } from "@pegasus/workers/agent-worker.ts";
-import type { TaskNotification } from "@pegasus/agents/task-runner.ts";
+import type { TaskNotification } from "@pegasus/agents/agent.ts";
 import { setSettings, resetSettings } from "@pegasus/infra/config.ts";
 import type { Settings } from "@pegasus/infra/config.ts";
 
@@ -89,10 +90,10 @@ function makeTestSettings(dataDir: string): Settings {
   };
 }
 
-/** Track the last onNotification callback registered by the mock TaskRunner. */
+/** Track the last onNotification callback registered by the mock Agent. */
 let _notifyCallback: ((n: unknown) => void) | null = null;
 
-/** Create a mock TaskRunner-like object for factory injection. */
+/** Create a mock Agent-like object for factory injection. */
 function createMockAgent() {
   return {
     submit: mock((_text: string, _source: string) => "mock_task_id"),
@@ -407,7 +408,7 @@ describe("handleShutdown", () => {
         expect(reason).toContain("shutting down");
       },
     };
-    // TaskRunner has no stop() — handleShutdown only cancels proxyModel
+    // Agent has no stop() — handleShutdown only cancels proxyModel
     const fakeAgent = {
       submit: mock(() => "t1"),
     };
@@ -446,7 +447,7 @@ describe("handleShutdown", () => {
   }, 5_000);
 
   it("should handle case with only agent (no proxyModel)", async () => {
-    // TaskRunner has no stop() — with no proxyModel, handleShutdown just posts shutdown-complete
+    // Agent has no stop() — with no proxyModel, handleShutdown just posts shutdown-complete
     const fakeAgent = {
       submit: mock(() => "t1"),
     };
@@ -673,7 +674,7 @@ describe("initProject", () => {
     lastMockProxy = createMockProxyModel();
     _notifyCallback = null;
     cleanupAgent = _setAgentFactoryForTest((deps: any) => {
-      // Capture onNotification from TaskRunnerDeps
+      // Capture onNotification from AgentDeps
       if (deps.onNotification) _notifyCallback = deps.onNotification;
       return lastMockAgent as any;
     });
@@ -923,5 +924,35 @@ describe("splitModelSpec", () => {
   it("should handle specs with multiple slashes", () => {
     const result = splitModelSpec("custom/deep/model-name", "openai/gpt-4o");
     expect(result).toEqual({ provider: "custom", model: "deep/model-name" });
+  });
+});
+
+// ── _createProjectAgent (default path) ───────────────────
+
+import { SubAgentTypeRegistry } from "@pegasus/agents/subagents/registry.ts";
+
+describe("_createProjectAgent", () => {
+  const TMP = "/tmp/pegasus-test-create-project-agent";
+
+  beforeEach(() => mkdirSync(TMP, { recursive: true }));
+  afterEach(() => rmSync(TMP, { recursive: true, force: true }));
+
+  it("should create an Agent with subagentConfig when no factory override", () => {
+    const registry = new SubAgentTypeRegistry();
+    const notifications: unknown[] = [];
+
+    const agent = _createProjectAgent({
+      model: { modelId: "test", provider: "test", generate: async () => ({}) } as any,
+      subagentTypeRegistry: registry,
+      tasksDir: `${TMP}/tasks`,
+      onNotification: (n) => notifications.push(n),
+      sessionDir: `${TMP}/session`,
+      channelId: "test-project",
+    });
+
+    expect(agent).toBeDefined();
+    expect(typeof agent.submit).toBe("function");
+    expect(typeof agent.listAll).toBe("function");
+    expect(agent.activeCount).toBe(0);
   });
 });

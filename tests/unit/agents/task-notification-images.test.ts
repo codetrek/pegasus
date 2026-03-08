@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import type { TaskNotification } from "@pegasus/agents/task-runner.ts";
+import type { TaskNotification } from "@pegasus/agents/agent.ts";
 import type { Message } from "@pegasus/infra/llm-types.ts";
 
 // ═══════════════════════════════════════════════════

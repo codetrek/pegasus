@@ -31,8 +31,6 @@ import { TokenRefreshMonitor } from "./mcp/auth/refresh-monitor.ts";
 import type { DeviceCodeAuthConfig } from "./mcp/auth/types.ts";
 import { SkillRegistry } from "./skills/index.ts";
 import { SubAgentTypeRegistry, loadSubAgentTypeDefinitions } from "./agents/subagents/index.ts";
-import { TaskRunner } from "./agents/task-runner.ts";
-import type { TaskNotification } from "./agents/task-runner.ts";
 import { ProjectManager } from "./projects/manager.ts";
 import { ProjectAdapter } from "./projects/project-adapter.ts";
 import { ImageManager } from "./media/image-manager.ts";
@@ -41,7 +39,7 @@ import { Reflection } from "./agents/reflection.ts";
 import { ToolRegistry } from "./agents/tools/registry.ts";
 import { ToolExecutor } from "./agents/tools/executor.ts";
 import { mainAgentTools } from "./agents/tools/builtins/index.ts";
-import type { Tool, ToolContext } from "./agents/tools/types.ts";
+import type { Tool } from "./agents/tools/types.ts";
 import { MainAgent } from "./agents/main-agent.ts";
 import type { InjectedSubsystems } from "./agents/main-agent.ts";
 import { buildMainAgentPaths } from "./storage/paths.ts";
@@ -73,7 +71,6 @@ export class Pegasus {
   private skillRegistry!: SkillRegistry;
   private skillDirs: Array<{ dir: string; source: "builtin" | "user" }> = [];
   private subAgentTypeRegistry!: SubAgentTypeRegistry;
-  private taskRunner!: TaskRunner;
   private projectManager!: ProjectManager;
   private projectAdapter!: ProjectAdapter;
   private imageManager: ImageManager | null = null;
@@ -343,22 +340,7 @@ export class Pegasus {
       });
     }
 
-    // 8. TaskRunner
-    this.taskRunner = new TaskRunner({
-      model: this.models.getForTier("balanced"),
-      taskTypeRegistry: this.subAgentTypeRegistry,
-      tasksDir: mainStorePaths.tasks,
-      storeImage: this._getStoreImageCallback(),
-      contextWindow: this.models.getDefaultContextWindow() ?? this.settings.llm.contextWindow,
-      onNotification: (notification: TaskNotification) => {
-        // Route to MainAgent's queue (MainAgent may not exist during early init)
-        if (this._mainAgent) {
-          this._mainAgent.pushTaskNotification(notification);
-        }
-      },
-    });
-
-    // Wrap MCP tools once — shared by both TaskRunner and MainAgent (via injection)
+    // 8. Wrap MCP tools once — shared by MainAgent's own registry and subagent registries
     let wrappedMcpTools: Tool[] = [];
     if (this.mcpManager && mcpConfigs.length > 0) {
       for (const config of mcpConfigs.filter((c) => c.enabled)) {
@@ -366,9 +348,6 @@ export class Pegasus {
           const mcpToolsRaw = await this.mcpManager.listTools(config.name);
           wrappedMcpTools.push(...wrapMCPTools(config.name, mcpToolsRaw, this.mcpManager));
         } catch { /* already logged during MCP connection */ }
-      }
-      if (wrappedMcpTools.length > 0) {
-        this.taskRunner.setAdditionalTools(wrappedMcpTools);
       }
     }
 
@@ -380,8 +359,8 @@ export class Pegasus {
     // 10. TickManager — uses MainAgent reference via closure
     this.tickManager = new TickManager({
       getActiveWorkCount: () => ({
-        tasks: this.taskRunner?.activeCount ?? 0,
-        subagents: 0,  // SubAgentManager removed — all work tracked by TaskRunner
+        tasks: this._mainAgent?.activeCount ?? 0,
+        subagents: 0,  // All work tracked by Agent's subagent management
       }),
       hasPendingWork: () => false, // Conservative: let TickManager decide based on active work count
       onTick: (activeTasks, activeSubAgents) => {
@@ -391,7 +370,7 @@ export class Pegasus {
       },
     });
 
-    // 11. Create MainAgent with injected deps
+    // 11. Create MainAgent with injected deps (Agent owns subagent management via subagentConfig)
     const injected: InjectedSubsystems = {
       modelLimitsCache: this.modelLimitsCache,
       authManager: this.authManager,
@@ -399,8 +378,7 @@ export class Pegasus {
       tokenRefreshMonitor: this.tokenRefreshMonitor,
       skillRegistry: this.skillRegistry,
       skillDirs: this.skillDirs,
-      aiTaskTypeRegistry: this.subAgentTypeRegistry,
-      taskRunner: this.taskRunner,
+      subagentTypeRegistry: this.subAgentTypeRegistry,
       projectManager: this.projectManager,
       projectAdapter: this.projectAdapter,
       imageManager: this.imageManager,
@@ -416,6 +394,11 @@ export class Pegasus {
       settings: this.settings,
       injected,
     });
+
+    // Register MCP tools as additional subagent tools (after MainAgent creation)
+    if (wrappedMcpTools.length > 0) {
+      this._mainAgent.setAdditionalTools(wrappedMcpTools);
+    }
 
     // Wire reply routing if adapters were registered before start()
     if (this._replyCallback) {
@@ -510,19 +493,6 @@ export class Pegasus {
   // ═══════════════════════════════════════════════════
   // Internal helpers
   // ═══════════════════════════════════════════════════
-
-  /**
-   * Get a storeImage callback for ToolContext injection (TaskRunner deps).
-   * Returns undefined when vision is disabled (imageManager is null).
-   */
-  private _getStoreImageCallback(): ToolContext["storeImage"] {
-    if (!this.imageManager) return undefined;
-    const mgr = this.imageManager;
-    return async (buffer: Buffer, mimeType: string, source: string) => {
-      const ref = await mgr.store(buffer, mimeType, source);
-      return { id: ref.id, mimeType: ref.mimeType };
-    };
-  }
 
   /**
    * Handle message from a channel with no owner configured.

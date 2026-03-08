@@ -1,16 +1,19 @@
 /**
- * Tests for TaskRunner.resume() — resumes a previously-submitted task
+ * Tests for Agent.resume() — resumes a previously-submitted subagent
  * by appending new user input and re-running from persisted session.
  *
- * Also tests _loadIndex() internals via the public resume() surface.
+ * Replaces the former task-runner-resume.test.ts. Now that Agent owns
+ * subagent management directly (TaskRunner was deleted), we test the
+ * same functionality through Agent with subagentConfig.
+ *
+ * Also tests _loadSubagentIndex() internals via the public resume() surface.
  */
 
 import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
-import { TaskRunner, type TaskRunnerDeps } from "../../../src/agents/task-runner.ts";
-import type { TaskNotification } from "../../../src/agents/task-runner.ts";
+import { Agent, type TaskNotification } from "../../../src/agents/agent.ts";
 import type { LanguageModel } from "../../../src/infra/llm-types.ts";
 import { SubAgentTypeRegistry } from "../../../src/agents/subagents/registry.ts";
-import { Agent } from "../../../src/agents/agent.ts";
+import { ToolRegistry } from "../../../src/agents/tools/registry.ts";
 import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -60,14 +63,24 @@ function createBlockingModel(): [LanguageModel, () => void] {
 
 let tempDir: string;
 
-function createDeps(overrides?: Partial<TaskRunnerDeps>): TaskRunnerDeps {
-  return {
-    model: createMockModel(),
-    taskTypeRegistry: new SubAgentTypeRegistry(),
-    tasksDir: tempDir,
-    onNotification: mock((_n: TaskNotification) => {}),
-    ...overrides,
-  };
+interface CreateAgentOpts {
+  model?: LanguageModel;
+  onNotification?: (n: TaskNotification) => void;
+}
+
+function createAgentWithSubagents(overrides?: CreateAgentOpts): Agent {
+  return new Agent({
+    agentId: "test-agent",
+    model: overrides?.model ?? createMockModel(),
+    toolRegistry: new ToolRegistry(),
+    systemPrompt: "test",
+    sessionDir: path.join(tempDir, "session"),
+    subagentConfig: {
+      subagentTypeRegistry: new SubAgentTypeRegistry(),
+      tasksDir: tempDir,
+      onNotification: overrides?.onNotification ?? mock((_n: TaskNotification) => {}),
+    },
+  });
 }
 
 /** Write an index.jsonl with given entries. */
@@ -102,7 +115,7 @@ async function waitForNotifications(ms = 200): Promise<void> {
 
 // ── Tests ────────────────────────────────────────────
 
-describe("TaskRunner.resume", () => {
+describe("Agent.resume", () => {
   beforeEach(async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), "pegasus-resume-test-"));
   });
@@ -123,12 +136,12 @@ describe("TaskRunner.resume", () => {
       ]);
 
       const [model] = createBlockingModel();
-      const runner = new TaskRunner(createDeps({ model }));
+      const agent = createAgentWithSubagents({ model });
 
-      const result = await runner.resume(taskId, "follow up input");
+      const result = await agent.resume(taskId, "follow up input");
 
       expect(result).toBe(taskId);
-      expect(runner.activeCount).toBe(1);
+      expect(agent.activeCount).toBe(1);
 
       // Verify the new message was appended to session
       const sessionPath = path.join(tempDir, date, taskId, "current.jsonl");
@@ -154,8 +167,8 @@ describe("TaskRunner.resume", () => {
         notifications.push(n);
       });
 
-      const runner = new TaskRunner(createDeps({ onNotification }));
-      await runner.resume(taskId, "continue please");
+      const agent = createAgentWithSubagents({ onNotification });
+      await agent.resume(taskId, "continue please");
 
       await waitForNotifications();
 
@@ -169,19 +182,19 @@ describe("TaskRunner.resume", () => {
     test("throws when taskId not in index", async () => {
       // Empty index
       await writeIndex(tempDir, []);
-      const runner = new TaskRunner(createDeps());
+      const agent = createAgentWithSubagents();
 
       await expect(
-        runner.resume("nonexistent-id", "some input"),
+        agent.resume("nonexistent-id", "some input"),
       ).rejects.toThrow("Task nonexistent-id not found in task index");
     }, 5000);
 
     test("throws when index file does not exist", async () => {
       // No index file at all
-      const runner = new TaskRunner(createDeps());
+      const agent = createAgentWithSubagents();
 
       await expect(
-        runner.resume("missing-id", "some input"),
+        agent.resume("missing-id", "some input"),
       ).rejects.toThrow("Task missing-id not found in task index");
     }, 5000);
   });
@@ -209,8 +222,8 @@ describe("TaskRunner.resume", () => {
       };
 
       try {
-        const runner = new TaskRunner(createDeps());
-        await runner.resume(taskId, "new instruction");
+        const agent = createAgentWithSubagents();
+        await agent.resume(taskId, "new instruction");
 
         await waitForNotifications();
 
@@ -230,11 +243,11 @@ describe("TaskRunner.resume", () => {
       ]);
 
       const [model] = createBlockingModel();
-      const runner = new TaskRunner(createDeps({ model }));
+      const agent = createAgentWithSubagents({ model });
 
-      await runner.resume(taskId, "do more", "explore", "Exploration task");
+      await agent.resume(taskId, "do more", "explore", "Exploration task");
 
-      const status = runner.getStatus(taskId);
+      const status = agent.getStatus(taskId);
       expect(status).not.toBeNull();
       expect(status!.taskType).toBe("explore");
       expect(status!.description).toBe("Exploration task");
@@ -251,17 +264,17 @@ describe("TaskRunner.resume", () => {
       ]);
 
       const [model] = createBlockingModel();
-      const runner = new TaskRunner(createDeps({ model }));
+      const agent = createAgentWithSubagents({ model });
 
-      await runner.resume(taskId, "continue");
+      await agent.resume(taskId, "continue");
 
-      const status = runner.getStatus(taskId);
+      const status = agent.getStatus(taskId);
       expect(status).not.toBeNull();
       expect(status!.taskType).toBe("general");
     }, 5000);
   });
 
-  describe("_loadIndex", () => {
+  describe("_loadSubagentIndex", () => {
     test("parses index.jsonl correctly with multiple entries", async () => {
       await writeIndex(tempDir, [
         { taskId: "task-aaa", date: "2026-03-01" },
@@ -269,32 +282,32 @@ describe("TaskRunner.resume", () => {
         { taskId: "task-ccc", date: "2026-03-03" },
       ]);
 
-      // We test _loadIndex indirectly: resume succeeds for known IDs,
+      // We test _loadSubagentIndex indirectly: resume succeeds for known IDs,
       // throws for unknown ones
       await writeSession(tempDir, "2026-03-02", "task-bbb", [
         { role: "user", content: "hello" },
       ]);
 
       const [model] = createBlockingModel();
-      const runner = new TaskRunner(createDeps({ model }));
+      const agent = createAgentWithSubagents({ model });
 
       // Should find task-bbb
-      const result = await runner.resume("task-bbb", "follow up");
+      const result = await agent.resume("task-bbb", "follow up");
       expect(result).toBe("task-bbb");
 
       // Should not find task-zzz
       await expect(
-        runner.resume("task-zzz", "nope"),
+        agent.resume("task-zzz", "nope"),
       ).rejects.toThrow("Task task-zzz not found in task index");
     }, 5000);
 
     test("returns empty map when index file is missing", async () => {
-      // No index file written — _loadIndex should return empty map,
+      // No index file written — _loadSubagentIndex should return empty map,
       // causing resume to throw "not found"
-      const runner = new TaskRunner(createDeps());
+      const agent = createAgentWithSubagents();
 
       await expect(
-        runner.resume("any-id", "input"),
+        agent.resume("any-id", "input"),
       ).rejects.toThrow("Task any-id not found in task index");
     }, 5000);
 
@@ -305,11 +318,11 @@ describe("TaskRunner.resume", () => {
       ]);
 
       const [model] = createBlockingModel();
-      const runner = new TaskRunner(createDeps({ model }));
+      const agent = createAgentWithSubagents({ model });
 
-      const result = await runner.resume("solo-task", "more input");
+      const result = await agent.resume("solo-task", "more input");
       expect(result).toBe("solo-task");
-      expect(runner.activeCount).toBe(1);
+      expect(agent.activeCount).toBe(1);
     }, 5000);
   });
 
@@ -335,8 +348,8 @@ describe("TaskRunner.resume", () => {
       };
 
       try {
-        const runner = new TaskRunner(createDeps({ onNotification }));
-        await runner.resume(taskId, "continue");
+        const agent = createAgentWithSubagents({ onNotification });
+        await agent.resume(taskId, "continue");
 
         await waitForNotifications();
 
@@ -344,7 +357,7 @@ describe("TaskRunner.resume", () => {
         expect(failedCall).toBeDefined();
         expect(failedCall!.taskId).toBe(taskId);
         expect((failedCall as any).error).toBe("agent crashed on resume");
-        expect(runner.activeCount).toBe(0);
+        expect(agent.activeCount).toBe(0);
       } finally {
         Agent.prototype.run = originalRun;
       }

@@ -12,7 +12,6 @@ import type { ModelRegistry } from "@pegasus/infra/model-registry.ts";
 import type { Persona } from "@pegasus/identity/persona.ts";
 import { SkillRegistry } from "@pegasus/skills/index.ts";
 import { SubAgentTypeRegistry } from "@pegasus/agents/subagents/index.ts";
-import { TaskRunner } from "@pegasus/agents/task-runner.ts";
 import { ProjectManager } from "@pegasus/projects/manager.ts";
 import { ProjectAdapter } from "@pegasus/projects/project-adapter.ts";
 import { ImageManager } from "@pegasus/media/image-manager.ts";
@@ -43,7 +42,7 @@ export interface CreateInjectedOpts {
 /**
  * Build mock InjectedSubsystems suitable for unit tests.
  *
- * Creates real lightweight subsystem instances (SkillRegistry, TaskRunner, etc.)
+ * Creates real lightweight subsystem instances (SkillRegistry, etc.)
  * but uses the test's mock model — no network calls, no auth.
  */
 export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubsystems {
@@ -73,16 +72,6 @@ export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubs
   // Sub-agent types
   const subAgentTypeRegistry = new SubAgentTypeRegistry();
 
-  // TaskRunner — uses the mock model
-  const taskRunner = new TaskRunner({
-    model: models.getForTier("balanced"),
-    taskTypeRegistry: subAgentTypeRegistry,
-    tasksDir: mainStorePaths.tasks,
-    storeImage: undefined,
-    contextWindow: settings.llm.contextWindow,
-    onNotification: () => {}, // Tests wire this up via MainAgent if needed
-  });
-
   // Projects
   const projectsDir = path.join(settings.dataDir, "agents", "projects");
   const projectManager = new ProjectManager(projectsDir);
@@ -102,11 +91,11 @@ export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubs
 
   // TickManager — uses mutable agent ref so fire() can call _handleTick
   // after MainAgent is created.
-  const agentRef: { handleTick?: (t: number, s: number) => void } = {};
+  const agentRef: { handleTick?: (t: number, s: number) => void; activeCount?: () => number } = {};
   const tickManager = new TickManager({
     getActiveWorkCount: () => ({
-      tasks: taskRunner?.activeCount ?? 0,
-      subagents: 0,  // SubAgentManager removed — all work tracked by TaskRunner
+      tasks: agentRef.activeCount?.() ?? 0,
+      subagents: 0,
     }),
     hasPendingWork: () => false,
     onTick: (activeTasks, activeSubAgents) => {
@@ -131,15 +120,14 @@ export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubs
     modelLimitsCache,
   });
 
-  const result: InjectedSubsystems & { _wireTickToAgent: (agent: { _handleTickFromApp: (t: number, s: number) => void }) => void } = {
+  const result: InjectedSubsystems & { _wireTickToAgent: (agent: { _handleTickFromApp: (t: number, s: number) => void; activeCount: number }) => void } = {
     modelLimitsCache,
     authManager,
     mcpManager: null,
     tokenRefreshMonitor: null,
     skillRegistry,
     skillDirs,
-    aiTaskTypeRegistry: subAgentTypeRegistry,
-    taskRunner,
+    subagentTypeRegistry: subAgentTypeRegistry,
     projectManager,
     projectAdapter,
     imageManager,
@@ -149,6 +137,7 @@ export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubs
     ownerStore: new OwnerStore(settings.authDir),
     _wireTickToAgent: (agent) => {
       agentRef.handleTick = (t, s) => agent._handleTickFromApp(t, s);
+      agentRef.activeCount = () => agent.activeCount;
     },
   };
 

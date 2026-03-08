@@ -1,5 +1,10 @@
 /**
- * Tests for TaskRunner — manages Agent instances for AITask execution.
+ * Tests for Agent's subagent management — submit(), resume(), getStatus(),
+ * listAll(), activeCount, setAdditionalTools().
+ *
+ * Replaces the former task-runner.test.ts. Now that Agent owns subagent
+ * management directly (TaskRunner was deleted), we test the same functionality
+ * through Agent with subagentConfig.
  *
  * Exercises:
  *   - submit returns taskId and increments activeCount
@@ -14,15 +19,16 @@
  *   - onNotify callback forwarded from Agent
  *   - setAdditionalTools clears tool registry cache
  *   - run() promise rejection triggers failed notification (.catch branch)
+ *   - storeImage propagates to ToolContext
+ *   - imageRefs flow through notification
  */
 
 import { describe, test, expect, mock, beforeEach, afterEach, afterAll } from "bun:test";
-import { TaskRunner, type TaskRunnerDeps } from "../../../src/agents/task-runner.ts";
-import type { TaskNotification } from "../../../src/agents/task-runner.ts";
+import { Agent, type TaskNotification } from "../../../src/agents/agent.ts";
 import type { LanguageModel } from "../../../src/infra/llm-types.ts";
 import { SubAgentTypeRegistry } from "../../../src/agents/subagents/registry.ts";
 import { allTaskTools } from "../../../src/agents/tools/builtins/index.ts";
-import { Agent } from "../../../src/agents/agent.ts";
+import { ToolRegistry } from "../../../src/agents/tools/registry.ts";
 import type { Tool, ToolContext, ToolResult } from "../../../src/agents/tools/types.ts";
 import { ToolCategory } from "../../../src/agents/tools/types.ts";
 import { z } from "zod";
@@ -75,14 +81,29 @@ function createBlockingModel(): [LanguageModel, () => void] {
 
 let tempDir: string;
 
-function createDeps(overrides?: Partial<TaskRunnerDeps>): TaskRunnerDeps {
-  return {
-    model: createMockModel(),
-    taskTypeRegistry: new SubAgentTypeRegistry(),
-    tasksDir: tempDir,
-    onNotification: mock((_n: TaskNotification) => {}),
-    ...overrides,
-  };
+interface CreateAgentOpts {
+  model?: LanguageModel;
+  onNotification?: (n: TaskNotification) => void;
+  storeImage?: ToolContext["storeImage"];
+  resolveModel?: (tierOrSpec: string) => LanguageModel;
+  subagentTypeRegistry?: SubAgentTypeRegistry;
+}
+
+function createAgentWithSubagents(overrides?: CreateAgentOpts): Agent {
+  return new Agent({
+    agentId: "test-agent",
+    model: overrides?.model ?? createMockModel(),
+    toolRegistry: new ToolRegistry(),
+    systemPrompt: "test",
+    sessionDir: path.join(tempDir, "session"),
+    subagentConfig: {
+      subagentTypeRegistry: overrides?.subagentTypeRegistry ?? new SubAgentTypeRegistry(),
+      tasksDir: path.join(tempDir, "tasks"),
+      onNotification: overrides?.onNotification ?? (() => {}),
+      storeImage: overrides?.storeImage,
+      resolveModel: overrides?.resolveModel,
+    },
+  });
 }
 
 /** Wait for notifications to arrive (fire-and-forget needs a tick). */
@@ -92,10 +113,10 @@ async function waitForNotifications(ms = 50): Promise<void> {
 
 // ── Tests ────────────────────────────────────────────
 
-describe("TaskRunner", () => {
+describe("Agent subagent management", () => {
   const allTempDirs: string[] = [];
   beforeEach(async () => {
-    tempDir = await mkdtemp(path.join(os.tmpdir(), "pegasus-taskrunner-test-"));
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "pegasus-agent-subagent-test-"));
     allTempDirs.push(tempDir);
   });
   afterEach(async () => {
@@ -106,12 +127,13 @@ describe("TaskRunner", () => {
     await Bun.sleep(100);
     await Promise.all(allTempDirs.map(d => rm(d, { recursive: true, force: true }).catch(() => {})));
   });
+
   describe("submit returns taskId and increments activeCount", () => {
     test("returns a non-empty taskId string", () => {
       const [model] = createBlockingModel();
-      const runner = new TaskRunner(createDeps({ model }));
+      const agent = createAgentWithSubagents({ model });
 
-      const taskId = runner.submit("do stuff", "user", "general", "Test task");
+      const taskId = agent.submit("do stuff", "user", "general", "Test task");
 
       expect(taskId).toBeTruthy();
       expect(typeof taskId).toBe("string");
@@ -120,15 +142,15 @@ describe("TaskRunner", () => {
 
     test("increments activeCount after submit", () => {
       const [model] = createBlockingModel();
-      const runner = new TaskRunner(createDeps({ model }));
+      const agent = createAgentWithSubagents({ model });
 
-      expect(runner.activeCount).toBe(0);
+      expect(agent.activeCount).toBe(0);
 
-      runner.submit("do stuff", "user", "general", "Task 1");
-      expect(runner.activeCount).toBe(1);
+      agent.submit("do stuff", "user", "general", "Task 1");
+      expect(agent.activeCount).toBe(1);
 
-      runner.submit("do more", "user", "general", "Task 2");
-      expect(runner.activeCount).toBe(2);
+      agent.submit("do more", "user", "general", "Task 2");
+      expect(agent.activeCount).toBe(2);
     }, 5000);
   });
 
@@ -143,8 +165,8 @@ describe("TaskRunner", () => {
         })),
       );
 
-      const runner = new TaskRunner(createDeps({ model, onNotification }));
-      const taskId = runner.submit("compute", "user", "general", "Compute task");
+      const agent = createAgentWithSubagents({ model, onNotification });
+      const taskId = agent.submit("compute", "user", "general", "Compute task");
 
       await waitForNotifications();
 
@@ -166,8 +188,8 @@ describe("TaskRunner", () => {
         }),
       );
 
-      const runner = new TaskRunner(createDeps({ model, onNotification }));
-      const taskId = runner.submit("do stuff", "user", "general", "Failing task");
+      const agent = createAgentWithSubagents({ model, onNotification });
+      const taskId = agent.submit("do stuff", "user", "general", "Failing task");
 
       await waitForNotifications();
 
@@ -182,24 +204,24 @@ describe("TaskRunner", () => {
 
   describe("activeCount decrements after task completion", () => {
     test("activeCount returns to 0 after task completes", async () => {
-      const runner = new TaskRunner(createDeps());
+      const agent = createAgentWithSubagents();
 
-      runner.submit("do stuff", "user", "general", "Task");
-      expect(runner.activeCount).toBe(1);
+      agent.submit("do stuff", "user", "general", "Task");
+      expect(agent.activeCount).toBe(1);
 
       await waitForNotifications();
 
-      expect(runner.activeCount).toBe(0);
+      expect(agent.activeCount).toBe(0);
     }, 5000);
   });
 
   describe("getStatus returns running task info", () => {
     test("returns TaskInfo for active task", () => {
       const [model] = createBlockingModel();
-      const runner = new TaskRunner(createDeps({ model }));
+      const agent = createAgentWithSubagents({ model });
 
-      const taskId = runner.submit("analyze data", "api", "explore", "Explore task");
-      const status = runner.getStatus(taskId);
+      const taskId = agent.submit("analyze data", "api", "explore", "Explore task");
+      const status = agent.getStatus(taskId);
 
       expect(status).not.toBeNull();
       expect(status!.taskId).toBe(taskId);
@@ -213,20 +235,20 @@ describe("TaskRunner", () => {
 
   describe("getStatus returns null for unknown taskId", () => {
     test("returns null for nonexistent taskId", () => {
-      const runner = new TaskRunner(createDeps());
-      expect(runner.getStatus("nonexistent-id")).toBeNull();
+      const agent = createAgentWithSubagents();
+      expect(agent.getStatus("nonexistent-id")).toBeNull();
     }, 5000);
   });
 
   describe("listAll returns all active tasks", () => {
     test("lists multiple active tasks", () => {
       const [model] = createBlockingModel();
-      const runner = new TaskRunner(createDeps({ model }));
+      const agent = createAgentWithSubagents({ model });
 
-      const id1 = runner.submit("task 1", "user", "general", "First");
-      const id2 = runner.submit("task 2", "user", "plan", "Second");
+      const id1 = agent.submit("task 1", "user", "general", "First");
+      const id2 = agent.submit("task 2", "user", "plan", "Second");
 
-      const all = runner.listAll();
+      const all = agent.listAll();
       expect(all.length).toBe(2);
 
       const ids = all.map((t) => t.taskId);
@@ -235,8 +257,8 @@ describe("TaskRunner", () => {
     }, 5000);
 
     test("returns empty array when no tasks", () => {
-      const runner = new TaskRunner(createDeps());
-      expect(runner.listAll()).toEqual([]);
+      const agent = createAgentWithSubagents();
+      expect(agent.listAll()).toEqual([]);
     }, 5000);
   });
 
@@ -245,13 +267,13 @@ describe("TaskRunner", () => {
       const [model] = createBlockingModel();
       const registry = new SubAgentTypeRegistry();
       // No types registered — getToolNames("unknown") returns all tool names
-      const runner = new TaskRunner(createDeps({ model, taskTypeRegistry: registry }));
+      const agent = createAgentWithSubagents({ model, subagentTypeRegistry: registry });
 
-      runner.submit("test", "user", "unknown_type", "Test");
+      agent.submit("test", "user", "unknown_type", "Test");
 
       // Access the cached tool registry to verify tool count
       // Cache key is now "type:dDEPTH" — default depth is 0
-      const cachedRegistry = (runner as any).toolRegistryCache.get("unknown_type:d0");
+      const cachedRegistry = (agent as any)._subagentToolRegistryCache.get("unknown_type:d0");
       expect(cachedRegistry).toBeDefined();
 
       const registeredTools = cachedRegistry.list();
@@ -272,11 +294,11 @@ describe("TaskRunner", () => {
         },
       ]);
 
-      const runner = new TaskRunner(createDeps({ model, taskTypeRegistry: registry }));
-      runner.submit("read something", "user", "readonly", "Read task");
+      const agent = createAgentWithSubagents({ model, subagentTypeRegistry: registry });
+      agent.submit("read something", "user", "readonly", "Read task");
 
       // Cache key is now "type:dDEPTH" — default depth is 0
-      const cachedRegistry = (runner as any).toolRegistryCache.get("readonly:d0");
+      const cachedRegistry = (agent as any)._subagentToolRegistryCache.get("readonly:d0");
       expect(cachedRegistry).toBeDefined();
 
       const registeredTools = cachedRegistry.list();
@@ -309,17 +331,17 @@ describe("TaskRunner", () => {
         }),
       );
 
-      const runner = new TaskRunner(createDeps({ model, onNotification }));
+      const agent = createAgentWithSubagents({ model, onNotification });
 
-      const id1 = runner.submit("task A", "user", "general", "First task");
-      const id2 = runner.submit("task B", "user", "general", "Second task");
+      const id1 = agent.submit("task A", "user", "general", "First task");
+      const id2 = agent.submit("task B", "user", "general", "Second task");
 
-      expect(runner.activeCount).toBeGreaterThanOrEqual(1);
+      expect(agent.activeCount).toBeGreaterThanOrEqual(1);
 
       await waitForNotifications();
 
       // Both should have completed
-      expect(runner.activeCount).toBe(0);
+      expect(agent.activeCount).toBe(0);
 
       const completedNotifs = notifications.filter((n) => n.type === "completed");
       expect(completedNotifs.length).toBe(2);
@@ -364,8 +386,8 @@ describe("TaskRunner", () => {
         }),
       );
 
-      const runner = new TaskRunner(createDeps({ model, onNotification }));
-      runner.submit("do work", "user", "general", "Notify test");
+      const agent = createAgentWithSubagents({ model, onNotification });
+      agent.submit("do work", "user", "general", "Notify test");
 
       await waitForNotifications(100);
 
@@ -379,16 +401,16 @@ describe("TaskRunner", () => {
   describe("setAdditionalTools clears tool registry cache", () => {
     test("clears cache so next submit builds fresh registry", () => {
       const [model] = createBlockingModel();
-      const runner = new TaskRunner(createDeps({ model }));
+      const agent = createAgentWithSubagents({ model });
 
       // Submit a task to populate the cache for "general" type
-      runner.submit("task", "user", "general", "First");
+      agent.submit("task", "user", "general", "First");
 
-      const cacheBefore = (runner as any).toolRegistryCache as Map<string, unknown>;
+      const cacheBefore = (agent as any)._subagentToolRegistryCache as Map<string, unknown>;
       expect(cacheBefore.size).toBeGreaterThan(0);
 
       // setAdditionalTools should clear the cache
-      runner.setAdditionalTools([]);
+      agent.setAdditionalTools([]);
 
       expect(cacheBefore.size).toBe(0);
     }, 5000);
@@ -409,8 +431,8 @@ describe("TaskRunner", () => {
       };
 
       try {
-        const runner = new TaskRunner(createDeps({ onNotification }));
-        runner.submit("do stuff", "user", "general", "Failing task");
+        const agent = createAgentWithSubagents({ onNotification });
+        agent.submit("do stuff", "user", "general", "Failing task");
 
         await waitForNotifications(100);
 
@@ -421,7 +443,7 @@ describe("TaskRunner", () => {
         expect((failedCall as any).error).toBe("run() blew up");
 
         // activeCount should be back to 0
-        expect(runner.activeCount).toBe(0);
+        expect(agent.activeCount).toBe(0);
       } finally {
         Agent.prototype.run = originalRun;
       }
@@ -439,8 +461,8 @@ describe("TaskRunner", () => {
       };
 
       try {
-        const runner = new TaskRunner(createDeps({ onNotification }));
-        runner.submit("do stuff", "user", "general", "String error task");
+        const agent = createAgentWithSubagents({ onNotification });
+        agent.submit("do stuff", "user", "general", "String error task");
 
         await waitForNotifications(100);
 
@@ -453,7 +475,7 @@ describe("TaskRunner", () => {
     }, 5000);
   });
 
-  describe("storeImage propagates from TaskRunner to ToolContext", () => {
+  describe("storeImage propagates from Agent to subagent ToolContext", () => {
     test("tool receives storeImage callback via ToolContext when provided", async () => {
       let capturedContext: ToolContext | null = null;
 
@@ -498,15 +520,12 @@ describe("TaskRunner", () => {
         }),
       );
 
-      const runner = new TaskRunner(createDeps({
-        model,
-        storeImage: mockStoreImage,
-      }));
+      const agent = createAgentWithSubagents({ model, storeImage: mockStoreImage });
 
-      // Register the spy tool as additional so TaskRunner picks it up
-      runner.setAdditionalTools([spyTool]);
+      // Register the spy tool as additional so agent picks it up
+      agent.setAdditionalTools([spyTool]);
 
-      runner.submit("run spy", "user", "general", "Spy task");
+      agent.submit("run spy", "user", "general", "Spy task");
 
       await waitForNotifications(100);
 
@@ -514,7 +533,7 @@ describe("TaskRunner", () => {
       expect(capturedContext!.storeImage).toBe(mockStoreImage);
     }, 5000);
 
-    test("tool receives no storeImage when not provided to TaskRunner", async () => {
+    test("tool receives no storeImage when not provided to Agent", async () => {
       let capturedContext: ToolContext | null = null;
 
       const spyTool: Tool = {
@@ -552,9 +571,9 @@ describe("TaskRunner", () => {
       );
 
       // No storeImage provided
-      const runner = new TaskRunner(createDeps({ model }));
-      runner.setAdditionalTools([spyTool]);
-      runner.submit("run spy", "user", "general", "No image task");
+      const agent = createAgentWithSubagents({ model });
+      agent.setAdditionalTools([spyTool]);
+      agent.submit("run spy", "user", "general", "No image task");
 
       await waitForNotifications(100);
 
@@ -563,7 +582,7 @@ describe("TaskRunner", () => {
     }, 5000);
   });
 
-  describe("imageRefs flow from Agent through TaskRunner notification", () => {
+  describe("imageRefs flow from subagent through notification", () => {
     test("completed notification includes imageRefs when tool returns images", async () => {
       const notifications: TaskNotification[] = [];
       const onNotification = mock((n: TaskNotification) => {
@@ -611,9 +630,9 @@ describe("TaskRunner", () => {
         }),
       );
 
-      const runner = new TaskRunner(createDeps({ model, onNotification }));
-      runner.setAdditionalTools([imageTool]);
-      runner.submit("take screenshot", "user", "general", "Image task");
+      const agent = createAgentWithSubagents({ model, onNotification });
+      agent.setAdditionalTools([imageTool]);
+      agent.submit("take screenshot", "user", "general", "Image task");
 
       await waitForNotifications(100);
 
@@ -636,8 +655,8 @@ describe("TaskRunner", () => {
         notifications.push(n);
       });
 
-      const runner = new TaskRunner(createDeps({ onNotification }));
-      runner.submit("no images", "user", "general", "Plain task");
+      const agent = createAgentWithSubagents({ onNotification });
+      agent.submit("no images", "user", "general", "Plain task");
 
       await waitForNotifications(100);
 
@@ -645,6 +664,171 @@ describe("TaskRunner", () => {
       expect(completed).toBeDefined();
       const imageRefs = (completed as any).imageRefs;
       expect(imageRefs).toBeUndefined();
+    }, 5000);
+  });
+
+  // ── storeImage propagation via SubagentConfig ──
+
+  describe("storeImage via SubagentConfig", () => {
+    test("subagent receives storeImage from SubagentConfig", async () => {
+      let storedImage = false;
+      const mockStoreImage = mock(async (_buf: Buffer, _mime: string, _src: string) => {
+        storedImage = true;
+        return { id: "img-1", mimeType: "image/png" };
+      });
+
+      // Create a model that triggers a tool call to store_test_image
+      const storeTestTool: Tool = {
+        name: "store_test_image",
+        description: "Test tool that stores an image",
+        category: ToolCategory.MEDIA,
+        parameters: z.object({}),
+        async execute(_params: unknown, context: ToolContext): Promise<ToolResult> {
+          const startedAt = Date.now();
+          if (context.storeImage) {
+            await context.storeImage(Buffer.from("fake"), "image/png", "test");
+            return { success: true, result: "stored", startedAt };
+          }
+          return { success: true, result: "no_storeImage", startedAt };
+        },
+      };
+
+      // Model that calls store_test_image tool
+      const toolCallingModel = createMockModel(async (_opts: any) => {
+        // First call: invoke tool; second call: return final text
+        if (!storedImage) {
+          return {
+            text: "",
+            finishReason: "tool-calls" as const,
+            toolCalls: [{ id: "tc1", name: "store_test_image", arguments: {} }],
+            usage: { promptTokens: 10, completionTokens: 5 },
+          };
+        }
+        return {
+          text: "done",
+          finishReason: "stop" as const,
+          usage: { promptTokens: 10, completionTokens: 5 },
+        };
+      });
+
+      // Register the test tool in a SubAgentType
+      const registry = new SubAgentTypeRegistry();
+      registry.registerMany([{
+        name: "general",
+        description: "test",
+        tools: ["store_test_image"],
+        prompt: "",
+        source: "builtin" as const,
+      }]);
+
+      const agent = createAgentWithSubagents({
+        model: toolCallingModel,
+        storeImage: mockStoreImage,
+        subagentTypeRegistry: registry,
+      });
+      // Add store_test_image to parent's inheritable tools
+      agent.setAdditionalTools([storeTestTool]);
+
+      agent.submit("store an image", "user", "general", "Store test");
+      await waitForNotifications(200);
+
+      expect(mockStoreImage).toHaveBeenCalled();
+      expect(storedImage).toBe(true);
+    }, 5000);
+
+    test("subagent works without storeImage (undefined)", async () => {
+      const notifications: TaskNotification[] = [];
+      const agent = createAgentWithSubagents({
+        onNotification: (n) => notifications.push(n),
+        // storeImage not provided
+      });
+
+      agent.submit("no image needed", "user", "general", "Plain task");
+      await waitForNotifications(100);
+
+      const completed = notifications.find(n => n.type === "completed");
+      expect(completed).toBeDefined();
+    }, 5000);
+  });
+
+  // ── resolveModel via SubagentConfig ──
+
+  describe("resolveModel via SubagentConfig", () => {
+    test("subagent uses model from SubAgentType when resolveModel is provided", async () => {
+      let usedModelId = "";
+      const fastModel = createMockModel(async () => {
+        usedModelId = "fast-model";
+        return {
+          text: "fast result",
+          finishReason: "stop" as const,
+          usage: { promptTokens: 5, completionTokens: 3 },
+        };
+      });
+      (fastModel as any).modelId = "fast-model";
+
+      const registry = new SubAgentTypeRegistry();
+      registry.registerMany([{
+        name: "explore",
+        description: "exploration",
+        tools: ["*"],
+        prompt: "",
+        source: "builtin" as const,
+        model: "fast",  // SubAgentType declares model tier
+      }]);
+
+      const notifications: TaskNotification[] = [];
+      const agent = createAgentWithSubagents({
+        onNotification: (n) => notifications.push(n),
+        subagentTypeRegistry: registry,
+        resolveModel: (tier: string) => {
+          expect(tier).toBe("fast");
+          return fastModel;
+        },
+      });
+
+      agent.submit("explore something", "user", "explore", "Explore task");
+      await waitForNotifications(100);
+
+      expect(usedModelId).toBe("fast-model");
+    }, 5000);
+
+    test("subagent falls back to parent model when SubAgentType has no model", async () => {
+      let usedParentModel = false;
+      const parentModel = createMockModel(async () => {
+        usedParentModel = true;
+        return {
+          text: "parent model result",
+          finishReason: "stop" as const,
+          usage: { promptTokens: 5, completionTokens: 3 },
+        };
+      });
+
+      const registry = new SubAgentTypeRegistry();
+      registry.registerMany([{
+        name: "general",
+        description: "general",
+        tools: ["*"],
+        prompt: "",
+        source: "builtin" as const,
+        // No model field — should use parent's model
+      }]);
+
+      const resolveModel = mock((_tier: string) => parentModel);
+
+      const notifications: TaskNotification[] = [];
+      const agent = createAgentWithSubagents({
+        model: parentModel,
+        onNotification: (n) => notifications.push(n),
+        subagentTypeRegistry: registry,
+        resolveModel,
+      });
+
+      agent.submit("do work", "user", "general", "General task");
+      await waitForNotifications(100);
+
+      // resolveModel should NOT be called since SubAgentType has no model
+      expect(resolveModel).not.toHaveBeenCalled();
+      expect(usedParentModel).toBe(true);
     }, 5000);
   });
 });
