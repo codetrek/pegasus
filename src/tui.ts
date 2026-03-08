@@ -70,7 +70,8 @@ export async function startTUI(): Promise<void> {
   await tuiAdapter.start({ send: (msg) => app.routeMessage(msg) });
 
   // Render TUI — blocks (opentui event loop)
-  renderApp();
+  // Disable opentui's built-in Ctrl+C handler; we manage exit ourselves (double Ctrl+C).
+  renderApp({ exitOnCtrlC: false });
 }
 
 // Entry point
