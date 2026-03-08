@@ -4,10 +4,10 @@ import type { ReflectionDeps } from "@pegasus/agents/cognitive/reflect.ts";
 import { createReflectionContext } from "@pegasus/agents/cognitive/reflect.ts";
 import type { LanguageModel, GenerateTextResult } from "@pegasus/infra/llm-types.ts";
 import type { Persona } from "@pegasus/identity/persona.ts";
-import { ToolRegistry } from "@pegasus/tools/registry.ts";
-import { ToolExecutor } from "@pegasus/tools/executor.ts";
+import { ToolRegistry } from "@pegasus/agents/tools/registry";
+import { ToolExecutor } from "@pegasus/agents/tools/executor";
 import { EventBus } from "@pegasus/agents/events/bus";
-import { reflectionTools } from "@pegasus/tools/builtins/index.ts";
+import { reflectionTools } from "@pegasus/agents/tools/builtins";
 import { rm, mkdir } from "node:fs/promises";
 
 const testDataDir = "/tmp/pegasus-test-post-reflector";

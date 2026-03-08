@@ -9,8 +9,8 @@ import { ToolPermissionError } from "../errors.ts";
 import path from "node:path";
 import { readdir, access, stat as fsStat } from "node:fs/promises";
 import ignore from "ignore";
-import { getSettings } from "../../infra/config.ts";
-import { isImageFile, readImageFile } from "../../media/image-helpers.ts";
+import { getSettings } from "../../../infra/config.ts";
+import { isImageFile, readImageFile } from "../../../media/image-helpers.ts";
 
 // ── rg availability check (cached at module load) ──
 

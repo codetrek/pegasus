@@ -4,7 +4,7 @@
 
 import type { Tool, ToolStats } from "./types.ts";
 import { ToolCategory } from "./types.ts";
-import type { ToolDefinition } from "../models/tool.ts";
+import type { ToolDefinition } from "../../models/tool.ts";
 import { zodToJsonSchema as zodToJson } from "zod-to-json-schema";
 
 export class ToolRegistry {

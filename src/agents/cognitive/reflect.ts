@@ -11,8 +11,8 @@ import { getLogger } from "../../infra/logger.ts";
 import { shortId } from "../../infra/id.ts";
 import type { Persona } from "../../identity/persona.ts";
 import { buildReflectionPrompt } from "../../prompts/index.ts";
-import type { ToolRegistry } from "../../tools/registry.ts";
-import type { ToolExecutor } from "../../tools/executor.ts";
+import type { ToolRegistry } from "../tools/registry.ts";
+import type { ToolExecutor } from "../tools/executor.ts";
 import { estimateTokensFromChars } from "../../context/index.ts";
 
 const logger = getLogger("cognitive.reflect");

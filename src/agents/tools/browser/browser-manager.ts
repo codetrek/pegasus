@@ -10,7 +10,7 @@
 
 import type { BrowserConfig } from "./types.ts";
 import { addRefsToSnapshot } from "./aria-snapshot.ts";
-import { getLogger } from "../../infra/logger.ts";
+import { getLogger } from "../../../infra/logger.ts";
 
 const logger = getLogger("browser_manager");
 

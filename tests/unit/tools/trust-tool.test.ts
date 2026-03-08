@@ -2,8 +2,8 @@
  * Tests for trust tool — manage trusted owner identities.
  */
 import { describe, it, expect } from "bun:test";
-import { trust } from "../../../src/tools/builtins/trust-tool.ts";
-import { ToolCategory } from "../../../src/tools/types.ts";
+import { trust } from "../../../src/agents/tools/builtins/trust-tool.ts";
+import { ToolCategory } from "../../../src/agents/tools/types.ts";
 import { OwnerStore } from "../../../src/security/owner-store.ts";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";

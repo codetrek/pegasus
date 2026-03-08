@@ -5,9 +5,9 @@
  */
 
 import { describe, it, expect, mock, beforeEach } from "bun:test";
-import { BrowserManager } from "../../../src/tools/browser/browser-manager.ts";
-import type { BrowserLauncher } from "../../../src/tools/browser/browser-manager.ts";
-import type { BrowserConfig } from "../../../src/tools/browser/types.ts";
+import { BrowserManager } from "../../../src/agents/tools/browser/browser-manager.ts";
+import type { BrowserLauncher } from "../../../src/agents/tools/browser/browser-manager.ts";
+import type { BrowserConfig } from "../../../src/agents/tools/browser/types.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 

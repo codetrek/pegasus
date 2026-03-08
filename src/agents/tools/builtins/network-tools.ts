@@ -5,7 +5,7 @@
 import { z } from "zod";
 import TurndownService from "turndown";
 import type { Tool, ToolResult, ToolContext, ToolCategory } from "../types.ts";
-import { WEB_EXTRACT_SYSTEM_PROMPT } from "../../prompts/index.ts";
+import { WEB_EXTRACT_SYSTEM_PROMPT } from "../../../prompts/index.ts";
 
 // ── http_get ────────────────────────────────────
 
@@ -215,7 +215,7 @@ export const web_search: Tool = {
       // Load search config from settings
       let searchConfig: { provider?: string; apiKey?: string; baseURL?: string; maxResults?: number } | undefined;
       try {
-        const { getSettings } = await import("../../infra/config.ts");
+        const { getSettings } = await import("../../../infra/config.ts");
         searchConfig = getSettings().tools?.webSearch;
       } catch {
         // Settings not initialized (e.g. in tests)

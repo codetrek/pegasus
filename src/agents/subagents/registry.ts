@@ -6,7 +6,7 @@
  */
 import { getLogger } from "../../infra/logger.ts";
 import type { SubAgentTypeDefinition } from "./types.ts";
-import { allTaskTools } from "../../tools/builtins/index.ts";
+import { allTaskTools } from "../tools/builtins/index.ts";
 
 const logger = getLogger("subagent_type_registry");
 

@@ -4,7 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { SubAgentTypeRegistry } from "@pegasus/agents/subagents/registry.ts";
 import { parseSubAgentTypeFile, scanSubAgentTypeDir, loadSubAgentTypeDefinitions } from "@pegasus/agents/subagents/loader.ts";
 import type { SubAgentTypeDefinition } from "@pegasus/agents/subagents/types.ts";
-import { allTaskTools } from "@pegasus/tools/builtins/index.ts";
+import { allTaskTools } from "@pegasus/agents/tools/builtins";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 

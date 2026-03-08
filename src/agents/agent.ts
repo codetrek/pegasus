@@ -30,10 +30,10 @@ import type { LanguageModel, GenerateTextResult, Message } from "../infra/llm-ty
 import type { Event } from "./events/types.ts";
 import { EventType, createEvent } from "./events/types.ts";
 import { EventBus } from "./events/bus.ts";
-import { ToolRegistry } from "../tools/registry.ts";
-import { ToolExecutor } from "../tools/executor.ts";
+import { ToolRegistry } from "./tools/registry.ts";
+import { ToolExecutor } from "./tools/executor.ts";
 import type { ToolCall, ToolDefinition } from "../models/tool.ts";
-import type { ToolResult, ToolContext } from "../tools/types.ts";
+import type { ToolResult, ToolContext } from "./tools/types.ts";
 import type { ImageManager } from "../media/image-manager.ts";
 import { hydrateImages } from "../media/image-prune.ts";
 import {

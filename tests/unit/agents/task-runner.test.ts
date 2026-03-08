@@ -21,10 +21,10 @@ import { TaskRunner, type TaskRunnerDeps } from "../../../src/agents/task-runner
 import type { TaskNotification } from "../../../src/agents/task-runner.ts";
 import type { LanguageModel } from "../../../src/infra/llm-types.ts";
 import { SubAgentTypeRegistry } from "../../../src/agents/subagents/registry.ts";
-import { allTaskTools } from "../../../src/tools/builtins/index.ts";
+import { allTaskTools } from "../../../src/agents/tools/builtins/index.ts";
 import { Agent } from "../../../src/agents/agent.ts";
-import type { Tool, ToolContext, ToolResult } from "../../../src/tools/types.ts";
-import { ToolCategory } from "../../../src/tools/types.ts";
+import type { Tool, ToolContext, ToolResult } from "../../../src/agents/tools/types.ts";
+import { ToolCategory } from "../../../src/agents/tools/types.ts";
 import { z } from "zod";
 import { mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";

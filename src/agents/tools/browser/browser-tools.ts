@@ -9,7 +9,7 @@ import { z } from "zod";
 import { readFile, unlink } from "node:fs/promises";
 import type { Tool, ToolResult, ToolContext } from "../types.ts";
 import { ToolCategory } from "../types.ts";
-import type { ImageAttachment } from "../../media/types.ts";
+import type { ImageAttachment } from "../../../media/types.ts";
 
 // ── Helper ──────────────────────────────────────
 

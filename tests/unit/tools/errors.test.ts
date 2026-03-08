@@ -9,7 +9,7 @@ import {
   ToolValidationError,
   ToolTimeoutError,
   ToolPermissionError,
-} from "../../../src/tools/errors.ts";
+} from "../../../src/agents/tools/errors.ts";
 
 describe("ToolError", () => {
   it("should set toolName, message, and name", () => {

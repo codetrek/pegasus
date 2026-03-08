@@ -5,8 +5,8 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Tool, ToolResult, ToolContext } from "../types.ts";
 import { ToolCategory } from "../types.ts";
-import type { ImageAttachment } from "../../media/types.ts";
-import { readImageFile, extToMime } from "../../media/image-helpers.ts";
+import type { ImageAttachment } from "../../../media/types.ts";
+import { readImageFile, extToMime } from "../../../media/image-helpers.ts";
 
 export const image_read: Tool = {
   name: "image_read",

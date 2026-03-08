@@ -11,15 +11,15 @@
  *     completion event before the caller has updated state.
  */
 
-import type { Event } from "../agents/events/index.ts";
+import type { Event } from "../events/index.ts";
 import type { ToolResult, ToolContext } from "./types.ts";
 import {
   ToolNotFoundError,
   ToolValidationError,
   ToolTimeoutError,
 } from "./errors.ts";
-import { EventType as ET, createEvent } from "../agents/events/types.ts";
-import { getLogger } from "../infra/logger.ts";
+import { EventType as ET, createEvent } from "../events/types.ts";
+import { getLogger } from "../../infra/logger.ts";
 import { MAX_TOOL_TIMEOUT } from "./background.ts";
 
 const logger = getLogger("tools.executor");

@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { current_time, sleep, get_env, set_env } from "../../../src/tools/builtins/system-tools.ts";
+import { current_time, sleep, get_env, set_env } from "../../../src/agents/tools/builtins/system-tools.ts";
 
 describe("current_time tool", () => {
   it("should return current time", async () => {

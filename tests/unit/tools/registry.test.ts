@@ -3,9 +3,9 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { ToolRegistry } from "../../../src/tools/registry.ts";
-import type { Tool, ToolCategory } from "../../../src/tools/types.ts";
-import { allTaskTools } from "../../../src/tools/builtins/index.ts";
+import { ToolRegistry } from "../../../src/agents/tools/registry.ts";
+import type { Tool, ToolCategory } from "../../../src/agents/tools/types.ts";
+import { allTaskTools } from "../../../src/agents/tools/builtins/index.ts";
 import { z } from "zod";
 
 describe("ToolRegistry", () => {

@@ -3,8 +3,8 @@
  * Covers the TaskRunner interface.
  */
 import { describe, it, expect } from "bun:test";
-import { task_status } from "../../../src/tools/builtins/task-status-tool.ts";
-import type { TaskRegistryLike } from "../../../src/tools/tool-context.ts";
+import { task_status } from "../../../src/agents/tools/builtins/task-status-tool.ts";
+import type { TaskRegistryLike } from "../../../src/agents/tools/tool-context.ts";
 
 describe("task_status", () => {
   it("should return error when taskRegistry is not in context", async () => {

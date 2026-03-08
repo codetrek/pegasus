@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { image_read } from "../../../src/tools/builtins/image-tools.ts";
-import { ToolCategory } from "../../../src/tools/types.ts";
+import { image_read } from "../../../src/agents/tools/builtins/image-tools.ts";
+import { ToolCategory } from "../../../src/agents/tools/types.ts";
 import { ImageManager } from "../../../src/media/image-manager.ts";
 import { mkdtemp, rm } from "node:fs/promises";
 import { mkdirSync, writeFileSync } from "node:fs";

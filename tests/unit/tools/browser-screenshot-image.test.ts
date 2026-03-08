@@ -10,7 +10,7 @@ import { writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { browser_screenshot } from "../../../src/tools/browser/browser-tools.ts";
+import { browser_screenshot } from "../../../src/agents/tools/browser/browser-tools.ts";
 
 // ── Helpers ──────────────────────────────────────
 

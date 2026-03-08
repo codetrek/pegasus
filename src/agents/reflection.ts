@@ -9,10 +9,10 @@
 import type { Message } from "../infra/llm-types.ts";
 import type { Persona } from "../identity/persona.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
-import type { ToolExecutor } from "../tools/executor.ts";
+import type { ToolExecutor } from "./tools/executor.ts";
 import type { Settings } from "../infra/config.ts";
-import { ToolRegistry } from "../tools/registry.ts";
-import { reflectionTools } from "../tools/builtins/index.ts";
+import { ToolRegistry } from "./tools/registry.ts";
+import { reflectionTools } from "./tools/builtins/index.ts";
 import { PostTaskReflector } from "./cognitive/reflect.ts";
 import { createReflectionContext } from "./cognitive/reflect.ts";
 import { computeTokenBudget, type ModelLimitsCache } from "../context/index.ts";

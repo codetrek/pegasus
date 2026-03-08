@@ -11,7 +11,7 @@ import {
   isImageFile,
   readImageFile,
 } from "../../../src/media/image-helpers.ts";
-import type { ToolContext } from "../../../src/tools/types.ts";
+import type { ToolContext } from "../../../src/agents/tools/types.ts";
 import { createHash } from "node:crypto";
 
 // ── Test fixtures ─────────────────────────────────────

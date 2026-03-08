@@ -5,7 +5,7 @@
  * and enriched index.jsonl (with description, taskType, source).
  */
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { task_list, task_replay } from "../../../src/tools/builtins/task-tools.ts";
+import { task_list, task_replay } from "../../../src/agents/tools/builtins/task-tools.ts";
 import { rm, mkdir, appendFile } from "node:fs/promises";
 
 const testDir = "/tmp/pegasus-test-task-tools";

@@ -17,7 +17,7 @@ import type { Event } from "../../../../src/agents/events/types.ts";
 import { EventType, createEvent } from "../../../../src/agents/events/types.ts";
 import type { LanguageModel, Message } from "../../../../src/infra/llm-types.ts";
 import type { TaskExecutionState, CreateTaskStateOptions } from "../../../../src/agents/base/task-execution-state.ts";
-import { ToolRegistry } from "../../../../src/tools/registry.ts";
+import { ToolRegistry } from "../../../../src/agents/tools/registry.ts";
 import { EventBus } from "../../../../src/agents/events/bus.ts";
 import { z } from "zod";
 import { mkdtemp, rm } from "node:fs/promises";

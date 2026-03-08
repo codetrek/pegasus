@@ -4,9 +4,9 @@
 
 import { z } from "zod";
 import path from "node:path";
-import type { LanguageModel } from "../infra/llm-types.ts";
+import type { LanguageModel } from "../../infra/llm-types.ts";
 import type { BackgroundTaskManager } from "./background.ts";
-import type { ImageAttachment } from "../media/types.ts";
+import type { ImageAttachment } from "../../media/types.ts";
 import type {
   TaskRegistryLike,
   TickManagerLike,

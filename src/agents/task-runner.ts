@@ -10,11 +10,11 @@
 
 import { Agent, type AgentResult } from "./agent.ts";
 import type { LanguageModel } from "../infra/llm-types.ts";
-import { ToolRegistry } from "../tools/registry.ts";
-import type { Tool, ToolContext } from "../tools/types.ts";
-import { allTaskTools } from "../tools/builtins/index.ts";
-import { spawn_subagent } from "../tools/builtins/spawn-subagent-tool.ts";
-import { resume_subagent } from "../tools/builtins/resume-subagent-tool.ts";
+import { ToolRegistry } from "./tools/registry.ts";
+import type { Tool, ToolContext } from "./tools/types.ts";
+import { allTaskTools } from "./tools/builtins/index.ts";
+import { spawn_subagent } from "./tools/builtins/spawn-subagent-tool.ts";
+import { resume_subagent } from "./tools/builtins/resume-subagent-tool.ts";
 import type { SubAgentTypeRegistry } from "./subagents/registry.ts";
 import { shortId } from "../infra/id.ts";
 import { getLogger } from "../infra/logger.ts";

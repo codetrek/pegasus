@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { read_file, write_file, list_files, edit_file, grep_files, glob_files } from "../../../src/tools/builtins/file-tools.ts";
+import { read_file, write_file, list_files, edit_file, grep_files, glob_files } from "../../../src/agents/tools/builtins/file-tools.ts";
 import { rm, mkdir } from "node:fs/promises";
 
 const testDir = "/tmp/pegasus-test-files";

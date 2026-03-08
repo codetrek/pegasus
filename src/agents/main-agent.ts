@@ -27,7 +27,7 @@ import { buildSystemPrompt } from "../prompts/index.ts";
 import type { Settings } from "../infra/config.ts";
 import { getSettings } from "../infra/config.ts";
 import { getLogger } from "../infra/logger.ts";
-import { ToolRegistry } from "../tools/registry.ts";
+import { ToolRegistry } from "./tools/registry.ts";
 import { ImageManager } from "../media/image-manager.ts";
 import { TaskRunner } from "./task-runner.ts";
 import type { TaskNotification } from "./task-runner.ts";
@@ -46,10 +46,10 @@ import { Agent, type QueueItem, type TaskNotificationPayload } from "./agent.ts"
 import { EventBus } from "./events/bus.ts";
 
 // Main Agent's curated tool set
-import { mainAgentTools } from "../tools/builtins/index.ts";
+import { mainAgentTools } from "./tools/builtins/index.ts";
 import { MCPManager } from "../mcp/index.ts";
 import { TokenRefreshMonitor } from "../mcp/auth/refresh-monitor.ts";
-import type { Tool, ToolContext } from "../tools/types.ts";
+import type { Tool, ToolContext } from "./tools/types.ts";
 import { buildMainAgentPaths } from "../storage/paths.ts";
 import type { AgentStorePaths } from "../storage/paths.ts";
 

@@ -3,8 +3,8 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { shell_exec } from "../../../src/tools/builtins/shell-tools.ts";
-import { ToolCategory } from "../../../src/tools/types.ts";
+import { shell_exec } from "../../../src/agents/tools/builtins/shell-tools.ts";
+import { ToolCategory } from "../../../src/agents/tools/types.ts";
 import os from "node:os";
 import fs from "node:fs";
 

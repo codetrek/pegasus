@@ -6,10 +6,10 @@ import { describe, it, expect, mock } from "bun:test";
 import { z } from "zod";
 import {
   BackgroundTaskManager,
-} from "../../../src/tools/background.ts";
-import { ToolExecutor } from "../../../src/tools/executor.ts";
-import { bg_run, bg_output, bg_stop } from "../../../src/tools/builtins/background-tools.ts";
-import type { Tool, ToolContext, ToolCategory, ToolResult } from "../../../src/tools/types.ts";
+} from "../../../src/agents/tools/background.ts";
+import { ToolExecutor } from "../../../src/agents/tools/executor.ts";
+import { bg_run, bg_output, bg_stop } from "../../../src/agents/tools/builtins/background-tools.ts";
+import type { Tool, ToolContext, ToolCategory, ToolResult } from "../../../src/agents/tools/types.ts";
 
 // ── Helpers ─────────────────────────────────────────
 

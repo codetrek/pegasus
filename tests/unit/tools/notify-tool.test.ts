@@ -1,6 +1,6 @@
 import { describe, expect, test, mock } from "bun:test";
-import { notify } from "@pegasus/tools/builtins/notify-tool.ts";
-import { ToolCategory } from "@pegasus/tools/types.ts";
+import { notify } from "@pegasus/agents/tools/builtins/notify-tool";
+import { ToolCategory } from "@pegasus/agents/tools/types";
 
 describe("notify tool", () => {
   test("self-executes via onNotify callback when available", async () => {

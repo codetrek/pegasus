@@ -10,7 +10,7 @@ import path from "node:path";
 import { readFile } from "node:fs/promises";
 import type { Tool, ToolResult, ToolContext } from "../types.ts";
 import { ToolCategory } from "../types.ts";
-import { SessionStore } from "../../session/store.ts";
+import { SessionStore } from "../../../session/store.ts";
 
 // ── Shared index reader ──────────────────────────
 

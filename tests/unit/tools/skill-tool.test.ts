@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
-import { use_skill } from "../../../src/tools/builtins/skill-tool.ts";
-import { ToolCategory } from "../../../src/tools/types.ts";
-import type { ToolContext } from "../../../src/tools/types.ts";
+import { use_skill } from "../../../src/agents/tools/builtins/skill-tool.ts";
+import { ToolCategory } from "../../../src/agents/tools/types.ts";
+import type { ToolContext } from "../../../src/agents/tools/types.ts";
 
 describe("use_skill tool", () => {
   /** Stub methods that other tools need but skill tests don't care about. */

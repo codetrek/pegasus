@@ -11,8 +11,8 @@
 
 import type { ToolExecutor } from "./executor.ts";
 import type { ToolResult, ToolContext } from "./types.ts";
-import { getLogger } from "../infra/logger.ts";
-import { shortId } from "../infra/id.ts";
+import { getLogger } from "../../infra/logger.ts";
+import { shortId } from "../../infra/id.ts";
 
 const logger = getLogger("tools.background");
 

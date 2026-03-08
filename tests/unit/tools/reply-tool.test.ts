@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
-import { reply } from "../../../src/tools/builtins/reply-tool.ts";
-import { ToolCategory } from "../../../src/tools/types.ts";
-import type { ToolContext } from "../../../src/tools/types.ts";
+import { reply } from "../../../src/agents/tools/builtins/reply-tool.ts";
+import { ToolCategory } from "../../../src/agents/tools/types.ts";
+import type { ToolContext } from "../../../src/agents/tools/types.ts";
 
 describe("reply tool", () => {
   function makeContext(overrides?: Partial<ToolContext>): ToolContext {

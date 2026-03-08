@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { session_archive_read } from "@pegasus/tools/builtins/session-tools.ts";
+import { session_archive_read } from "@pegasus/agents/tools/builtins/session-tools";
 import { rm, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 

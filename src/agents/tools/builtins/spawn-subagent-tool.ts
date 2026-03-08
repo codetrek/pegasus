@@ -11,7 +11,7 @@
 import { z } from "zod";
 import { ToolCategory } from "../types.ts";
 import type { Tool, ToolResult, ToolContext } from "../types.ts";
-import { getLogger } from "../../infra/logger.ts";
+import { getLogger } from "../../../infra/logger.ts";
 
 const logger = getLogger("spawn_subagent");
 

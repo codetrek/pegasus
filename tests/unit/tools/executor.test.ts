@@ -3,8 +3,8 @@
  */
 
 import { describe, it, expect, mock } from "bun:test";
-import { ToolExecutor } from "../../../src/tools/executor.ts";
-import type { Tool, ToolContext, ToolCategory } from "../../../src/tools/types.ts";
+import { ToolExecutor } from "../../../src/agents/tools/executor.ts";
+import type { Tool, ToolContext, ToolCategory } from "../../../src/agents/tools/types.ts";
 import { z } from "zod";
 
 describe("ToolExecutor", () => {
