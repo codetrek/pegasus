@@ -177,7 +177,7 @@ describe("TUI Store", () => {
       expect(chatStore.messages).toHaveLength(1);
       expect(chatStore.messages[0]!.role).toBe("assistant");
       expect(chatStore.messages[0]!.text).toBe("hi back");
-      expect(chatStore.messages[0]!.channel).toBe("cli");
+      expect(chatStore.messages[0]!.header).toContain("channel: cli");
     });
 
     it("should handle assistant direct text (no toolCalls)", () => {
@@ -223,7 +223,7 @@ describe("TUI Store", () => {
       loadMessages("main", messages);
       expect(chatStore.messages).toHaveLength(1);
       expect(chatStore.messages[0]!.text).toBe("parsed");
-      expect(chatStore.messages[0]!.channel).toBe("telegram");
+      expect(chatStore.messages[0]!.header).toContain("channel: telegram");
     });
 
     it("should set currentAgent", () => {
@@ -234,6 +234,64 @@ describe("TUI Store", () => {
     it("should handle empty messages array", () => {
       loadMessages("main", []);
       expect(chatStore.messages).toHaveLength(0);
+    });
+
+    it("should strip header from user message text and preserve header field", () => {
+      const messages: Message[] = [
+        { role: "user", content: "[2026-03-08 09:21:53 | channel: telegram | id: 123 | user: 456]\n给我列一下目录" },
+      ];
+      loadMessages("main", messages);
+      expect(chatStore.messages).toHaveLength(1);
+      expect(chatStore.messages[0]!.text).toBe("给我列一下目录");
+      expect(chatStore.messages[0]!.time).toBe("09:21");
+      expect(chatStore.messages[0]!.header).toBe("[2026-03-08 09:21:53 | channel: telegram | id: 123 | user: 456]");
+    });
+
+    it("should strip cli channel header from user messages", () => {
+      const messages: Message[] = [
+        { role: "user", content: "[2026-03-08 14:05:00 | channel: cli | id: main]\nhello from cli" },
+      ];
+      loadMessages("main", messages);
+      expect(chatStore.messages).toHaveLength(1);
+      expect(chatStore.messages[0]!.text).toBe("hello from cli");
+      expect(chatStore.messages[0]!.header).toBe("[2026-03-08 14:05:00 | channel: cli | id: main]");
+    });
+
+    it("should filter task notification messages", () => {
+      const messages: Message[] = [
+        { role: "user", content: "[2026-03-08 09:22:03 | channel: cli | id: main]\n[Task abc123 completed]\nResult: \"done\"" },
+        { role: "user", content: "[Task def456 failed]\nError: timeout" },
+        { role: "user", content: "[2026-03-08 09:22:10 | channel: telegram | id: 123]\n继续吧" },
+      ];
+      loadMessages("main", messages);
+      // Only the real user message should survive
+      expect(chatStore.messages).toHaveLength(1);
+      expect(chatStore.messages[0]!.text).toBe("继续吧");
+    });
+
+    it("should handle user messages without header (plain text)", () => {
+      const messages: Message[] = [
+        { role: "user", content: "simple message without header" },
+      ];
+      loadMessages("main", messages);
+      expect(chatStore.messages).toHaveLength(1);
+      expect(chatStore.messages[0]!.text).toBe("simple message without header");
+      expect(chatStore.messages[0]!.header).toBeUndefined();
+    });
+
+    it("should generate header for assistant reply tool calls with channel", () => {
+      const messages: Message[] = [
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{ id: "tc1", name: "reply", arguments: { text: "hello!", channelType: "telegram", channelId: "tg-123" } }],
+        },
+      ];
+      loadMessages("main", messages);
+      expect(chatStore.messages).toHaveLength(1);
+      expect(chatStore.messages[0]!.text).toBe("hello!");
+      expect(chatStore.messages[0]!.header).toContain("channel: telegram");
+      expect(chatStore.messages[0]!.header).toContain("id: tg-123");
     });
   });
 

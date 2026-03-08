@@ -21,7 +21,8 @@ export interface ChatMessage {
   role: "user" | "assistant" | "system"
   time: string
   text: string
-  channel?: string    // source channel (e.g. "cli", "telegram")
+  /** Full metadata header for dashboard display, e.g. "[2026-03-08 09:21:53 | channel: telegram | id: xxx]" */
+  header?: string
 }
 
 interface TuiStore {
@@ -85,6 +86,26 @@ function extractTime(content: string): string {
 }
 
 /**
+ * Extract the full metadata header line from session message content.
+ * Header format: [2026-03-08 09:21:53 | channel: telegram | id: xxx | user: xxx]
+ * Returns the header string (with brackets) or undefined if not found.
+ */
+function extractHeader(content: string): string | undefined {
+  const match = content.match(/^(\[[\d-]+ [\d:]+ \|[^\]]*\])/)
+  if (match) return match[1]
+  return undefined
+}
+
+/**
+ * Strip the metadata header line from session message content.
+ * Removes the first line if it matches the [timestamp | ...] pattern,
+ * returning only the actual user text.
+ */
+function stripHeader(content: string): string {
+  return content.replace(/^\[[\d-]+ [\d:]+ \|[^\]]*\]\n?/, "").trim()
+}
+
+/**
  * Check if a user message is system-injected (not real user input).
  * These should be hidden from the TUI chat view.
  */
@@ -95,6 +116,9 @@ function isSystemInjected(content: string): boolean {
   if (content.includes("[System:") && content.includes("task(s) running")) return true
   // Compact summaries
   if (content.startsWith("[Session compacted")) return true
+  // Task notifications injected as user messages
+  const stripped = stripHeader(content)
+  if (/^\[Task\s+\S+\s+(completed|failed|update)\]/.test(stripped)) return true
   return false
 }
 
@@ -113,20 +137,26 @@ export function loadMessages(agentId: string, messages: ReadonlyArray<Message>):
       chatMessages.push({
         role: "user",
         time: extractTime(msg.content) || formatTime(Date.now()),
-        text: msg.content,
+        text: stripHeader(msg.content),
+        header: extractHeader(msg.content),
       })
     } else if (msg.role === "assistant") {
       // Extract reply tool calls — that's the actual response text
       if (msg.toolCalls?.length) {
         for (const tc of msg.toolCalls) {
           if (tc.name === "reply" && tc.arguments?.text) {
+            const channelType = tc.arguments.channelType as string | undefined;
+            const channelId = tc.arguments.channelId as string | undefined;
+            const replyHeader = channelType
+              ? `[${new Date().toISOString().replace("T", " ").slice(0, 19)} | channel: ${channelType}${channelId ? ` | id: ${channelId}` : ""}]`
+              : undefined;
             chatMessages.push({
               role: "assistant",
               time: chatMessages.length > 0
                 ? chatMessages[chatMessages.length - 1]!.time
                 : formatTime(Date.now()),
               text: tc.arguments.text as string,
-              channel: tc.arguments.channelType as string | undefined,
+              header: replyHeader,
             })
           }
         }

@@ -32,7 +32,15 @@ function handleCommand(input: string): boolean | "exit" {
   return false;
 }
 
-/** Format current time as HH:MM. */
+/** Format channel info as metadata header, matching session format. */
+function formatChannelHeader(message: OutboundMessage): string | undefined {
+  const ch = message.channel;
+  const now = new Date().toISOString().replace("T", " ").slice(0, 19);
+  const parts = [`channel: ${ch.type}`, `id: ${ch.channelId}`];
+  if (ch.userId) parts.push(`user: ${ch.userId}`);
+  if (ch.replyTo) parts.push(`thread: ${ch.replyTo}`);
+  return `[${now} | ${parts.join(" | ")}]`;
+}
 function formatTime(): string {
   const d = new Date();
   return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
@@ -63,7 +71,13 @@ export class TuiAdapter implements ChannelAdapter {
       }
 
       // Show user message in chat immediately
-      addMessage({ role: "user", time: formatTime(), text: trimmed });
+      const now = new Date().toISOString().replace("T", " ").slice(0, 19);
+      addMessage({
+        role: "user",
+        time: formatTime(),
+        text: trimmed,
+        header: `[${now} | channel: cli | id: ${getCurrentAgent()}]`,
+      });
 
       // Forward to agent
       agent.send({
@@ -75,12 +89,11 @@ export class TuiAdapter implements ChannelAdapter {
 
   async deliver(message: OutboundMessage): Promise<void> {
     const isMirrorInbound = message.metadata?.mirrorInbound === true;
-    const channel = message.channel.type !== "cli" ? message.channel.type : undefined;
     addMessage({
       role: isMirrorInbound ? "user" : "assistant",
       time: formatTime(),
       text: message.text,
-      channel,
+      header: formatChannelHeader(message),
     });
   }
 
