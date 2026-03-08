@@ -103,6 +103,13 @@ export interface SubagentConfig {
   subagentTypeRegistry: SubAgentTypeRegistry;
   tasksDir: string;
   onNotification: (notification: TaskNotification) => void;
+  /**
+   * Tools that subagents can inherit from this parent Agent.
+   * SubAgentType's `tools` field filters from this set (not from a global list).
+   * Privileged tools (e.g. trust, project management) should be excluded.
+   * If omitted, falls back to allTaskTools for backward compatibility.
+   */
+  parentTools?: Tool[];
 }
 
 // ── Dependencies ─────────────────────────────────────
@@ -1577,7 +1584,11 @@ export class Agent {
     const toolNames = config.subagentTypeRegistry.getToolNames(taskType);
     const toolNameSet = new Set(toolNames);
 
-    for (const tool of allTaskTools) {
+    // Inherit tools from parent — filtered by SubAgentType's tool list.
+    // If parentTools is set, subagents only see what the parent allows.
+    // Falls back to allTaskTools for backward compatibility (e.g. agent-worker).
+    const availableTools = config.parentTools ?? allTaskTools;
+    for (const tool of availableTools) {
       if (toolNameSet.has(tool.name)) {
         registry.register(tool);
       }

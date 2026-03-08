@@ -379,7 +379,7 @@ export function _setExitProcessForTest(fn: (code: number) => void): () => void {
 // These allow unit tests to inject mock Agent/ProxyLanguageModel constructors
 // WITHOUT using mock.module (which pollutes other test files globally in Bun).
 
-interface ProjectAgentFactoryDeps {
+export interface ProjectAgentFactoryDeps {
   model: ProxyLanguageModel;
   subagentTypeRegistry: SubAgentTypeRegistry;
   tasksDir: string;
@@ -413,7 +413,8 @@ export function _setProxyModelFactoryForTest(fn: ProxyModelFactory): () => void 
   return () => { _proxyModelFactory = null; };
 }
 
-function _createProjectAgent(deps: ProjectAgentFactoryDeps): Agent {
+/** @internal Exported for testing only. */
+export function _createProjectAgent(deps: ProjectAgentFactoryDeps): Agent {
   if (_projectAgentFactory) return _projectAgentFactory(deps);
   return new Agent({
     agentId: deps.channelId,

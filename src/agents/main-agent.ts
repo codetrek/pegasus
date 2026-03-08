@@ -54,6 +54,18 @@ import type { AgentStorePaths } from "../storage/paths.ts";
 
 const logger = getLogger("main_agent");
 
+/** Tools that are MainAgent-only and must NOT be inherited by subagents. */
+const PRIVILEGED_TOOL_NAMES = new Set([
+  "reply",            // Channel reply — only MainAgent talks to the user
+  "trust",            // Owner trust management
+  "reload_skills",    // Skill hot-reload + prompt rebuild
+  "create_project",   // Project lifecycle management
+  "list_projects",
+  "disable_project",
+  "enable_project",
+  "archive_project",
+]);
+
 /**
  * Injected subsystems — provided by PegasusApp.
  * MainAgent requires all subsystems to be injected; it never self-initializes.
@@ -128,6 +140,9 @@ export class MainAgent extends Agent {
         subagentTypeRegistry: deps.injected.aiTaskTypeRegistry,
         tasksDir: mainStorePaths.tasks,
         onNotification: (n) => this.pushTaskNotification(n),
+        // Subagents inherit MainAgent's tools MINUS privileged ones.
+        // Privileged tools are MainAgent-only (channel reply, trust, project mgmt, skill reload).
+        parentTools: toolRegistry.list().filter(t => !PRIVILEGED_TOOL_NAMES.has(t.name)),
       },
     });
 
