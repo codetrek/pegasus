@@ -15,7 +15,7 @@
  *   7. Queue-based message processing (send → queue → _handleMessage → _think)
  *   8. One-shot run() execution (returns Promise<AgentResult>)
  *   9. Memory injection: auto-injects memory index on fresh start + after compaction
- *  10. Reflection: auto-runs ReflectionOrchestrator after compaction
+ *  10. Reflection: auto-runs Reflection after compaction
  *  11. Memory snapshot: auto-injects getMemorySnapshot into ToolContext
  *
  * Subclass overrides for customization (e.g. MainAgent):
@@ -27,13 +27,13 @@
  */
 
 import type { LanguageModel, GenerateTextResult, Message } from "../infra/llm-types.ts";
-import type { Event } from "../events/types.ts";
-import { EventType, createEvent } from "../events/types.ts";
-import { EventBus } from "../events/bus.ts";
-import { ToolRegistry } from "../tools/registry.ts";
-import { ToolExecutor } from "../tools/executor.ts";
+import type { Event } from "./events/types.ts";
+import { EventType, createEvent } from "./events/types.ts";
+import { EventBus } from "./events/bus.ts";
+import { ToolRegistry } from "./tools/registry.ts";
+import { ToolExecutor } from "./tools/executor.ts";
 import type { ToolCall, ToolDefinition } from "../models/tool.ts";
-import type { ToolResult, ToolContext } from "../tools/types.ts";
+import type { ToolResult, ToolContext } from "./tools/types.ts";
 import type { ImageManager } from "../media/image-manager.ts";
 import { hydrateImages } from "../media/image-prune.ts";
 import {
@@ -63,7 +63,7 @@ import type {
 } from "../channels/types.ts";
 import { sanitizeForPrompt } from "../infra/sanitize.ts";
 import { formatSize } from "../prompts/index.ts";
-import type { ReflectionOrchestrator } from "./reflection-orchestrator.ts";
+import type { Reflection } from "./reflection.ts";
 
 const logger = getLogger("agent");
 
@@ -100,8 +100,8 @@ export interface AgentDeps {
   systemPrompt: string | (() => string);
   /** Pre-set ToolContext fields merged into every buildToolContext() call. */
   toolContext?: Partial<ToolContext>;
-  /** ReflectionOrchestrator for post-compaction reflection. Optional. */
-  reflectionOrchestrator?: ReflectionOrchestrator;
+  /** Reflection for post-compaction reflection. Optional. */
+  reflectionOrchestrator?: Reflection;
 }
 
 // ── Helpers ──────────────────────────────────────────
@@ -222,8 +222,8 @@ export class Agent {
 
   /** Memory directory path — enables auto memory injection on start/compact. */
   private _memoryDir?: string;
-  /** ReflectionOrchestrator — enables auto reflection after compaction. */
-  private _reflectionOrchestrator?: ReflectionOrchestrator;
+  /** Reflection — enables auto reflection after compaction. */
+  private _reflectionOrchestrator?: Reflection;
 
   /** Holds the last execution result for run() to resolve. */
   private _lastResult: AgentResult | null = null;

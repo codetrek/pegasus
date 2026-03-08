@@ -11,18 +11,18 @@ import type { Settings } from "@pegasus/infra/config.ts";
 import type { ModelRegistry } from "@pegasus/infra/model-registry.ts";
 import type { Persona } from "@pegasus/identity/persona.ts";
 import { SkillRegistry } from "@pegasus/skills/index.ts";
-import { AITaskTypeRegistry } from "@pegasus/aitask-types/index.ts";
+import { SubAgentTypeRegistry } from "@pegasus/agents/subagents/index.ts";
 import { TaskRunner } from "@pegasus/agents/task-runner.ts";
 import { ProjectManager } from "@pegasus/projects/manager.ts";
 import { ProjectAdapter } from "@pegasus/projects/project-adapter.ts";
 import { ImageManager } from "@pegasus/media/image-manager.ts";
 import { TickManager } from "@pegasus/agents/tick-manager.ts";
-import { ReflectionOrchestrator } from "@pegasus/agents/reflection-orchestrator.ts";
+import { Reflection } from "@pegasus/agents/reflection.ts";
 import { AuthManager } from "@pegasus/agents/auth-manager.ts";
 import { ModelLimitsCache } from "@pegasus/context/index.ts";
-import { ToolRegistry } from "@pegasus/tools/registry.ts";
-import { ToolExecutor } from "@pegasus/tools/executor.ts";
-import { mainAgentTools } from "@pegasus/tools/builtins/index.ts";
+import { ToolRegistry } from "@pegasus/agents/tools/registry";
+import { ToolExecutor } from "@pegasus/agents/tools/executor";
+import { mainAgentTools } from "@pegasus/agents/tools/builtins";
 import { buildMainAgentPaths } from "@pegasus/storage/paths.ts";
 import { OwnerStore } from "@pegasus/security/owner-store.ts";
 import path from "node:path";
@@ -32,7 +32,7 @@ export interface CreateInjectedOpts {
   models: ModelRegistry;
   /** Settings — must include dataDir. */
   settings: Settings;
-  /** Persona for ReflectionOrchestrator. */
+  /** Persona for Reflection. */
   persona: Persona;
   /** Optional custom ProjectAdapter (e.g., with mock WorkerAdapter). */
   projectAdapter?: ProjectAdapter;
@@ -70,13 +70,13 @@ export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubs
   ];
   skillRegistry.reloadFromDirs(skillDirs);
 
-  // AI task types
-  const aiTaskTypeRegistry = new AITaskTypeRegistry();
+  // Sub-agent types
+  const subAgentTypeRegistry = new SubAgentTypeRegistry();
 
   // TaskRunner — uses the mock model
   const taskRunner = new TaskRunner({
     model: models.getForTier("balanced"),
-    taskTypeRegistry: aiTaskTypeRegistry,
+    taskTypeRegistry: subAgentTypeRegistry,
     tasksDir: mainStorePaths.tasks,
     storeImage: undefined,
     contextWindow: settings.llm.contextWindow,
@@ -114,7 +114,7 @@ export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubs
     },
   });
 
-  // ReflectionOrchestrator
+  // Reflection
   const toolRegistry = new ToolRegistry();
   toolRegistry.registerMany(mainAgentTools);
   const toolExecutor = new ToolExecutor(
@@ -122,7 +122,7 @@ export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubs
     { emit: () => {} },
     (settings.tools?.timeout ?? 30) * 1000,
   );
-  const reflectionOrchestrator = new ReflectionOrchestrator({
+  const reflectionOrchestrator = new Reflection({
     models,
     persona,
     toolExecutor,
@@ -138,7 +138,7 @@ export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubs
     tokenRefreshMonitor: null,
     skillRegistry,
     skillDirs,
-    aiTaskTypeRegistry,
+    aiTaskTypeRegistry: subAgentTypeRegistry,
     taskRunner,
     projectManager,
     projectAdapter,

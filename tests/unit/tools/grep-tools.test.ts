@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { grep_files, _resetRgCache, isRgAvailable, getMaxFileSize } from "../../../src/tools/builtins/file-tools.ts";
+import { grep_files, _resetRgCache, isRgAvailable, getMaxFileSize } from "../../../src/agents/tools/builtins/file-tools.ts";
 import { rm, mkdir } from "node:fs/promises";
 import { SettingsSchema, setSettings, resetSettings } from "../../../src/infra/config.ts";
 

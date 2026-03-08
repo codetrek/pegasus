@@ -72,10 +72,10 @@ pegasus/
 │   │       ├── reply-tool.ts       # reply (Main Agent only)
 │   │       └── spawn-task-tool.ts      # spawn_task (Main Agent only)
 │   │
-│   ├── aitask-types/                  # AITask type system
-│   │   ├── types.ts               # AITaskTypeDefinition, AITaskTypeFrontmatter
-│   │   ├── loader.ts              # Parse AITASK.md files, scan directories
-│   │   ├── registry.ts            # AITaskTypeRegistry (priority resolution, metadata)
+│   ├── subagents/                  # SubAgent type system
+│   │   ├── types.ts               # SubAgentTypeDefinition, SubAgentTypeFrontmatter
+│   │   ├── loader.ts              # Parse SUBAGENT.md files, scan directories
+│   │   ├── registry.ts            # SubAgentTypeRegistry (priority resolution, metadata)
 │   │   └── index.ts               # Re-exports
 │   │
 │   ├── identity/                   # Identity layer

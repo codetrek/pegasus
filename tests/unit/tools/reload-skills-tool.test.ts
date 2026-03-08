@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
-import { reload_skills } from "../../../src/tools/builtins/reload-skills-tool.ts";
-import { ToolCategory } from "../../../src/tools/types.ts";
-import type { ToolContext } from "../../../src/tools/types.ts";
+import { reload_skills } from "../../../src/agents/tools/builtins/reload-skills-tool.ts";
+import { ToolCategory } from "../../../src/agents/tools/types.ts";
+import type { ToolContext } from "../../../src/agents/tools/types.ts";
 
 describe("reload_skills tool", () => {
   function makeContext(overrides?: Partial<ToolContext>): ToolContext {

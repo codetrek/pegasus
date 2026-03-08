@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
-import { resume_subagent } from "../../../src/tools/builtins/resume-subagent-tool.ts";
-import { ToolCategory } from "../../../src/tools/types.ts";
-import type { ToolContext } from "../../../src/tools/types.ts";
+import { resume_subagent } from "../../../src/agents/tools/builtins/resume-subagent-tool.ts";
+import { ToolCategory } from "../../../src/agents/tools/types.ts";
+import type { ToolContext } from "../../../src/agents/tools/types.ts";
 
 describe("resume_subagent tool", () => {
   /** Stub methods that other tools need but resume_subagent tests don't care about. */

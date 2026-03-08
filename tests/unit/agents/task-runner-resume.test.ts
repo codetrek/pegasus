@@ -9,7 +9,7 @@ import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
 import { TaskRunner, type TaskRunnerDeps } from "../../../src/agents/task-runner.ts";
 import type { TaskNotification } from "../../../src/agents/task-runner.ts";
 import type { LanguageModel } from "../../../src/infra/llm-types.ts";
-import { AITaskTypeRegistry } from "../../../src/aitask-types/registry.ts";
+import { SubAgentTypeRegistry } from "../../../src/agents/subagents/registry.ts";
 import { Agent } from "../../../src/agents/agent.ts";
 import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import path from "node:path";
@@ -63,7 +63,7 @@ let tempDir: string;
 function createDeps(overrides?: Partial<TaskRunnerDeps>): TaskRunnerDeps {
   return {
     model: createMockModel(),
-    taskTypeRegistry: new AITaskTypeRegistry(),
+    taskTypeRegistry: new SubAgentTypeRegistry(),
     tasksDir: tempDir,
     onNotification: mock((_n: TaskNotification) => {}),
     ...overrides,

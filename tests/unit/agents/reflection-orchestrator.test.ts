@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import {
-  ReflectionOrchestrator,
-  type ReflectionOrchestratorDeps,
-} from "../../../src/agents/reflection-orchestrator.ts";
+  Reflection,
+  type ReflectionDeps,
+} from "../../../src/agents/reflection.ts";
 import type { Message } from "../../../src/infra/llm-types.ts";
 
 /**
- * Build a minimal mock ModelRegistry for ReflectionOrchestrator tests.
+ * Build a minimal mock ModelRegistry for Reflection tests.
  */
 function mockModels() {
   return {
@@ -19,13 +19,13 @@ function mockModels() {
     }),
     getContextWindowForTier: (_tier: string) => 128_000,
     getProviderForTier: (_tier: string) => "test",
-  } as unknown as ReflectionOrchestratorDeps["models"];
+  } as unknown as ReflectionDeps["models"];
 }
 
 function mockSettings() {
   return {
     llm: { contextWindow: 128_000 },
-  } as unknown as ReflectionOrchestratorDeps["settings"];
+  } as unknown as ReflectionDeps["settings"];
 }
 
 function mockPersona() {
@@ -35,7 +35,7 @@ function mockPersona() {
     personality: ["helpful", "concise"],
     style: "professional",
     values: ["accuracy"],
-  } as unknown as ReflectionOrchestratorDeps["persona"];
+  } as unknown as ReflectionDeps["persona"];
 }
 
 /**
@@ -69,7 +69,7 @@ function mockToolExecutor(overrides?: {
         }
         return { success: true, result: "ok" };
       },
-    } as unknown as ReflectionOrchestratorDeps["toolExecutor"],
+    } as unknown as ReflectionDeps["toolExecutor"],
   };
 }
 
@@ -86,8 +86,8 @@ function makeMessages(count: number, roles?: Array<"user" | "assistant" | "syste
   }));
 }
 
-describe("ReflectionOrchestrator", () => {
-  let deps: ReflectionOrchestratorDeps;
+describe("Reflection", () => {
+  let deps: ReflectionDeps;
   let mockExec: ReturnType<typeof mockToolExecutor>;
 
   beforeEach(() => {
@@ -105,32 +105,32 @@ describe("ReflectionOrchestrator", () => {
 
   describe("shouldReflect", () => {
     it("returns false for empty messages", () => {
-      const orch = new ReflectionOrchestrator(deps);
+      const orch = new Reflection(deps);
       expect(orch.shouldReflect([])).toBe(false);
     }, 5_000);
 
     it("returns false for trivial sessions (<6 messages)", () => {
-      const orch = new ReflectionOrchestrator(deps);
+      const orch = new Reflection(deps);
       // 4 messages, 2 user — but total < 6
       expect(orch.shouldReflect(makeMessages(4))).toBe(false);
       expect(orch.shouldReflect(makeMessages(5))).toBe(false);
     }, 5_000);
 
     it("returns false when fewer than 2 user messages", () => {
-      const orch = new ReflectionOrchestrator(deps);
+      const orch = new Reflection(deps);
       // 6 messages but only 1 user
       const messages = makeMessages(6, ["user", "assistant", "system", "assistant", "system", "assistant"]);
       expect(orch.shouldReflect(messages)).toBe(false);
     }, 5_000);
 
     it("returns true for substantial sessions (>=6 messages, >=2 user)", () => {
-      const orch = new ReflectionOrchestrator(deps);
+      const orch = new Reflection(deps);
       // 8 messages with 4 user messages
       expect(orch.shouldReflect(makeMessages(8))).toBe(true);
     }, 5_000);
 
     it("returns true at boundary: exactly 6 messages with 3 user", () => {
-      const orch = new ReflectionOrchestrator(deps);
+      const orch = new Reflection(deps);
       const messages = makeMessages(6); // alternating user/assistant = 3 user
       expect(orch.shouldReflect(messages)).toBe(true);
     }, 5_000);
@@ -142,7 +142,7 @@ describe("ReflectionOrchestrator", () => {
     it("creates PostTaskReflector and runs reflection", async () => {
       // The generate mock returns text without toolCalls, so reflector.run
       // completes in 1 round
-      const orch = new ReflectionOrchestrator(deps);
+      const orch = new Reflection(deps);
       const messages = makeMessages(8);
 
       // Should not throw
@@ -161,7 +161,7 @@ describe("ReflectionOrchestrator", () => {
       });
       deps.toolExecutor = mockExec.executor;
 
-      const orch = new ReflectionOrchestrator(deps);
+      const orch = new Reflection(deps);
       await orch.runReflection(makeMessages(8));
 
       // Should have called memory_list then memory_read for the fact
@@ -176,7 +176,7 @@ describe("ReflectionOrchestrator", () => {
       mockExec = mockToolExecutor({ throwOnList: true });
       deps.toolExecutor = mockExec.executor;
 
-      const orch = new ReflectionOrchestrator(deps);
+      const orch = new Reflection(deps);
 
       // Should not throw — gracefully continues without memory
       await orch.runReflection(makeMessages(8));
@@ -186,7 +186,7 @@ describe("ReflectionOrchestrator", () => {
       mockExec = mockToolExecutor({ memoryListSuccess: false });
       deps.toolExecutor = mockExec.executor;
 
-      const orch = new ReflectionOrchestrator(deps);
+      const orch = new Reflection(deps);
 
       // Should not throw — listResult.success is false, skips loading
       await orch.runReflection(makeMessages(8));
@@ -206,7 +206,7 @@ describe("ReflectionOrchestrator", () => {
       mockExec = mockToolExecutor({ memoryListResult: manyEpisodes });
       deps.toolExecutor = mockExec.executor;
 
-      const orch = new ReflectionOrchestrator(deps);
+      const orch = new Reflection(deps);
 
       // Should not throw — episodes are trimmed internally
       await orch.runReflection(makeMessages(8));
@@ -221,7 +221,7 @@ describe("ReflectionOrchestrator", () => {
       });
       deps.toolExecutor = mockExec.executor;
 
-      const orch = new ReflectionOrchestrator(deps);
+      const orch = new Reflection(deps);
       await orch.runReflection(makeMessages(8));
 
       // No memory_read calls — episodes don't need full content

@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { normalizePath, isPathAllowed } from "../../../src/tools/types.ts";
+import { normalizePath, isPathAllowed } from "../../../src/agents/tools/types.ts";
 
 describe("normalizePath", () => {
   it("should normalize relative path with baseDir", () => {

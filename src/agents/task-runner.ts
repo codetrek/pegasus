@@ -10,12 +10,12 @@
 
 import { Agent, type AgentResult } from "./agent.ts";
 import type { LanguageModel } from "../infra/llm-types.ts";
-import { ToolRegistry } from "../tools/registry.ts";
-import type { Tool, ToolContext } from "../tools/types.ts";
-import { allTaskTools } from "../tools/builtins/index.ts";
-import { spawn_subagent } from "../tools/builtins/spawn-subagent-tool.ts";
-import { resume_subagent } from "../tools/builtins/resume-subagent-tool.ts";
-import type { AITaskTypeRegistry } from "../aitask-types/registry.ts";
+import { ToolRegistry } from "./tools/registry.ts";
+import type { Tool, ToolContext } from "./tools/types.ts";
+import { allTaskTools } from "./tools/builtins/index.ts";
+import { spawn_subagent } from "./tools/builtins/spawn-subagent-tool.ts";
+import { resume_subagent } from "./tools/builtins/resume-subagent-tool.ts";
+import type { SubAgentTypeRegistry } from "./subagents/registry.ts";
 import { shortId } from "../infra/id.ts";
 import { getLogger } from "../infra/logger.ts";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
@@ -51,7 +51,7 @@ export interface TaskRunnerDeps {
   /** LLM model for task agents. */
   model: LanguageModel;
   /** AI task type registry for per-type tool resolution. */
-  taskTypeRegistry: AITaskTypeRegistry;
+  taskTypeRegistry: SubAgentTypeRegistry;
   /** Base directory for task persistence (e.g. data/agents/main/tasks). */
   tasksDir: string;
   /** Callback for task lifecycle notifications. */
@@ -66,7 +66,7 @@ export interface TaskRunnerDeps {
 
 export class TaskRunner {
   private model: LanguageModel;
-  private taskTypeRegistry: AITaskTypeRegistry;
+  private taskTypeRegistry: SubAgentTypeRegistry;
   private tasksDir: string;
   private onNotification: (notification: TaskNotification) => void;
   private storeImage?: ToolContext["storeImage"];
@@ -316,7 +316,7 @@ export class TaskRunner {
 
   /**
    * Build or retrieve a cached ToolRegistry for a given task type + depth.
-   * Uses AITaskTypeRegistry.getToolNames() to resolve which tools
+   * Uses SubAgentTypeRegistry.getToolNames() to resolve which tools
    * are available. Falls back to allTaskTools for unknown types.
    *
    * When depth === 0, spawn_subagent and resume_subagent are added

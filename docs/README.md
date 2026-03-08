@@ -79,7 +79,7 @@ pegasus/
 │   ├── subagent/        # SubAgent lifecycle (SubAgentManager)
 │   ├── session/         # Session persistence + compaction
 │   ├── skills/          # Skill loader + registry
-│   ├── aitask-types/   # Task type specialization (AITASK.md)
+│   ├── subagents/   # Sub-agent type specialization (SUBAGENT.md)
 │   ├── task/            # TaskFSM + TaskContext + TaskPersister
 │   ├── tools/           # Tool registry, executor, builtins
 │   └── cli.ts           # CLI entry point
@@ -104,7 +104,7 @@ pegasus/
 - [Event System](./events.md) — EventType, EventBus, priority queue
 - [Task FSM](./task-fsm.md) — states, transitions, suspend/resume
 - [Task Persistence](./task-persistence.md) — JSONL event logs, replay
-- [AITask Types](./aitask-types.md) — task type specialization (AITASK.md)
+- [SubAgent Types](./subagent-types.md) — sub-agent type specialization (SUBAGENT.md)
 
 ### LLM & Model
 - [Multi-Model](./multi-model.md) — per-role model config, ModelRegistry
@@ -118,7 +118,7 @@ pegasus/
 - [Skill System](./skill-system.md) — SKILL.md format, loader, registry, triggering
 - [Vision Support](./vision.md) — image input, storage, hydration, pruning
 - [Project System](./project-system.md) — long-lived task spaces, Worker threads
-- [Execution Model](./execution-model.md) — four execution tiers: MainAgent, SubAgent, AITask, Project
+- [Execution Model](./execution-model.md) — four execution tiers: MainAgent, SubAgent, Task, Project
 - [Security](./security.md) — trust-based channel routing, owner identity, prompt injection resistance
 - [MCP Auth](./mcp-auth.md) — MCP server authentication
 

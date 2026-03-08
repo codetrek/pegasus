@@ -4,9 +4,9 @@ import {
   createEvent,
   effectivePriority,
   deriveEvent,
-} from "@pegasus/events/types.ts";
-import { EventBus } from "@pegasus/events/bus.ts";
-import type { Event } from "@pegasus/events/types.ts";
+} from "@pegasus/agents/events/types";
+import { EventBus } from "@pegasus/agents/events/bus";
+import type { Event } from "@pegasus/agents/events/types";
 
 // ── EventType ────────────────────────────────────
 

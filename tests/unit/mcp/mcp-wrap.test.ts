@@ -7,7 +7,7 @@
 import { describe, it, expect, mock } from "bun:test";
 import { wrapMCPTools } from "../../../src/mcp/wrap.ts";
 import type { MCPManager } from "../../../src/mcp/manager.ts";
-import { ToolCategory } from "../../../src/tools/types.ts";
+import { ToolCategory } from "../../../src/agents/tools/types.ts";
 import type { Tool as McpTool, CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 // Create a mock MCPManager

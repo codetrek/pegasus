@@ -15,8 +15,8 @@ import {
   browser_scroll,
   browser_close,
   browserTools,
-} from "../../../src/tools/browser/browser-tools.ts";
-import { ToolCategory } from "../../../src/tools/types.ts";
+} from "../../../src/agents/tools/browser/browser-tools.ts";
+import { ToolCategory } from "../../../src/agents/tools/types.ts";
 
 // ── Mock helpers ────────────────────────────────
 

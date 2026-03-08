@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
-import { spawn_subagent } from "../../../src/tools/builtins/spawn-subagent-tool.ts";
-import { ToolCategory } from "../../../src/tools/types.ts";
-import type { ToolContext } from "../../../src/tools/types.ts";
+import { spawn_subagent } from "../../../src/agents/tools/builtins/spawn-subagent-tool.ts";
+import { ToolCategory } from "../../../src/agents/tools/types.ts";
+import type { ToolContext } from "../../../src/agents/tools/types.ts";
 
 describe("spawn_subagent tool", () => {
   /** Stub methods that task_status needs but spawn_subagent tests don't care about. */

@@ -300,7 +300,7 @@ describe("buildSystemPrompt", () => {
     const prompt = buildSystemPrompt({
       mode: "task",
       persona,
-      aiTaskPrompt: "## Your Role\nYou are a research assistant.",
+      subAgentPrompt: "## Your Role\nYou are a research assistant.",
     });
     expect(prompt).toContain("research assistant");
   });
@@ -309,7 +309,7 @@ describe("buildSystemPrompt", () => {
     const prompt = buildSystemPrompt({
       mode: "main",
       persona,
-      aiTaskPrompt: "## Your Role\nYou are a research assistant.",
+      subAgentPrompt: "## Your Role\nYou are a research assistant.",
     });
     expect(prompt).not.toContain("research assistant");
   });
@@ -319,7 +319,7 @@ describe("buildSystemPrompt", () => {
     const prompt = buildSystemPrompt({
       mode: "main",
       persona,
-      aiTaskMetadata: "## Available AI Task Types\n- explore: read-only research",
+      subAgentMetadata: "## Available AI Task Types\n- explore: read-only research",
     });
     expect(prompt).toContain("Available AI Task Types");
   });
@@ -375,7 +375,7 @@ describe("buildSystemPrompt - prompt structure", () => {
     const prompt = buildSystemPrompt({
       mode: "main",
       persona,
-      aiTaskMetadata: "## Available AI Task Types\n- explore: research",
+      subAgentMetadata: "## Available AI Task Types\n- explore: research",
       skillMetadata: "## Available Skills\n- commit: git",
     });
 
@@ -383,7 +383,7 @@ describe("buildSystemPrompt - prompt structure", () => {
     const thinkIdx = prompt.indexOf("## How You Think");
     const toolsIdx = prompt.indexOf("## Tools");
     const delegateIdx = prompt.indexOf("## Delegation");
-    const aiTaskIdx = prompt.indexOf("## Available AI Task Types");
+    const subAgentIdx = prompt.indexOf("## Available AI Task Types");
     const channelIdx = prompt.indexOf("## Channels and reply()");
     const sessionIdx = prompt.indexOf("## Session History");
     const skillIdx = prompt.indexOf("## Available Skills");
@@ -393,7 +393,7 @@ describe("buildSystemPrompt - prompt structure", () => {
     expect(thinkIdx).toBeGreaterThan(0);
     expect(toolsIdx).toBeGreaterThan(0);
     expect(delegateIdx).toBeGreaterThan(0);
-    expect(aiTaskIdx).toBeGreaterThan(0);
+    expect(subAgentIdx).toBeGreaterThan(0);
     expect(channelIdx).toBeGreaterThan(0);
     expect(sessionIdx).toBeGreaterThan(0);
     expect(skillIdx).toBeGreaterThan(0);
@@ -402,8 +402,8 @@ describe("buildSystemPrompt - prompt structure", () => {
     expect(safetyIdx).toBeLessThan(thinkIdx);
     expect(thinkIdx).toBeLessThan(toolsIdx);
     expect(toolsIdx).toBeLessThan(delegateIdx);
-    expect(delegateIdx).toBeLessThan(aiTaskIdx);
-    expect(aiTaskIdx).toBeLessThan(channelIdx);
+    expect(delegateIdx).toBeLessThan(subAgentIdx);
+    expect(subAgentIdx).toBeLessThan(channelIdx);
     expect(channelIdx).toBeLessThan(sessionIdx);
     expect(sessionIdx).toBeLessThan(skillIdx);
   });
@@ -412,7 +412,7 @@ describe("buildSystemPrompt - prompt structure", () => {
     const prompt = buildSystemPrompt({
       mode: "task",
       persona,
-      aiTaskPrompt: "## Your Role\nYou are a research assistant.\n\n## Rules\n1. READ ONLY",
+      subAgentPrompt: "## Your Role\nYou are a research assistant.\n\n## Rules\n1. READ ONLY",
     });
 
     // Has: identity + safety + AI task type prompt
@@ -433,7 +433,7 @@ describe("buildSystemPrompt - prompt structure", () => {
     const prompt = buildSystemPrompt({
       mode: "main",
       persona,
-      aiTaskPrompt: "## Your Role\nYou are a research assistant.",
+      subAgentPrompt: "## Your Role\nYou are a research assistant.",
     });
     expect(prompt).not.toContain("You are a research assistant");
   });

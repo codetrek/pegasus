@@ -225,7 +225,7 @@ agent.onNotify((notification) => {
 })
 ```
 
-`submit` is the primary way CLI/API calls the Agent. Internally it emits a `MESSAGE_RECEIVED` event and waits for a `TASK_CREATED` event to return the taskId. The optional `taskType` parameter (`"general"`, `"explore"`, or `"plan"`) determines which tool set and system prompt the task uses (see `docs/aitask-types.md`).
+`submit` is the primary way CLI/API calls the Agent. Internally it emits a `MESSAGE_RECEIVED` event and waits for a `TASK_CREATED` event to return the taskId. The optional `taskType` parameter (`"general"`, `"explore"`, or `"plan"`) determines which tool set and system prompt the task uses (see `docs/subagent-types.md`).
 
 `onNotify` handles three notification types:
 - `completed` — task finished with a result

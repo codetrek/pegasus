@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { base64_encode, base64_decode } from "../../../src/tools/builtins/data-tools.ts";
+import { base64_encode, base64_decode } from "../../../src/agents/tools/builtins/data-tools.ts";
 
 describe("base64_encode tool", () => {
   it("should encode text to Base64", async () => {

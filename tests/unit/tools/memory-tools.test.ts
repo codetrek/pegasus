@@ -10,7 +10,7 @@ import {
   memory_append,
   extractSummary,
   resolveMemoryPath,
-} from "../../../src/tools/builtins/memory-tools.ts";
+} from "../../../src/agents/tools/builtins/memory-tools.ts";
 import { rm, mkdir } from "node:fs/promises";
 
 const testDir = "/tmp/pegasus-test-memory";

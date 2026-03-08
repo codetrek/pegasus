@@ -11,8 +11,8 @@
 
 import { z } from "zod";
 import type { Tool as McpTool, CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { Tool, ToolResult } from "../tools/types.ts";
-import { ToolCategory } from "../tools/types.ts";
+import type { Tool, ToolResult } from "../agents/tools/types.ts";
+import { ToolCategory } from "../agents/tools/types.ts";
 import type { MCPManager } from "./manager.ts";
 import { errorToString } from "../infra/errors.ts";
 

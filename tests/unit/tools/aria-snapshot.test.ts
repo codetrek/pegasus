@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { addRefsToSnapshot } from "../../../src/tools/browser/aria-snapshot.ts";
+import { addRefsToSnapshot } from "../../../src/agents/tools/browser/aria-snapshot.ts";
 
 describe("addRefsToSnapshot", () => {
   // ── 1. Basic ref assignment (button, link, textbox) ────────────────

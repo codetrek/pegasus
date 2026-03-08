@@ -5,8 +5,8 @@
  * Tests the full stack: BrowserManager → Playwright → Chromium → HTML.
  */
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
-import { BrowserManager } from "../../src/tools/browser/browser-manager.ts";
-import type { BrowserConfig } from "../../src/tools/browser/types.ts";
+import { BrowserManager } from "../../src/agents/tools/browser/browser-manager.ts";
+import type { BrowserConfig } from "../../src/agents/tools/browser/types.ts";
 import { existsSync, unlinkSync, readdirSync } from "fs";
 
 const TASK_A = "integration-task-a";

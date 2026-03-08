@@ -7,7 +7,7 @@
  *
  * Memory injection and reflection are handled by Agent (built-in capabilities):
  *   - Agent auto-injects memory index on fresh session start and after compaction
- *   - Agent auto-runs reflection after compaction via injected ReflectionOrchestrator
+ *   - Agent auto-runs reflection after compaction via injected Reflection
  *   - Agent auto-injects getMemorySnapshot into ToolContext when memoryDir is set
  *
  * All infrastructure subsystems (auth, MCP, skills, tasks, etc.) are injected
@@ -27,7 +27,7 @@ import { buildSystemPrompt } from "../prompts/index.ts";
 import type { Settings } from "../infra/config.ts";
 import { getSettings } from "../infra/config.ts";
 import { getLogger } from "../infra/logger.ts";
-import { ToolRegistry } from "../tools/registry.ts";
+import { ToolRegistry } from "./tools/registry.ts";
 import { ImageManager } from "../media/image-manager.ts";
 import { TaskRunner } from "./task-runner.ts";
 import type { TaskNotification } from "./task-runner.ts";
@@ -35,21 +35,21 @@ import { computeTokenBudget, calculateMaxToolResultChars, ModelLimitsCache } fro
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import path from "node:path";
 import { SkillRegistry } from "../skills/index.ts";
-import { AITaskTypeRegistry } from "../aitask-types/index.ts";
+import { SubAgentTypeRegistry } from "./subagents/index.ts";
 import { ProjectManager } from "../projects/manager.ts";
 import { ProjectAdapter } from "../projects/project-adapter.ts";
 import { OwnerStore } from "../security/owner-store.ts";
 import { TickManager } from "./tick-manager.ts";
 import { AuthManager } from "./auth-manager.ts";
-import { ReflectionOrchestrator } from "./reflection-orchestrator.ts";
+import { Reflection } from "./reflection.ts";
 import { Agent, type QueueItem, type TaskNotificationPayload } from "./agent.ts";
-import { EventBus } from "../events/bus.ts";
+import { EventBus } from "./events/bus.ts";
 
 // Main Agent's curated tool set
-import { mainAgentTools } from "../tools/builtins/index.ts";
+import { mainAgentTools } from "./tools/builtins/index.ts";
 import { MCPManager } from "../mcp/index.ts";
 import { TokenRefreshMonitor } from "../mcp/auth/refresh-monitor.ts";
-import type { Tool, ToolContext } from "../tools/types.ts";
+import type { Tool, ToolContext } from "./tools/types.ts";
 import { buildMainAgentPaths } from "../storage/paths.ts";
 import type { AgentStorePaths } from "../storage/paths.ts";
 
@@ -66,13 +66,13 @@ export interface InjectedSubsystems {
   tokenRefreshMonitor: TokenRefreshMonitor | null;
   skillRegistry: SkillRegistry;
   skillDirs: Array<{ dir: string; source: "builtin" | "user" }>;
-  aiTaskTypeRegistry: AITaskTypeRegistry;
+  aiTaskTypeRegistry: SubAgentTypeRegistry;
   taskRunner: TaskRunner;
   projectManager: ProjectManager;
   projectAdapter: ProjectAdapter;
   imageManager: ImageManager | null;
   tickManager: TickManager;
-  reflectionOrchestrator: ReflectionOrchestrator;
+  reflectionOrchestrator: Reflection;
   /** Pre-wrapped MCP tools for MainAgent's tool registry (avoids double-wrapping). */
   mcpTools: Tool[];
   /** Owner trust store — created by PegasusApp, used in ToolContext. */
@@ -93,7 +93,7 @@ export class MainAgent extends Agent {
   private taskRunner!: TaskRunner;
   private skillRegistry!: SkillRegistry;
   private skillDirs: Array<{ dir: string; source: "builtin" | "user" }> = [];
-  private aiTaskTypeRegistry!: AITaskTypeRegistry;
+  private subAgentTypeRegistry!: SubAgentTypeRegistry;
   private projectManager!: ProjectManager;
   private projectAdapter!: ProjectAdapter;
   private mainStorePaths: AgentStorePaths;
@@ -140,7 +140,7 @@ export class MainAgent extends Agent {
     this.ownerStore = inj.ownerStore;
     this.skillRegistry = inj.skillRegistry;
     this.skillDirs = inj.skillDirs;
-    this.aiTaskTypeRegistry = inj.aiTaskTypeRegistry;
+    this.subAgentTypeRegistry = inj.aiTaskTypeRegistry;
     this.taskRunner = inj.taskRunner;
     this.projectManager = inj.projectManager;
     this.projectAdapter = inj.projectAdapter;
@@ -292,7 +292,7 @@ export class MainAgent extends Agent {
 
   private _buildSystemPrompt(): string {
     // Get AI task type metadata for prompt
-    const aiTaskMetadata = this.aiTaskTypeRegistry.getMetadataForPrompt();
+    const subAgentMetadata = this.subAgentTypeRegistry.getMetadataForPrompt();
 
     // Build project metadata for prompt
     const projectMetadata = this._buildProjectMetadata();
@@ -310,7 +310,7 @@ export class MainAgent extends Agent {
     return buildSystemPrompt({
       mode: "main",
       persona: this.persona!,
-      aiTaskMetadata: aiTaskMetadata || undefined,
+      subAgentMetadata: subAgentMetadata || undefined,
       skillMetadata: skillMetadata || undefined,
       projectMetadata: projectMetadata || undefined,
     });

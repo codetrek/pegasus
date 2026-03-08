@@ -6,9 +6,9 @@ import {
   disable_project,
   enable_project,
   archive_project,
-} from "../../../src/tools/builtins/project-tools.ts";
-import { ToolCategory } from "../../../src/tools/types.ts";
-import type { ToolContext } from "../../../src/tools/types.ts";
+} from "../../../src/agents/tools/builtins/project-tools.ts";
+import { ToolCategory } from "../../../src/agents/tools/types.ts";
+import type { ToolContext } from "../../../src/agents/tools/types.ts";
 
 // ── Mock ProjectManager ───────────────────────────────────
 

@@ -11,7 +11,7 @@
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
-import type { ToolContext, ToolResult } from "../tools/types.ts";
+import type { ToolContext, ToolResult } from "../agents/tools/types.ts";
 import type { ImageAttachment } from "./types.ts";
 
 // ── Constants ─────────────────────────────────────────

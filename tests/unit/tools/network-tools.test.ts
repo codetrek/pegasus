@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "bun:test";
-import { http_get, http_post, http_request, web_search, web_fetch, clearWebFetchCache } from "../../../src/tools/builtins/network-tools.ts";
+import { http_get, http_post, http_request, web_search, web_fetch, clearWebFetchCache } from "../../../src/agents/tools/builtins/network-tools.ts";
 import type { LanguageModel } from "../../../src/infra/llm-types.ts";
 
 // ── Local test server ───────────────────────────

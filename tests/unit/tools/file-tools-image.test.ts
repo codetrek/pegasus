@@ -7,8 +7,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { read_file } from "../../../src/tools/builtins/file-tools.ts";
-import type { ToolContext } from "../../../src/tools/types.ts";
+import { read_file } from "../../../src/agents/tools/builtins/file-tools.ts";
+import type { ToolContext } from "../../../src/agents/tools/types.ts";
 
 // ── Test fixtures ─────────────────────────────────────
 
