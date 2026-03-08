@@ -7,9 +7,9 @@
 import { render } from "@opentui/solid"
 import { App } from "./app.tsx"
 
-/** Render the TUI app. Called by src/tui.ts after PegasusApp boots. */
-export function renderApp(): void {
-  render(() => <App />)
+/** Render the TUI app. Options are forwarded to opentui's renderer config. */
+export function renderApp(config?: Record<string, unknown>): void {
+  render(() => <App />, config)
 }
 
 // Standalone mode — for UI development without PegasusApp
