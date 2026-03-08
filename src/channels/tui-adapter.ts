@@ -39,7 +39,7 @@ function formatTime(): string {
 }
 
 export class TuiAdapter implements ChannelAdapter {
-  readonly type = "tui";
+  readonly type = "cli";
   private onExit?: () => Promise<void>;
 
   constructor(onExit?: () => Promise<void>) {
@@ -68,7 +68,7 @@ export class TuiAdapter implements ChannelAdapter {
       // Forward to agent
       agent.send({
         text: trimmed,
-        channel: { type: "tui", channelId: "main" },
+        channel: { type: "cli", channelId: "main" },
       });
     });
   }

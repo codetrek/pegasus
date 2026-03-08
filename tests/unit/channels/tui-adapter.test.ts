@@ -18,9 +18,9 @@ describe("TuiAdapter", () => {
     mockAgent = { send: (msg) => sentMessages.push(msg) };
   });
 
-  it("should have type 'tui'", () => {
+  it("should have type 'cli'", () => {
     adapter = new TuiAdapter();
-    expect(adapter.type).toBe("tui");
+    expect(adapter.type).toBe("cli");
   });
 
   it("start() should register onSend callback", async () => {
@@ -30,7 +30,7 @@ describe("TuiAdapter", () => {
     sendInput("hello");
     expect(sentMessages).toHaveLength(1);
     expect(sentMessages[0]!.text).toBe("hello");
-    expect(sentMessages[0]!.channel).toEqual({ type: "tui", channelId: "main" });
+    expect(sentMessages[0]!.channel).toEqual({ type: "cli", channelId: "main" });
   });
 
   it("should add user message to chatStore on input", async () => {
