@@ -16,7 +16,7 @@
  *   - run() promise rejection triggers failed notification (.catch branch)
  */
 
-import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, mock, beforeEach, afterEach, afterAll } from "bun:test";
 import { TaskRunner, type TaskRunnerDeps } from "../../../src/agents/task-runner.ts";
 import type { TaskNotification } from "../../../src/agents/task-runner.ts";
 import type { LanguageModel } from "../../../src/infra/llm-types.ts";
@@ -93,11 +93,18 @@ async function waitForNotifications(ms = 50): Promise<void> {
 // ── Tests ────────────────────────────────────────────
 
 describe("TaskRunner", () => {
+  const allTempDirs: string[] = [];
   beforeEach(async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), "pegasus-taskrunner-test-"));
+    allTempDirs.push(tempDir);
   });
   afterEach(async () => {
     await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  });
+  afterAll(async () => {
+    // Final sweep: blocking-model tests may recreate dirs after afterEach
+    await Bun.sleep(100);
+    await Promise.all(allTempDirs.map(d => rm(d, { recursive: true, force: true }).catch(() => {})));
   });
   describe("submit returns taskId and increments activeCount", () => {
     test("returns a non-empty taskId string", () => {
