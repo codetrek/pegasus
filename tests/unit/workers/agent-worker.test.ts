@@ -32,6 +32,7 @@ import {
   _setExitProcessForTest,
   _setAgentFactoryForTest,
   _setProxyModelFactoryForTest,
+  _createProjectAgent,
 } from "@pegasus/workers/agent-worker.ts";
 import type { TaskNotification } from "@pegasus/agents/agent.ts";
 import { setSettings, resetSettings } from "@pegasus/infra/config.ts";
@@ -923,5 +924,35 @@ describe("splitModelSpec", () => {
   it("should handle specs with multiple slashes", () => {
     const result = splitModelSpec("custom/deep/model-name", "openai/gpt-4o");
     expect(result).toEqual({ provider: "custom", model: "deep/model-name" });
+  });
+});
+
+// ── _createProjectAgent (default path) ───────────────────
+
+import { SubAgentTypeRegistry } from "@pegasus/agents/subagents/registry.ts";
+
+describe("_createProjectAgent", () => {
+  const TMP = "/tmp/pegasus-test-create-project-agent";
+
+  beforeEach(() => mkdirSync(TMP, { recursive: true }));
+  afterEach(() => rmSync(TMP, { recursive: true, force: true }));
+
+  it("should create an Agent with subagentConfig when no factory override", () => {
+    const registry = new SubAgentTypeRegistry();
+    const notifications: unknown[] = [];
+
+    const agent = _createProjectAgent({
+      model: { modelId: "test", provider: "test", generate: async () => ({}) } as any,
+      subagentTypeRegistry: registry,
+      tasksDir: `${TMP}/tasks`,
+      onNotification: (n) => notifications.push(n),
+      sessionDir: `${TMP}/session`,
+      channelId: "test-project",
+    });
+
+    expect(agent).toBeDefined();
+    expect(typeof agent.submit).toBe("function");
+    expect(typeof agent.listAll).toBe("function");
+    expect(agent.activeCount).toBe(0);
   });
 });
