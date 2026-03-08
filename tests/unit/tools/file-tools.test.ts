@@ -222,8 +222,8 @@ describe("file tools", () => {
       const result = await list_files.execute({ path: testDir }, context);
 
       expect(result.success).toBe(true);
-      expect((result.result as { files: unknown[]; count: number }).files).toBeInstanceOf(Array);
-      expect((result.result as { files: unknown[]; count: number }).count).toBeGreaterThan(0);
+      expect(typeof result.result).toBe("string");
+      expect(result.result as string).toContain("list-test.txt");
 
       // Clean up
       await rm(filePath, { force: true }).catch(() => {});
@@ -239,21 +239,39 @@ describe("file tools", () => {
       const result = await list_files.execute({ path: testDir, recursive: true }, context);
 
       expect(result.success).toBe(true);
-      expect((result.result as { recursive: boolean; files: unknown[] }).recursive).toBe(true);
-      expect((result.result as { recursive: boolean; files: unknown[] }).files).toBeInstanceOf(Array);
+      const output = result.result as string;
+      expect(output).toContain("subdir/");
+      expect(output).toContain("subdir/nested.txt");
 
       // Clean up
       await rm(subDir, { recursive: true, force: true }).catch(() => {});
     });
 
-    it("should return empty list for non-existent directory", async () => {
+    it("should list directories in non-recursive mode", async () => {
+      const context = { taskId: "test-task-id" };
+      const subDir = `${testDir}/visible-dir`;
+
+      await mkdir(subDir, { recursive: true });
+      await Bun.write(`${testDir}/file.txt`, "test");
+
+      const result = await list_files.execute({ path: testDir }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("visible-dir/");
+      expect(output).toContain("file.txt");
+
+      // Clean up
+      await rm(subDir, { recursive: true, force: true }).catch(() => {});
+      await rm(`${testDir}/file.txt`, { force: true }).catch(() => {});
+    });
+
+    it("should return message for non-existent directory", async () => {
       const context = { taskId: "test-task-id" };
       const result = await list_files.execute({ path: `${testDir}/nonexistent-dir` }, context);
 
       expect(result.success).toBe(true);
-      const resultObj = result.result as { files: unknown[]; count: number };
-      expect(resultObj.files).toEqual([]);
-      expect(resultObj.count).toBe(0);
+      expect(result.result as string).toContain("not found");
     });
 
     it("should filter files by pattern (non-recursive)", async () => {
@@ -267,12 +285,10 @@ describe("file tools", () => {
       const result = await list_files.execute({ path: testDir, pattern: "\\.ts$" }, context);
 
       expect(result.success).toBe(true);
-      const resultObj = result.result as { files: Array<{ name: string }>; count: number };
-      // Only .ts files should match
-      expect(resultObj.count).toBe(2);
-      for (const file of resultObj.files) {
-        expect(file.name).toMatch(/\.ts$/);
-      }
+      const output = result.result as string;
+      expect(output).toContain("file1.ts");
+      expect(output).toContain("file3.ts");
+      expect(output).not.toContain("file2.js");
     });
 
     it("should filter files by pattern (recursive)", async () => {
@@ -290,12 +306,12 @@ describe("file tools", () => {
       }, context);
 
       expect(result.success).toBe(true);
-      const resultObj = result.result as { files: Array<{ name: string; isDir: boolean }> };
-      // Should include directories and only .ts files
-      const fileEntries = resultObj.files.filter(f => !f.isDir);
-      for (const file of fileEntries) {
-        expect(file.name).toMatch(/\.ts$/);
-      }
+      const output = result.result as string;
+      // Directories should still appear
+      expect(output).toContain("sub-pattern/");
+      // Only .ts files should appear
+      expect(output).toContain("nested1.ts");
+      expect(output).not.toContain("nested2.js");
     });
 
     it("should reject unauthorized paths via allowedPaths", async () => {
