@@ -29,8 +29,7 @@ import { getSettings } from "../infra/config.ts";
 import { getLogger } from "../infra/logger.ts";
 import { ToolRegistry } from "./tools/registry.ts";
 import { ImageManager } from "../media/image-manager.ts";
-import { TaskRunner } from "./task-runner.ts";
-import type { TaskNotification } from "./task-runner.ts";
+import type { TaskNotification } from "./agent.ts";
 import { computeTokenBudget, calculateMaxToolResultChars, ModelLimitsCache } from "../context/index.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import path from "node:path";
@@ -67,7 +66,6 @@ export interface InjectedSubsystems {
   skillRegistry: SkillRegistry;
   skillDirs: Array<{ dir: string; source: "builtin" | "user" }>;
   aiTaskTypeRegistry: SubAgentTypeRegistry;
-  taskRunner: TaskRunner;
   projectManager: ProjectManager;
   projectAdapter: ProjectAdapter;
   imageManager: ImageManager | null;
@@ -90,7 +88,6 @@ export interface MainAgentDeps {
 export class MainAgent extends Agent {
   private models: ModelRegistry;
   private settings: Settings;
-  private taskRunner!: TaskRunner;
   private skillRegistry!: SkillRegistry;
   private skillDirs: Array<{ dir: string; source: "builtin" | "user" }> = [];
   private subAgentTypeRegistry!: SubAgentTypeRegistry;
@@ -127,6 +124,11 @@ export class MainAgent extends Agent {
       visionKeepLastNTurns: settings.vision?.keepLastNTurns,
       toolContext: { memoryDir: mainStorePaths.memory! },
       reflectionOrchestrator: deps.injected.reflectionOrchestrator,
+      subagentConfig: {
+        subagentTypeRegistry: deps.injected.aiTaskTypeRegistry,
+        tasksDir: mainStorePaths.tasks,
+        onNotification: (n) => this.pushTaskNotification(n),
+      },
     });
 
     this.models = deps.models;
@@ -141,7 +143,6 @@ export class MainAgent extends Agent {
     this.skillRegistry = inj.skillRegistry;
     this.skillDirs = inj.skillDirs;
     this.subAgentTypeRegistry = inj.aiTaskTypeRegistry;
-    this.taskRunner = inj.taskRunner;
     this.projectManager = inj.projectManager;
     this.projectAdapter = inj.projectAdapter;
     this.tickManager = inj.tickManager;
@@ -228,7 +229,6 @@ export class MainAgent extends Agent {
     // MainAgent-specific fields (override/extend base context)
     ctx.sessionDir = this.mainStorePaths.session;
     ctx.tasksDir = this.mainStorePaths.tasks;
-    ctx.taskRegistry = this.taskRunner;
     ctx.projectManager = this.projectManager;
     ctx.ownerStore = this.ownerStore;
     ctx.mediaDir = imgMgr ? path.join(this.settings.dataDir, "media") : undefined;
@@ -334,9 +334,12 @@ export class MainAgent extends Agent {
     return lines.join("\n");
   }
 
-  /** Expose TaskRunner for testing. */
-  get _taskRunner(): TaskRunner {
-    return this.taskRunner;
+  /**
+   * Expose self as task registry for testing.
+   * Agent now implements TaskRegistryLike directly.
+   */
+  get _taskRunner(): MainAgent {
+    return this;
   }
 
   // ── Skill reload (event-driven, NOT polling) ────────
@@ -395,7 +398,7 @@ export class MainAgent extends Agent {
   // ═══════════════════════════════════════════════════
 
   /**
-   * Push a task notification into the queue (used by PegasusApp's TaskRunner callback).
+   * Push a task notification into the queue (used by Agent's subagent callbacks).
    */
   pushTaskNotification(notification: TaskNotification): void {
     this.pushQueue({ kind: "task_notify", notification } as QueueItem);

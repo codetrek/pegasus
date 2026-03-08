@@ -666,12 +666,12 @@ describe("MainAgent", () => {
       // Stub _think to prevent async side effects (we only test tick message injection)
       (agent as any)._think = async () => {};
 
-      // Mock TaskRunner.activeCount to return > 0 (TickManager now reads from TaskRunner)
+      // Mock activeCount to return > 0 (TickManager now reads from Agent)
       const origActiveCount = Object.getOwnPropertyDescriptor(
-        Object.getPrototypeOf(agent._taskRunner),
+        Object.getPrototypeOf(Object.getPrototypeOf(agent)),
         "activeCount",
-      ) ?? Object.getOwnPropertyDescriptor(agent._taskRunner, "activeCount");
-      Object.defineProperty(agent._taskRunner, "activeCount", {
+      ) ?? Object.getOwnPropertyDescriptor(agent, "activeCount");
+      Object.defineProperty(agent, "activeCount", {
         get: () => 1,
         configurable: true,
       });
@@ -691,9 +691,9 @@ describe("MainAgent", () => {
 
       // Restore
       if (origActiveCount) {
-        Object.defineProperty(agent._taskRunner, "activeCount", origActiveCount);
+        Object.defineProperty(agent, "activeCount", origActiveCount);
       } else {
-        Object.defineProperty(agent._taskRunner, "activeCount", {
+        Object.defineProperty(agent, "activeCount", {
           get: () => 0,
           configurable: true,
         });
@@ -704,7 +704,7 @@ describe("MainAgent", () => {
     }, 10_000);
 
     // "should include subagent count in tick status" — removed (SubAgentManager deleted,
-    // all work tracked by TaskRunner; TickManager subagent count is always 0).
+    // all work tracked by Agent; TickManager subagent count is always 0).
   });
 
   // ── buildSystemPrompt override ──
@@ -727,10 +727,10 @@ describe("MainAgent", () => {
     }, 10_000);
   });
 
-  // ── TaskRunner integration tests ──
+  // ── Subagent integration tests ──
 
-  describe("TaskRunner integration", () => {
-    it("should expose _taskRunner getter after start", async () => {
+  describe("Subagent integration", () => {
+    it("should expose _taskRunner getter (returns self) after start", async () => {
       const model = createReplyModel("ok");
       const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
@@ -743,7 +743,7 @@ describe("MainAgent", () => {
       await agent.stop();
     }, 10_000);
 
-    it("should use TaskRunner for spawn_subagent", async () => {
+    it("should use Agent subagent management for spawn_subagent", async () => {
       let mainCallCount = 0;
       const model: LanguageModel = {
         provider: "test",
@@ -765,7 +765,7 @@ describe("MainAgent", () => {
                     id: "tc-spawn",
                     name: "spawn_subagent",
                     arguments: {
-                      description: "TaskRunner test task",
+                      description: "Subagent test task",
                       input: "do the thing",
                     },
                   },
@@ -808,7 +808,7 @@ describe("MainAgent", () => {
       const sessionContent = await Bun.file(
         `${testDataDir}/agents/main/session/current.jsonl`,
       ).text();
-      expect(sessionContent).toContain('"description":"TaskRunner test task"');
+      expect(sessionContent).toContain('"description":"Subagent test task"');
       expect(sessionContent).toContain("spawn_subagent");
 
       // Wait for task completion

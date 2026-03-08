@@ -33,7 +33,7 @@ import {
   _setAgentFactoryForTest,
   _setProxyModelFactoryForTest,
 } from "@pegasus/workers/agent-worker.ts";
-import type { TaskNotification } from "@pegasus/agents/task-runner.ts";
+import type { TaskNotification } from "@pegasus/agents/agent.ts";
 import { setSettings, resetSettings } from "@pegasus/infra/config.ts";
 import type { Settings } from "@pegasus/infra/config.ts";
 
@@ -89,10 +89,10 @@ function makeTestSettings(dataDir: string): Settings {
   };
 }
 
-/** Track the last onNotification callback registered by the mock TaskRunner. */
+/** Track the last onNotification callback registered by the mock Agent. */
 let _notifyCallback: ((n: unknown) => void) | null = null;
 
-/** Create a mock TaskRunner-like object for factory injection. */
+/** Create a mock Agent-like object for factory injection. */
 function createMockAgent() {
   return {
     submit: mock((_text: string, _source: string) => "mock_task_id"),
@@ -407,7 +407,7 @@ describe("handleShutdown", () => {
         expect(reason).toContain("shutting down");
       },
     };
-    // TaskRunner has no stop() — handleShutdown only cancels proxyModel
+    // Agent has no stop() — handleShutdown only cancels proxyModel
     const fakeAgent = {
       submit: mock(() => "t1"),
     };
@@ -446,7 +446,7 @@ describe("handleShutdown", () => {
   }, 5_000);
 
   it("should handle case with only agent (no proxyModel)", async () => {
-    // TaskRunner has no stop() — with no proxyModel, handleShutdown just posts shutdown-complete
+    // Agent has no stop() — with no proxyModel, handleShutdown just posts shutdown-complete
     const fakeAgent = {
       submit: mock(() => "t1"),
     };
@@ -673,7 +673,7 @@ describe("initProject", () => {
     lastMockProxy = createMockProxyModel();
     _notifyCallback = null;
     cleanupAgent = _setAgentFactoryForTest((deps: any) => {
-      // Capture onNotification from TaskRunnerDeps
+      // Capture onNotification from AgentDeps
       if (deps.onNotification) _notifyCallback = deps.onNotification;
       return lastMockAgent as any;
     });

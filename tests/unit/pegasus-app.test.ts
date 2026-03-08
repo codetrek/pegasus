@@ -352,7 +352,7 @@ describe("PegasusApp", () => {
     await app.stop();
   }, 15_000);
 
-  it("mainAgent should have skills, taskRunner, and projects accessible", async () => {
+  it("mainAgent should have skills, subagent management, and projects accessible", async () => {
     const model = createMonologueModel("thinking...");
     const app = new Pegasus({
       models: createMockModelRegistry(model),
@@ -364,7 +364,7 @@ describe("PegasusApp", () => {
 
     const agent = app.mainAgent;
     expect(agent.skills).toBeDefined();
-    expect(agent._taskRunner).toBeDefined();
+    expect(agent.activeCount).toBeDefined();
     expect(agent.projects).toBeDefined();
 
     await app.stop();
@@ -545,11 +545,11 @@ describe("PegasusApp", () => {
   });
 
   // ═══════════════════════════════════════════════════
-  // Coverage: TaskRunner notification callback (lines 356-359)
+  // Coverage: Subagent notification callback
   // ═══════════════════════════════════════════════════
 
-  describe("TaskRunner notification routing (coverage)", () => {
-    it("should route task notifications from TaskRunner to MainAgent", async () => {
+  describe("Subagent notification routing (coverage)", () => {
+    it("should route task notifications from Agent to MainAgent", async () => {
       // Spawn a task through MainAgent and verify notification routing works.
       let mainCallCount = 0;
       const model: LanguageModel = {
