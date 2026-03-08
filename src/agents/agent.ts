@@ -110,6 +110,13 @@ export interface SubagentConfig {
    * If omitted, falls back to allTaskTools for backward compatibility.
    */
   parentTools?: Tool[];
+  /** Store image callback passed to subagents for image persistence. */
+  storeImage?: ToolContext["storeImage"];
+  /**
+   * Resolve a model tier/spec (e.g. "fast", "balanced", "openai/gpt-4o") to a LanguageModel.
+   * Used to honor SubAgentType's `model` field. If omitted, subagents use parent's model.
+   */
+  resolveModel?: (tierOrSpec: string) => LanguageModel;
 }
 
 // ── Dependencies ─────────────────────────────────────
@@ -1350,9 +1357,15 @@ export class Agent {
     const dateStr = new Date().toISOString().slice(0, 10);
     const sessionDir = path.join(config.tasksDir, dateStr, taskId);
 
+    // Resolve model: SubAgentType's model field → resolveModel callback → parent's model
+    const typeModel = config.subagentTypeRegistry.getModel(taskType);
+    const model = (typeModel && config.resolveModel)
+      ? config.resolveModel(typeModel)
+      : this.model;
+
     const agent = new Agent({
       agentId: taskId,
-      model: this.model,
+      model,
       toolRegistry,
       systemPrompt: this._buildSubagentPrompt(
         description,
@@ -1360,7 +1373,7 @@ export class Agent {
         depth,
       ),
       sessionDir,
-      storeImage: this._storeImage,
+      storeImage: config.storeImage,
       contextWindow: this.contextWindow,
       toolContext: {
         taskRegistry: this,
@@ -1427,9 +1440,15 @@ export class Agent {
     const depth = entry.depth ?? 0;
     const toolRegistry = this._getSubagentToolRegistry(resolvedType, depth);
 
+    // Resolve model: SubAgentType's model field → resolveModel callback → parent's model
+    const typeModel = config.subagentTypeRegistry.getModel(resolvedType);
+    const model = (typeModel && config.resolveModel)
+      ? config.resolveModel(typeModel)
+      : this.model;
+
     const agent = new Agent({
       agentId: taskId,
-      model: this.model,
+      model,
       toolRegistry,
       systemPrompt: this._buildSubagentPrompt(
         resolvedDescription,
@@ -1437,7 +1456,7 @@ export class Agent {
         depth,
       ),
       sessionDir,
-      storeImage: this._storeImage,
+      storeImage: config.storeImage,
       toolContext: {
         taskRegistry: this,
         onNotify: (message: string) => {

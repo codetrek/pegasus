@@ -143,6 +143,15 @@ export class MainAgent extends Agent {
         // Subagents inherit MainAgent's tools MINUS privileged ones.
         // Privileged tools are MainAgent-only (channel reply, trust, project mgmt, skill reload).
         parentTools: toolRegistry.list().filter(t => !PRIVILEGED_TOOL_NAMES.has(t.name)),
+        // Image storage for subagent tools (e.g. browser screenshots)
+        storeImage: deps.injected.imageManager
+          ? async (buffer: Buffer, mimeType: string, source: string) => {
+              const ref = await deps.injected.imageManager!.store(buffer, mimeType, source);
+              return { id: ref.id, mimeType: ref.mimeType };
+            }
+          : undefined,
+        // Resolve SubAgentType model tier/spec to a LanguageModel
+        resolveModel: (tierOrSpec: string) => deps.models.getForTier(tierOrSpec as import("../infra/model-registry.ts").ModelTier),
       },
     });
 

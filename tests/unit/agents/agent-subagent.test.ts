@@ -85,6 +85,7 @@ interface CreateAgentOpts {
   model?: LanguageModel;
   onNotification?: (n: TaskNotification) => void;
   storeImage?: ToolContext["storeImage"];
+  resolveModel?: (tierOrSpec: string) => LanguageModel;
   subagentTypeRegistry?: SubAgentTypeRegistry;
 }
 
@@ -99,8 +100,9 @@ function createAgentWithSubagents(overrides?: CreateAgentOpts): Agent {
       subagentTypeRegistry: overrides?.subagentTypeRegistry ?? new SubAgentTypeRegistry(),
       tasksDir: path.join(tempDir, "tasks"),
       onNotification: overrides?.onNotification ?? (() => {}),
+      storeImage: overrides?.storeImage,
+      resolveModel: overrides?.resolveModel,
     },
-    storeImage: overrides?.storeImage,
   });
 }
 
@@ -662,6 +664,171 @@ describe("Agent subagent management", () => {
       expect(completed).toBeDefined();
       const imageRefs = (completed as any).imageRefs;
       expect(imageRefs).toBeUndefined();
+    }, 5000);
+  });
+
+  // ── storeImage propagation via SubagentConfig ──
+
+  describe("storeImage via SubagentConfig", () => {
+    test("subagent receives storeImage from SubagentConfig", async () => {
+      let storedImage = false;
+      const mockStoreImage = mock(async (_buf: Buffer, _mime: string, _src: string) => {
+        storedImage = true;
+        return { id: "img-1", mimeType: "image/png" };
+      });
+
+      // Create a model that triggers a tool call to store_test_image
+      const storeTestTool: Tool = {
+        name: "store_test_image",
+        description: "Test tool that stores an image",
+        category: ToolCategory.MEDIA,
+        parameters: z.object({}),
+        async execute(_params: unknown, context: ToolContext): Promise<ToolResult> {
+          const startedAt = Date.now();
+          if (context.storeImage) {
+            await context.storeImage(Buffer.from("fake"), "image/png", "test");
+            return { success: true, result: "stored", startedAt };
+          }
+          return { success: true, result: "no_storeImage", startedAt };
+        },
+      };
+
+      // Model that calls store_test_image tool
+      const toolCallingModel = createMockModel(async (_opts: any) => {
+        // First call: invoke tool; second call: return final text
+        if (!storedImage) {
+          return {
+            text: "",
+            finishReason: "tool-calls" as const,
+            toolCalls: [{ id: "tc1", name: "store_test_image", arguments: {} }],
+            usage: { promptTokens: 10, completionTokens: 5 },
+          };
+        }
+        return {
+          text: "done",
+          finishReason: "stop" as const,
+          usage: { promptTokens: 10, completionTokens: 5 },
+        };
+      });
+
+      // Register the test tool in a SubAgentType
+      const registry = new SubAgentTypeRegistry();
+      registry.registerMany([{
+        name: "general",
+        description: "test",
+        tools: ["store_test_image"],
+        prompt: "",
+        source: "builtin" as const,
+      }]);
+
+      const agent = createAgentWithSubagents({
+        model: toolCallingModel,
+        storeImage: mockStoreImage,
+        subagentTypeRegistry: registry,
+      });
+      // Add store_test_image to parent's inheritable tools
+      agent.setAdditionalTools([storeTestTool]);
+
+      agent.submit("store an image", "user", "general", "Store test");
+      await waitForNotifications(200);
+
+      expect(mockStoreImage).toHaveBeenCalled();
+      expect(storedImage).toBe(true);
+    }, 5000);
+
+    test("subagent works without storeImage (undefined)", async () => {
+      const notifications: TaskNotification[] = [];
+      const agent = createAgentWithSubagents({
+        onNotification: (n) => notifications.push(n),
+        // storeImage not provided
+      });
+
+      agent.submit("no image needed", "user", "general", "Plain task");
+      await waitForNotifications(100);
+
+      const completed = notifications.find(n => n.type === "completed");
+      expect(completed).toBeDefined();
+    }, 5000);
+  });
+
+  // ── resolveModel via SubagentConfig ──
+
+  describe("resolveModel via SubagentConfig", () => {
+    test("subagent uses model from SubAgentType when resolveModel is provided", async () => {
+      let usedModelId = "";
+      const fastModel = createMockModel(async () => {
+        usedModelId = "fast-model";
+        return {
+          text: "fast result",
+          finishReason: "stop" as const,
+          usage: { promptTokens: 5, completionTokens: 3 },
+        };
+      });
+      (fastModel as any).modelId = "fast-model";
+
+      const registry = new SubAgentTypeRegistry();
+      registry.registerMany([{
+        name: "explore",
+        description: "exploration",
+        tools: ["*"],
+        prompt: "",
+        source: "builtin" as const,
+        model: "fast",  // SubAgentType declares model tier
+      }]);
+
+      const notifications: TaskNotification[] = [];
+      const agent = createAgentWithSubagents({
+        onNotification: (n) => notifications.push(n),
+        subagentTypeRegistry: registry,
+        resolveModel: (tier: string) => {
+          expect(tier).toBe("fast");
+          return fastModel;
+        },
+      });
+
+      agent.submit("explore something", "user", "explore", "Explore task");
+      await waitForNotifications(100);
+
+      expect(usedModelId).toBe("fast-model");
+    }, 5000);
+
+    test("subagent falls back to parent model when SubAgentType has no model", async () => {
+      let usedParentModel = false;
+      const parentModel = createMockModel(async () => {
+        usedParentModel = true;
+        return {
+          text: "parent model result",
+          finishReason: "stop" as const,
+          usage: { promptTokens: 5, completionTokens: 3 },
+        };
+      });
+
+      const registry = new SubAgentTypeRegistry();
+      registry.registerMany([{
+        name: "general",
+        description: "general",
+        tools: ["*"],
+        prompt: "",
+        source: "builtin" as const,
+        // No model field — should use parent's model
+      }]);
+
+      const resolveModel = mock((_tier: string) => parentModel);
+
+      const notifications: TaskNotification[] = [];
+      const agent = createAgentWithSubagents({
+        model: parentModel,
+        onNotification: (n) => notifications.push(n),
+        subagentTypeRegistry: registry,
+        resolveModel,
+      });
+
+      agent.submit("do work", "user", "general", "General task");
+      await waitForNotifications(100);
+
+      // resolveModel should NOT be called since SubAgentType has no model
+      expect(resolveModel).not.toHaveBeenCalled();
+      expect(usedParentModel).toBe(true);
     }, 5000);
   });
 });
