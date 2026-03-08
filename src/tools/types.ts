@@ -7,6 +7,20 @@ import path from "node:path";
 import type { LanguageModel } from "../infra/llm-types.ts";
 import type { BackgroundTaskManager } from "./background.ts";
 import type { ImageAttachment } from "../media/types.ts";
+import type {
+  TaskRegistryLike,
+  TickManagerLike,
+  OwnerStoreLike,
+  SkillRegistryLike,
+  ProjectManagerLike,
+  ProjectAdapterLike,
+  BrowserManagerLike,
+  OnReplyFn,
+  ResolveImageFn,
+  GetMemorySnapshotFn,
+  OnSkillsReloadedFn,
+  StoreImageFn,
+} from "./tool-context.ts";
 
 // ── ToolCategory ─────────────────────────────────────
 
@@ -64,39 +78,34 @@ export interface ToolResult {
  */
 export interface ToolContext {
   taskId: string;
-  userId?: string;
   allowedPaths?: string[];
   memoryDir?: string;
   sessionDir?: string;
   tasksDir?: string;
-  taskRegistry?: unknown; // TaskRunner — used by task_status tool (loosely typed to avoid circular imports)
-  projectManager?: unknown; // ProjectManager — used by project tools (loosely typed to avoid circular imports)
-  ownerStore?: unknown; // OwnerStore — used by trust tool (loosely typed to avoid circular imports)
-  browserManager?: unknown; // BrowserManager — used by browser tools (loosely typed to avoid circular imports)
+  taskRegistry?: TaskRegistryLike;
+  projectManager?: ProjectManagerLike;
+  ownerStore?: OwnerStoreLike;
+  browserManager?: BrowserManagerLike;
   extractModel?: LanguageModel; // Small model for content extraction (web_fetch)
   backgroundManager?: BackgroundTaskManager; // Background task execution manager (bg_run/bg_output/bg_stop)
   mediaDir?: string; // Directory for media storage (images, etc.)
   /** Store an image via ImageManager. Injected by Agent/MainAgent so tools can persist images
    *  without direct ImageManager references (works across thread boundaries). */
-  storeImage?: (
-    buffer: Buffer,
-    mimeType: string,
-    source: string,
-  ) => Promise<{ id: string; mimeType: string }>;
-  /** Reply callback — routes outbound message to channel adapter (loosely typed). */
-  onReply?: unknown;
-  /** Resolve an image by ID or file path. Returns base64 data or null (loosely typed). */
-  resolveImage?: unknown;
-  /** SkillRegistry for skill lookup and body loading (loosely typed). */
-  skillRegistry?: unknown;
-  /** TickManager for starting periodic status checks after spawning work (loosely typed). */
-  tickManager?: unknown;
-  /** Get memory snapshot for SubAgent context injection (loosely typed). */
-  getMemorySnapshot?: unknown;
+  storeImage?: StoreImageFn;
+  /** Reply callback — routes outbound message to channel adapter. */
+  onReply?: OnReplyFn;
+  /** Resolve an image by ID or file path. Returns base64 data or null. */
+  resolveImage?: ResolveImageFn;
+  /** SkillRegistry for skill lookup and body loading. */
+  skillRegistry?: SkillRegistryLike;
+  /** TickManager for starting periodic status checks after spawning work. */
+  tickManager?: TickManagerLike;
+  /** Get memory snapshot for SubAgent context injection. */
+  getMemorySnapshot?: GetMemorySnapshotFn;
   /** Callback when skills are reloaded — triggers prompt rebuild + worker broadcast. Returns new skill count. */
-  onSkillsReloaded?: unknown;
-  /** ProjectAdapter for starting/stopping project Workers (loosely typed). */
-  projectAdapter?: unknown;
+  onSkillsReloaded?: OnSkillsReloadedFn;
+  /** ProjectAdapter for starting/stopping project Workers. */
+  projectAdapter?: ProjectAdapterLike;
   /** Notify callback — used by notify tool for self-executing behavior. */
   onNotify?: (message: string) => void;
 }

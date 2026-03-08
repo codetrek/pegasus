@@ -9,13 +9,6 @@ import { z } from "zod";
 import type { Tool, ToolResult, ToolContext } from "../types.ts";
 import { ToolCategory } from "../types.ts";
 
-/** Loose interface for OwnerStore methods used by this tool. */
-interface OwnerStoreLike {
-  add(channelType: string, userId: string): void;
-  remove(channelType: string, userId: string): void;
-  listAll(): Record<string, string[]>;
-}
-
 export const trust: Tool = {
   name: "trust",
   description:
@@ -34,7 +27,7 @@ export const trust: Tool = {
       userId?: string;
     };
 
-    const store = context.ownerStore as OwnerStoreLike | undefined;
+    const store = context.ownerStore;
     if (!store) {
       return {
         success: false,

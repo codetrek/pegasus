@@ -9,18 +9,15 @@ import { z } from "zod";
 import { readFile, unlink } from "node:fs/promises";
 import type { Tool, ToolResult, ToolContext } from "../types.ts";
 import { ToolCategory } from "../types.ts";
-import type { BrowserManager } from "./browser-manager.ts";
 import type { ImageAttachment } from "../../media/types.ts";
 
 // ── Helper ──────────────────────────────────────
 
 /**
  * Retrieve BrowserManager from the tool context.
- * Uses a type assertion since the `browserManager` field is added
- * to ToolContext in a later integration step.
  */
-function getBrowserManager(context: ToolContext): BrowserManager {
-  const manager = context.browserManager as BrowserManager | undefined;
+function getBrowserManager(context: ToolContext) {
+  const manager = context.browserManager;
   if (!manager) {
     throw new Error(
       "Browser not available. Configure tools.browser in config.yml.",

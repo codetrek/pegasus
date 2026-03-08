@@ -10,22 +10,6 @@ import { z } from "zod";
 import type { Tool, ToolResult, ToolContext } from "../types.ts";
 import { ToolCategory } from "../types.ts";
 
-/** Loose interface for SkillRegistry methods used by this tool. */
-interface SkillRegistryLike {
-  get(name: string): { name: string; context?: string; agent?: string } | undefined;
-  loadBody(name: string, args?: string): string | null;
-}
-
-/** Loose interface for TaskRunner methods used by this tool. */
-interface TaskRegistryLike {
-  submit(input: string, source: string, type: string, description: string): string;
-}
-
-/** Loose interface for TickManager methods used by this tool. */
-interface TickManagerLike {
-  start(): void;
-}
-
 export const use_skill: Tool = {
   name: "use_skill",
   description: "Invoke a registered skill by name. Available skills are listed in the Skills section.",
@@ -38,7 +22,7 @@ export const use_skill: Tool = {
     const startedAt = Date.now();
     const { skill: skillName, args: skillArgs } = params as { skill: string; args?: string };
 
-    const registry = context.skillRegistry as SkillRegistryLike | undefined;
+    const registry = context.skillRegistry;
     if (!registry) {
       return {
         success: false,
@@ -63,7 +47,7 @@ export const use_skill: Tool = {
     try {
       if (skill.context === "fork") {
         // Fork: submit as background task
-        const taskRegistry = context.taskRegistry as TaskRegistryLike | undefined;
+        const taskRegistry = context.taskRegistry;
         if (!taskRegistry) {
           return {
             success: false,
@@ -79,7 +63,7 @@ export const use_skill: Tool = {
         const taskId = taskRegistry.submit(body ?? "", "skill:" + skillName, taskType, `Skill: ${skillName}`);
 
         // Start tick manager to poll for task completion
-        const tick = context.tickManager as TickManagerLike | undefined;
+        const tick = context.tickManager;
         if (tick) tick.start();
 
         return {

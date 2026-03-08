@@ -13,39 +13,16 @@ import type { Tool, ToolResult, ToolContext } from "../types.ts";
 
 // ── Helpers ────────────────────────────────────────────────
 
-/** Duck-typed interface for ProjectAdapter (loose coupling). */
-interface ProjectAdapterLike {
-  startProject(name: string, projectDir: string): void;
-  stopProject(name: string): Promise<void>;
-}
-
-/** Type for ProjectManager methods used by these tools (loose coupling). */
-interface ProjectManagerLike {
-  create(opts: {
-    name: string;
-    goal: string;
-    background?: string;
-    constraints?: string;
-    model?: string;
-    workdir?: string;
-  }): { name: string; status: string; prompt: string; projectDir: string };
-  list(status?: string): Array<{ name: string; status: string; [k: string]: unknown }>;
-  get(name: string): { name: string; projectDir: string; [k: string]: unknown } | null;
-  disable(name: string): void;
-  enable(name: string): void;
-  archive(name: string): void;
-}
-
-function getProjectManager(context: ToolContext): ProjectManagerLike {
-  const pm = (context as unknown as Record<string, unknown>).projectManager as ProjectManagerLike | undefined;
+function getProjectManager(context: ToolContext) {
+  const pm = context.projectManager;
   if (!pm) {
     throw new Error("projectManager not available in tool context");
   }
   return pm;
 }
 
-function getProjectAdapter(context: ToolContext): ProjectAdapterLike | null {
-  return (context.projectAdapter as ProjectAdapterLike | undefined) ?? null;
+function getProjectAdapter(context: ToolContext) {
+  return context.projectAdapter ?? null;
 }
 
 // ── create_project ────────────────────────────────────────

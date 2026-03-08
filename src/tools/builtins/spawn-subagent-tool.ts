@@ -15,25 +15,6 @@ import { getLogger } from "../../infra/logger.ts";
 
 const logger = getLogger("spawn_subagent");
 
-/** Loose interface for TaskRunner methods used by this tool. */
-export interface TaskRegistryLike {
-  submit(
-    input: string,
-    source: string,
-    type: string,
-    description: string,
-    opts?: { memorySnapshot?: string; depth?: number },
-  ): string;
-}
-
-/** Loose interface for TickManager methods used by this tool. */
-interface TickManagerLike {
-  start(): void;
-}
-
-/** Loose type for getMemorySnapshot callback. */
-type GetMemorySnapshotFn = () => Promise<string | undefined>;
-
 export const spawn_subagent: Tool = {
   name: "spawn_subagent",
   description:
@@ -61,7 +42,7 @@ export const spawn_subagent: Tool = {
       type?: string;
     };
 
-    const registry = context.taskRegistry as TaskRegistryLike | undefined;
+    const registry = context.taskRegistry;
     if (!registry) {
       return {
         success: false,
@@ -74,7 +55,7 @@ export const spawn_subagent: Tool = {
 
     try {
       // Collect memory snapshot for sub-agent context
-      const getSnapshot = context.getMemorySnapshot as GetMemorySnapshotFn | undefined;
+      const getSnapshot = context.getMemorySnapshot;
       const memorySnapshot = getSnapshot ? await getSnapshot() : undefined;
 
       const taskId = registry.submit(input, context.taskId, type ?? "general", description, {
@@ -83,7 +64,7 @@ export const spawn_subagent: Tool = {
       });
 
       // Start tick manager to poll for task completion
-      const tick = context.tickManager as TickManagerLike | undefined;
+      const tick = context.tickManager;
       if (tick) tick.start();
 
       logger.info({ subagentId: taskId, description, type }, "subagent_spawned");

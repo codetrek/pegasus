@@ -12,9 +12,6 @@ import { z } from "zod";
 import type { Tool, ToolResult, ToolContext } from "../types.ts";
 import { ToolCategory } from "../types.ts";
 
-/** Loose type for the onSkillsReloaded callback. */
-type OnSkillsReloadedFn = () => number;
-
 export const reload_skills: Tool = {
   name: "reload_skills",
   description:
@@ -25,7 +22,7 @@ export const reload_skills: Tool = {
   async execute(_params: unknown, context: ToolContext): Promise<ToolResult> {
     const startedAt = Date.now();
 
-    const onReloaded = context.onSkillsReloaded as OnSkillsReloadedFn | undefined;
+    const onReloaded = context.onSkillsReloaded;
     if (!onReloaded) {
       return {
         success: false,

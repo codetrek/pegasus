@@ -4,6 +4,13 @@ import { ToolCategory } from "../../../src/tools/types.ts";
 import type { ToolContext } from "../../../src/tools/types.ts";
 
 describe("use_skill tool", () => {
+  /** Stub methods that other tools need but skill tests don't care about. */
+  const registryStubs = {
+    getStatus: () => null,
+    listAll: () => [],
+    get activeCount() { return 0; },
+  } as const;
+
   function makeSkillRegistry(skills: Record<string, { context?: string; agent?: string; body?: string }>) {
     return {
       get: (name: string) => {
@@ -27,6 +34,8 @@ describe("use_skill tool", () => {
       }),
       taskRegistry: {
         submit: (_input: string, _source: string, _type: string, _desc: string) => "task-skill-1",
+        resume: async () => "",
+        ...registryStubs,
       },
       tickManager: { start: () => {} },
       ...overrides,
@@ -51,6 +60,8 @@ describe("use_skill tool", () => {
           capturedArgs = [input, source, type, desc];
           return "task-fork-1";
         },
+        resume: async () => "",
+        ...registryStubs,
       },
     });
 
@@ -146,6 +157,8 @@ describe("use_skill tool", () => {
           capturedType = type;
           return "t-1";
         },
+        resume: async () => "",
+        ...registryStubs,
       },
     });
 
@@ -164,6 +177,8 @@ describe("use_skill tool", () => {
           capturedType = type;
           return "t-1";
         },
+        resume: async () => "",
+        ...registryStubs,
       },
     });
 
