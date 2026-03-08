@@ -22,49 +22,49 @@ import { ToolCategory } from "../../../src/agents/tools/types.ts";
 
 function createMockManager() {
   return {
-    navigate: mock((_taskId: string, _url: string) =>
+    navigate: mock((_agentId: string, _url: string) =>
       Promise.resolve({
         snapshot:
           '[page] url: https://example.com\n  [button] "Click" [ref=e1]',
         truncated: false,
       }),
     ),
-    takeSnapshot: mock((_taskId: string) =>
+    takeSnapshot: mock((_agentId: string) =>
       Promise.resolve({
         snapshot:
           '[page] url: https://example.com\n  [button] "Click" [ref=e1]',
         truncated: false,
       }),
     ),
-    click: mock((_taskId: string, _ref: string) =>
+    click: mock((_agentId: string, _ref: string) =>
       Promise.resolve({
         snapshot:
           '[page] url: https://example.com\n  [heading] "Clicked!"',
         truncated: false,
       }),
     ),
-    type: mock((_taskId: string, _ref: string, _text: string, _submit?: boolean) =>
+    type: mock((_agentId: string, _ref: string, _text: string, _submit?: boolean) =>
       Promise.resolve({
         snapshot:
           '[page] url: https://example.com\n  [textbox] "Email" [ref=e1] value="test@test.com"',
         truncated: false,
       }),
     ),
-    scroll: mock((_taskId: string, _direction: string, _amount?: number) =>
+    scroll: mock((_agentId: string, _direction: string, _amount?: number) =>
       Promise.resolve({
         snapshot:
           '[page] url: https://example.com\n  [heading] "Section 2"',
         truncated: false,
       }),
     ),
-    screenshot: mock((_taskId: string, _fullPage?: boolean) =>
+    screenshot: mock((_agentId: string, _fullPage?: boolean) =>
       Promise.resolve({
         screenshotPath: "/tmp/pegasus-browser-123.png",
         snapshot: "[page] url: https://example.com",
         truncated: false,
       }),
     ),
-    closeSession: mock((_taskId: string) => Promise.resolve()),
+    closeSession: mock((_agentId: string) => Promise.resolve()),
     close: mock(() => Promise.resolve()),
     isRunning: true,
   };

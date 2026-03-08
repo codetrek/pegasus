@@ -143,7 +143,7 @@ export class EventBus {
 
   async emit(event: Event): Promise<void> {
     this.queue.put(event);
-    logger.debug({ eventType: event.type, eventId: event.id, taskId: event.taskId }, "event_emitted");
+    logger.debug({ eventType: event.type, eventId: event.id, agentId: event.agentId }, "event_emitted");
   }
 
   // ── Lifecycle ──

@@ -117,7 +117,7 @@ describe("BrowserManager", () => {
 
   // ── 2. getSession — reuse ────────────────────────────────────────
 
-  it("should return the same session for the same taskId", async () => {
+  it("should return the same session for the same agentId", async () => {
     const s1 = await manager.getSession(TEST_TASK);
     const s2 = await manager.getSession(TEST_TASK);
 
@@ -127,7 +127,7 @@ describe("BrowserManager", () => {
 
   // ── 3. getSession — separate sessions per task ────────────────────
 
-  it("should create separate sessions for different taskIds", async () => {
+  it("should create separate sessions for different agentIds", async () => {
     const s1 = await manager.getSession(TEST_TASK);
     const s2 = await manager.getSession(TEST_TASK_2);
 
@@ -420,7 +420,7 @@ describe("BrowserManager", () => {
     expect(s2).toBeDefined();
   });
 
-  it("should handle closeSession for non-existent taskId", async () => {
+  it("should handle closeSession for non-existent agentId", async () => {
     // Should not throw
     await manager.closeSession("non-existent");
     expect(manager.isActive).toBe(false);

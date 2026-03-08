@@ -97,10 +97,10 @@ async function writeIndex(
 async function writeSession(
   subagentsDir: string,
   date: string,
-  taskId: string,
+  agentId: string,
   messages: Array<{ role: string; content: string }>,
 ): Promise<void> {
-  const sessionDir = path.join(subagentsDir, date, taskId);
+  const sessionDir = path.join(subagentsDir, date, agentId);
   await mkdir(sessionDir, { recursive: true });
   const lines = messages
     .map((m) => JSON.stringify({ ts: Date.now(), role: m.role, content: m.content }))
@@ -123,14 +123,14 @@ describe("Agent.resume", () => {
     await rm(tempDir, { recursive: true, force: true }).catch(() => {});
   });
 
-  describe("resume with valid taskId", () => {
-    test("loads session, appends new input, and returns taskId", async () => {
-      const taskId = "abc123def456";
+  describe("resume with valid agentId", () => {
+    test("loads session, appends new input, and returns agentId", async () => {
+      const agentId = "abc123def456";
       const date = "2026-03-06";
 
       // Set up index and existing session
-      await writeIndex(tempDir, [{ subagentId: taskId, date }]);
-      await writeSession(tempDir, date, taskId, [
+      await writeIndex(tempDir, [{ subagentId: agentId, date }]);
+      await writeSession(tempDir, date, agentId, [
         { role: "user", content: "original input" },
         { role: "assistant", content: "original response" },
       ]);
@@ -138,13 +138,13 @@ describe("Agent.resume", () => {
       const [model] = createBlockingModel();
       const agent = createAgentWithSubagents({ model });
 
-      const result = await agent.resume(taskId, "follow up input");
+      const result = await agent.resume(agentId, "follow up input");
 
-      expect(result).toBe(taskId);
+      expect(result).toBe(agentId);
       expect(agent.activeCount).toBe(1);
 
       // Verify the new message was appended to session
-      const sessionPath = path.join(tempDir, date, taskId, "current.jsonl");
+      const sessionPath = path.join(tempDir, date, agentId, "current.jsonl");
       const content = await readFile(sessionPath, "utf-8");
       const lines = content.trim().split("\n").filter(Boolean);
       expect(lines.length).toBe(3); // original user + assistant + new user
@@ -154,11 +154,11 @@ describe("Agent.resume", () => {
     }, 5000);
 
     test("sends completed notification after agent finishes", async () => {
-      const taskId = "task123running1";
+      const agentId = "task123running1";
       const date = "2026-03-06";
 
-      await writeIndex(tempDir, [{ subagentId: taskId, date }]);
-      await writeSession(tempDir, date, taskId, [
+      await writeIndex(tempDir, [{ subagentId: agentId, date }]);
+      await writeSession(tempDir, date, agentId, [
         { role: "user", content: "original" },
       ]);
 
@@ -168,18 +168,18 @@ describe("Agent.resume", () => {
       });
 
       const agent = createAgentWithSubagents({ onNotification });
-      await agent.resume(taskId, "continue please");
+      await agent.resume(agentId, "continue please");
 
       await waitForNotifications();
 
       const completed = notifications.find((n) => n.type === "completed");
       expect(completed).toBeDefined();
-      expect(completed!.subagentId).toBe(taskId);
+      expect(completed!.subagentId).toBe(agentId);
     }, 5000);
   });
 
-  describe("resume with unknown taskId", () => {
-    test("throws when taskId not in index", async () => {
+  describe("resume with unknown agentId", () => {
+    test("throws when agentId not in index", async () => {
       // Empty index
       await writeIndex(tempDir, []);
       const agent = createAgentWithSubagents();
@@ -201,11 +201,11 @@ describe("Agent.resume", () => {
 
   describe("resume creates Agent and calls run()", () => {
     test("creates agent with correct sessionDir and fires run()", async () => {
-      const taskId = "agent-run-test1";
+      const agentId = "agent-run-test1";
       const date = "2026-03-05";
 
-      await writeIndex(tempDir, [{ subagentId: taskId, date }]);
-      await writeSession(tempDir, date, taskId, [
+      await writeIndex(tempDir, [{ subagentId: agentId, date }]);
+      await writeSession(tempDir, date, agentId, [
         { role: "user", content: "first message" },
       ]);
 
@@ -223,7 +223,7 @@ describe("Agent.resume", () => {
 
       try {
         const agent = createAgentWithSubagents();
-        await agent.resume(taskId, "new instruction");
+        await agent.resume(agentId, "new instruction");
 
         await waitForNotifications();
 
@@ -233,44 +233,44 @@ describe("Agent.resume", () => {
       }
     }, 5000);
 
-    test("uses provided taskType and description", async () => {
-      const taskId = "custom-type-test";
+    test("uses provided agentType and description", async () => {
+      const agentId = "custom-type-test";
       const date = "2026-03-04";
 
-      await writeIndex(tempDir, [{ subagentId: taskId, date }]);
-      await writeSession(tempDir, date, taskId, [
+      await writeIndex(tempDir, [{ subagentId: agentId, date }]);
+      await writeSession(tempDir, date, agentId, [
         { role: "user", content: "start" },
       ]);
 
       const [model] = createBlockingModel();
       const agent = createAgentWithSubagents({ model });
 
-      await agent.resume(taskId, "do more", "explore", "Exploration task");
+      await agent.resume(agentId, "do more", "explore", "Exploration task");
 
-      const status = agent.getStatus(taskId);
+      const status = agent.getStatus(agentId);
       expect(status).not.toBeNull();
-      expect(status!.taskType).toBe("explore");
+      expect(status!.agentType).toBe("explore");
       expect(status!.description).toBe("Exploration task");
       expect(status!.source).toBe("resume");
     }, 5000);
 
-    test("defaults taskType to 'general' when not provided", async () => {
-      const taskId = "default-type-tst";
+    test("defaults agentType to 'general' when not provided", async () => {
+      const agentId = "default-type-tst";
       const date = "2026-03-03";
 
-      await writeIndex(tempDir, [{ subagentId: taskId, date }]);
-      await writeSession(tempDir, date, taskId, [
+      await writeIndex(tempDir, [{ subagentId: agentId, date }]);
+      await writeSession(tempDir, date, agentId, [
         { role: "user", content: "start" },
       ]);
 
       const [model] = createBlockingModel();
       const agent = createAgentWithSubagents({ model });
 
-      await agent.resume(taskId, "continue");
+      await agent.resume(agentId, "continue");
 
-      const status = agent.getStatus(taskId);
+      const status = agent.getStatus(agentId);
       expect(status).not.toBeNull();
-      expect(status!.taskType).toBe("general");
+      expect(status!.agentType).toBe("general");
     }, 5000);
   });
 
@@ -328,11 +328,11 @@ describe("Agent.resume", () => {
 
   describe("resume agent failure handling", () => {
     test("sends failed notification when agent.run() rejects", async () => {
-      const taskId = "fail-resume-tst";
+      const agentId = "fail-resume-tst";
       const date = "2026-03-06";
 
-      await writeIndex(tempDir, [{ subagentId: taskId, date }]);
-      await writeSession(tempDir, date, taskId, [
+      await writeIndex(tempDir, [{ subagentId: agentId, date }]);
+      await writeSession(tempDir, date, agentId, [
         { role: "user", content: "start" },
       ]);
 
@@ -349,13 +349,13 @@ describe("Agent.resume", () => {
 
       try {
         const agent = createAgentWithSubagents({ onNotification });
-        await agent.resume(taskId, "continue");
+        await agent.resume(agentId, "continue");
 
         await waitForNotifications();
 
         const failedCall = notifications.find((n) => n.type === "failed");
         expect(failedCall).toBeDefined();
-        expect(failedCall!.subagentId).toBe(taskId);
+        expect(failedCall!.subagentId).toBe(agentId);
         expect((failedCall as any).error).toBe("agent crashed on resume");
         expect(agent.activeCount).toBe(0);
       } finally {

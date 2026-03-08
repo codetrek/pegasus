@@ -59,12 +59,8 @@ export const use_skill: Tool = {
         }
 
         const body = registry.loadBody(skillName, skillArgs);
-        const taskType = skill.agent || "general";
-        const subagentId = subagentRegistry.submit(body ?? "", "skill:" + skillName, taskType, `Skill: ${skillName}`);
-
-        // Start tick manager to poll for task completion
-        const tick = context.tickManager;
-        if (tick) tick.start();
+        const agentType = skill.agent || "general";
+        const subagentId = subagentRegistry.submit(body ?? "", "skill:" + skillName, agentType, `Skill: ${skillName}`);
 
         return {
           success: true,

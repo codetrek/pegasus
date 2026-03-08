@@ -130,9 +130,6 @@ function createMainAgent(opts: {
   });
   const agent = new MainAgent({ models, persona, settings, injected });
   activeAgents.push(agent);
-  if ('_wireTickToAgent' in injected) {
-    (injected as any)._wireTickToAgent(agent);
-  }
   return agent;
 }
 
@@ -180,62 +177,20 @@ describe("MainAgent", () => {
       return agent;
     }
 
-    it("should start and stop tick", async () => {
+    it("tick should not be running initially", async () => {
       const agent = await createAndStartAgent();
       const tick = agent._tick;
 
-      expect(tick.isRunning()).toBe(false);
-
-      tick.start();
-      expect(tick.isRunning()).toBe(true);
-
-      tick.stop();
       expect(tick.isRunning()).toBe(false);
     }, 10_000);
 
-    it("should be idempotent — multiple starts do not stack", async () => {
+    it("tick.fire() auto-stops when no active subagents", async () => {
       const agent = await createAndStartAgent();
       const tick = agent._tick;
 
-      tick.start();
-      tick.start(); // second start should be no-op
-      expect(tick.isRunning()).toBe(true);
-
-      tick.stop();
-      expect(tick.isRunning()).toBe(false);
-    }, 10_000);
-
-    it("should auto-stop when no active tasks", async () => {
-      const agent = await createAndStartAgent();
-      const tick = agent._tick;
-
-      tick.start();
-      // fire tick with no active tasks — should auto-stop
+      // Manually trigger a tick fire with no active work
       tick.fire();
       expect(tick.isRunning()).toBe(false);
-    }, 10_000);
-
-    it("should inject status message when active tasks exist", async () => {
-      const agent = await createAndStartAgent();
-      const tick = agent._tick;
-      const messagesBefore = tick.sessionMessages.length;
-
-      // Submit a task — it will go through the mock model quickly,
-      // but the task registry may briefly have it. Instead, we test
-      // that fire() with no active tasks auto-stops (covered above),
-      // and that start/stop lifecycle works correctly.
-      tick.start();
-      expect(tick.isRunning()).toBe(true);
-
-      // fire() with no active tasks will auto-stop
-      tick.fire();
-      expect(tick.isRunning()).toBe(false);
-
-      // No status message injected (no active tasks)
-      const tickMessages = tick.sessionMessages.slice(messagesBefore).filter(
-        m => m.content.includes("[System:")
-      );
-      expect(tickMessages).toHaveLength(0);
     }, 10_000);
   });
 
@@ -655,7 +610,7 @@ describe("MainAgent", () => {
   // ── _handleTick with active work ──
 
   describe("tick with active work", () => {
-    it("should inject status message and queue think when active tasks exist", async () => {
+    it("should inject status message and queue think when active subagents exist", async () => {
       const model = createMonologueModel("noted");
       const agent = createMainAgent({ models: createMockModelRegistry(model) });
       await agent.start();
@@ -666,45 +621,35 @@ describe("MainAgent", () => {
       // Stub _think to prevent async side effects (we only test tick message injection)
       (agent as any)._think = async () => {};
 
-      // Mock activeCount to return > 0 (TickManager now reads from Agent)
-      const origActiveCount = Object.getOwnPropertyDescriptor(
-        Object.getPrototypeOf(Object.getPrototypeOf(agent)),
-        "activeCount",
-      ) ?? Object.getOwnPropertyDescriptor(agent, "activeCount");
-      Object.defineProperty(agent, "activeCount", {
-        get: () => 1,
-        configurable: true,
+      // Mock _activeSubagents to simulate running subagents
+      (agent as any)._activeSubagents.set("fake-sa-1", {
+        subagentId: "fake-sa-1",
+        input: "test",
+        agentType: "general",
+        description: "fake",
+        source: "test",
+        startedAt: Date.now(),
+        depth: 0,
       });
 
       const tick = agent._tick;
       const msgsBefore = tick.sessionMessages.length;
 
-      tick.start();
-      tick.fire(); // should trigger _handleTick with activeTasks=1
+      // Fire tick — should inject status since active subagents exist
+      tick.fire();
 
       // Verify status message was injected
       const tickMsgs = tick.sessionMessages.slice(msgsBefore).filter(
         (m: any) => typeof m.content === "string" && m.content.includes("[System:"),
       );
       expect(tickMsgs.length).toBeGreaterThanOrEqual(1);
-      expect(tickMsgs[0]!.content).toContain("1 task(s) running");
+      expect(tickMsgs[0]!.content).toContain("1 subagent(s) running");
 
-      // Restore
-      if (origActiveCount) {
-        Object.defineProperty(agent, "activeCount", origActiveCount);
-      } else {
-        Object.defineProperty(agent, "activeCount", {
-          get: () => 0,
-          configurable: true,
-        });
-      }
+      // Clean up fake subagent
+      (agent as any)._activeSubagents.clear();
 
-      tick.stop();
       await agent.stop();
     }, 10_000);
-
-    // "should include subagent count in tick status" — removed (SubAgentManager deleted,
-    // all work tracked by Agent; TickManager subagent count is always 0).
   });
 
   // ── buildSystemPrompt override ──
@@ -824,7 +769,7 @@ describe("MainAgent", () => {
   // ═══════════════════════════════════════════════════
 
   describe("task notification handling (coverage)", () => {
-    it("should call tickManager.checkShouldStop for completed notifications", async () => {
+    it("should handle completed notifications and inject into session", async () => {
       const model = createMonologueModel("thinking...");
       const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
@@ -853,7 +798,7 @@ describe("MainAgent", () => {
       await agent.stop();
     }, 10_000);
 
-    it("should call tickManager.checkShouldStop for failed notifications", async () => {
+    it("should handle failed notifications and inject into session", async () => {
       const model = createMonologueModel("thinking...");
       const agent = createMainAgent({ models: createMockModelRegistry(model) });
 
@@ -879,7 +824,7 @@ describe("MainAgent", () => {
       await agent.stop();
     }, 10_000);
 
-    it("should NOT call tickManager.checkShouldStop for notify notifications", async () => {
+    it("should handle notify notifications without stopping tick", async () => {
       const model = createMonologueModel("thinking...");
       const agent = createMainAgent({ models: createMockModelRegistry(model) });
 

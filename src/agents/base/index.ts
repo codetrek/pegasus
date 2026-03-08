@@ -24,10 +24,10 @@ export {
 
 // Task execution state
 export {
-  type TaskExecutionState,
+  type AgentExecutionState as TaskExecutionState,
   createTaskState,
-  type CreateTaskStateOptions,
-} from "./task-execution-state.ts";
+  type CreateAgentStateOptions as CreateTaskStateOptions,
+} from "./execution-state.ts";
 
 // Unified Agent
 export {

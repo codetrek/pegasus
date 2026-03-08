@@ -17,7 +17,7 @@ interface IndexEntry {
   subagentId: string;
   date: string;
   description?: string;
-  taskType?: string;
+  agentType?: string;
   source?: string;
 }
 
@@ -71,7 +71,7 @@ export const subagent_list: Tool = {
         .map((e) => ({
           subagentId: e.subagentId,
           description: e.description ?? "",
-          taskType: e.taskType ?? "general",
+          agentType: e.agentType ?? "general",
           source: e.source ?? "",
         }));
 

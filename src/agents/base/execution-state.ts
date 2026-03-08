@@ -8,9 +8,9 @@
 import type { Message } from "../../infra/llm-types.ts";
 import type { ToolCallCollector } from "./tool-call-collector.ts";
 
-export interface TaskExecutionState {
+export interface AgentExecutionState {
   /** Unique task identifier. */
-  taskId: string;
+  agentId: string;
   /** Full message history for LLM calls. */
   messages: Message[];
   /** Current iteration count (number of LLM calls made). */
@@ -31,19 +31,19 @@ export interface TaskExecutionState {
   onComplete?: () => void;
 }
 
-export interface CreateTaskStateOptions {
+export interface CreateAgentStateOptions {
   maxIterations?: number;
   metadata?: Record<string, unknown>;
   onComplete?: () => void;
 }
 
 export function createTaskState(
-  taskId: string,
+  agentId: string,
   messages: Message[],
-  opts?: CreateTaskStateOptions,
-): TaskExecutionState {
+  opts?: CreateAgentStateOptions,
+): AgentExecutionState {
   return {
-    taskId,
+    agentId,
     messages,
     iteration: 0,
     maxIterations: opts?.maxIterations ?? 25,

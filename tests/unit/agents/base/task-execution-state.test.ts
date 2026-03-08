@@ -1,11 +1,11 @@
 import { describe, test, expect } from "bun:test";
-import { createTaskState } from "../../../../src/agents/base/task-execution-state.ts";
+import { createTaskState } from "../../../../src/agents/base/execution-state.ts";
 
 describe("TaskExecutionState", () => {
   test("createTaskState returns correct defaults", () => {
     const state = createTaskState("task-1", [{ role: "user", content: "hello" }]);
 
-    expect(state.taskId).toBe("task-1");
+    expect(state.agentId).toBe("task-1");
     expect(state.messages).toHaveLength(1);
     expect(state.iteration).toBe(0);
     expect(state.maxIterations).toBe(25);

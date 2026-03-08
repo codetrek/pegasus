@@ -15,7 +15,6 @@ import { SubAgentTypeRegistry } from "@pegasus/agents/subagents/index.ts";
 import { ProjectManager } from "@pegasus/projects/manager.ts";
 import { ProjectAdapter } from "@pegasus/projects/project-adapter.ts";
 import { ImageManager } from "@pegasus/media/image-manager.ts";
-import { TickManager } from "@pegasus/agents/tick-manager.ts";
 import { Reflection } from "@pegasus/agents/reflection.ts";
 import { AuthManager } from "@pegasus/agents/auth-manager.ts";
 import { ModelLimitsCache } from "@pegasus/context/index.ts";
@@ -89,20 +88,6 @@ export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubs
     });
   }
 
-  // TickManager — uses mutable agent ref so fire() can call _handleTick
-  // after MainAgent is created.
-  const agentRef: { handleTick?: (t: number, s: number) => void; activeCount?: () => number } = {};
-  const tickManager = new TickManager({
-    getActiveWorkCount: () => ({
-      tasks: agentRef.activeCount?.() ?? 0,
-      subagents: 0,
-    }),
-    hasPendingWork: () => false,
-    onTick: (activeTasks, activeSubAgents) => {
-      agentRef.handleTick?.(activeTasks, activeSubAgents);
-    },
-  });
-
   // Reflection
   const toolRegistry = new ToolRegistry();
   toolRegistry.registerMany(mainAgentTools);
@@ -120,7 +105,7 @@ export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubs
     modelLimitsCache,
   });
 
-  const result: InjectedSubsystems & { _wireTickToAgent: (agent: { _handleTickFromApp: (t: number, s: number) => void; activeCount: number }) => void } = {
+  return {
     modelLimitsCache,
     authManager,
     mcpManager: null,
@@ -131,15 +116,8 @@ export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubs
     projectManager,
     projectAdapter,
     imageManager,
-    tickManager,
     reflectionOrchestrator,
     mcpTools: [],
     ownerStore: new OwnerStore(settings.authDir),
-    _wireTickToAgent: (agent) => {
-      agentRef.handleTick = (t, s) => agent._handleTickFromApp(t, s);
-      agentRef.activeCount = () => agent.activeCount;
-    },
   };
-
-  return result;
 }

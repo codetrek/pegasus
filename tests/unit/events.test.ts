@@ -41,7 +41,7 @@ describe("Event", () => {
     expect(e.type).toBe(EventType.MESSAGE_RECEIVED);
     expect(e.id).toBeTruthy();
     expect(e.timestamp).toBeGreaterThan(0);
-    expect(e.taskId).toBeNull();
+    expect(e.agentId).toBeNull();
     expect(e.payload).toEqual({});
   });
 
@@ -65,13 +65,13 @@ describe("Event", () => {
   test("deriveEvent preserves causality chain", () => {
     const parent = createEvent(EventType.MESSAGE_RECEIVED, {
       source: "user",
-      taskId: "task-1",
+      agentId: "task-1",
     });
     const child = deriveEvent(parent, EventType.REASON_DONE, {
       payload: { result: "ok" },
     });
     expect(child.type).toBe(EventType.REASON_DONE);
-    expect(child.taskId).toBe("task-1");
+    expect(child.agentId).toBe("task-1");
     expect(child.source).toBe("user");
     expect(child.parentEventId).toBe(parent.id);
     expect(child.payload).toEqual({ result: "ok" });

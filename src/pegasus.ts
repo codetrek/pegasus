@@ -34,7 +34,6 @@ import { SubAgentTypeRegistry, loadSubAgentTypeDefinitions } from "./agents/suba
 import { ProjectManager } from "./projects/manager.ts";
 import { ProjectAdapter } from "./projects/project-adapter.ts";
 import { ImageManager } from "./media/image-manager.ts";
-import { TickManager } from "./agents/tick-manager.ts";
 import { Reflection } from "./agents/reflection.ts";
 import { ToolRegistry } from "./agents/tools/registry.ts";
 import { ToolExecutor } from "./agents/tools/executor.ts";
@@ -74,7 +73,6 @@ export class Pegasus {
   private projectManager!: ProjectManager;
   private projectAdapter!: ProjectAdapter;
   private imageManager: ImageManager | null = null;
-  private tickManager!: TickManager;
   private reflectionOrchestrator!: Reflection;
 
   // ── MainAgent ──
@@ -243,8 +241,7 @@ export class Pegasus {
    *   7. (Subagent management — built into Agent)
    *   8. Projects (ProjectManager + ProjectAdapter)
    *   9. ImageManager (already created in constructor based on config)
-   *  10. TickManager
-   *  11. MainAgent (with injected deps)
+   *  10. MainAgent (with injected deps; tick is built-in)
    */
   async start(): Promise<void> {
     if (this._started) {
@@ -368,21 +365,7 @@ export class Pegasus {
     this.projectManager = new ProjectManager(projectsDir);
     this.projectAdapter = new ProjectAdapter();
 
-    // 10. TickManager — uses MainAgent reference via closure
-    this.tickManager = new TickManager({
-      getActiveWorkCount: () => ({
-        tasks: this._mainAgent?.activeCount ?? 0,
-        subagents: 0,  // All work tracked by Agent's subagent management
-      }),
-      hasPendingWork: () => false, // Conservative: let TickManager decide based on active work count
-      onTick: (activeTasks, activeSubAgents) => {
-        if (this._mainAgent) {
-          this._mainAgent._handleTickFromApp(activeTasks, activeSubAgents);
-        }
-      },
-    });
-
-    // 11. Create MainAgent with injected deps (Agent owns subagent management via subagentConfig)
+    // 10. Create MainAgent with injected deps (Agent owns subagent management + tick via subagentConfig)
     const injected: InjectedSubsystems = {
       modelLimitsCache: this.modelLimitsCache,
       authManager: this.authManager,
@@ -394,7 +377,6 @@ export class Pegasus {
       projectManager: this.projectManager,
       projectAdapter: this.projectAdapter,
       imageManager: this.imageManager,
-      tickManager: this.tickManager,
       reflectionOrchestrator: this.reflectionOrchestrator,
       mcpTools: wrappedMcpTools,
       ownerStore: this.ownerStore,
@@ -417,10 +399,10 @@ export class Pegasus {
       this._mainAgent.onReply(this._replyCallback);
     }
 
-    // 12. Start MainAgent (loads session + injects memory + builds prompt)
+    // 11. Start MainAgent (loads session + injects memory + builds prompt)
     await this._mainAgent.start();
 
-    // 13. Set up ProjectAdapter (needs MainAgent.send for forwarding)
+    // 12. Set up ProjectAdapter (needs MainAgent.send for forwarding)
     this.projectAdapter.setModelRegistry(this.models);
     // Add projectAdapter to our adapters list for routing (don't use MainAgent.registerAdapter
     // which would overwrite our reply callback)
@@ -446,7 +428,7 @@ export class Pegasus {
       }
     }
 
-    // 14. Telegram adapter (if configured)
+    // 13. Telegram adapter (if configured)
     const telegramConfig = this.settings.channels?.telegram;
     if (telegramConfig?.enabled && telegramConfig?.token) {
       const storeImageFn = this.getStoreImageFn();
@@ -472,26 +454,22 @@ export class Pegasus {
       await this._mainAgent.stop();
     }
 
-    // 2. Ensure TickManager is stopped — PegasusApp owns it, so we stop it explicitly
-    // even though MainAgent.onStop() also calls tickManager.stop() in injected mode.
-    this.tickManager?.stop();
-
-    // 3. Stop project Workers
+    // 2. Stop project Workers
     await this.projectAdapter.stop();
 
-    // 4. Stop token refresh monitor
+    // 3. Stop token refresh monitor
     if (this.tokenRefreshMonitor) {
       this.tokenRefreshMonitor.stop();
       this.tokenRefreshMonitor = null;
     }
 
-    // 5. Disconnect MCP servers
+    // 4. Disconnect MCP servers
     if (this.mcpManager) {
       await this.mcpManager.disconnectAll();
       this.mcpManager = null;
     }
 
-    // 6. Close ImageManager
+    // 5. Close ImageManager
     if (this.imageManager) {
       this.imageManager.close();
       this.imageManager = null;

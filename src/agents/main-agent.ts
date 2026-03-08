@@ -10,18 +10,21 @@
  *   - Agent auto-runs reflection after compaction via injected Reflection
  *   - Agent auto-injects getMemorySnapshot into ToolContext when memoryDir is set
  *
+ * Tick (periodic status injection) is a built-in Agent capability:
+ *   - Agent auto-starts tick when subagents are spawned
+ *   - Agent auto-stops tick when all subagents complete
+ *   - No external TickManager needed
+ *
  * All infrastructure subsystems (auth, MCP, skills, subagents, etc.) are injected
  * by PegasusApp — MainAgent never self-initializes them.
  *
  * Key overrides:
  *   - buildToolContext()      → calls super() + overrides MainAgent-specific fields
- *   - onStart()/onStop()      → session lifecycle (MCP tools, prompt; tick + drain)
+ *   - onStart()/onStop()      → session lifecycle (MCP tools, prompt; drain)
  *   - getMaxToolResultChars() → truncation budget from model context window
  *   - computeBudgetOptions()  → ModelRegistry-aware compaction budget
- *   - onSubagentNotificationHandled() → tick management (checkShouldStop)
  */
 
-import type { Message } from "../infra/llm-types.ts";
 import type { Persona } from "../identity/persona.ts";
 import { buildSystemPrompt } from "./prompts/index.ts";
 import type { Settings } from "../infra/config.ts";
@@ -39,10 +42,9 @@ import { SubAgentTypeRegistry } from "./subagents/index.ts";
 import { ProjectManager } from "../projects/manager.ts";
 import { ProjectAdapter } from "../projects/project-adapter.ts";
 import { OwnerStore } from "../security/owner-store.ts";
-import { TickManager } from "./tick-manager.ts";
 import { AuthManager } from "./auth-manager.ts";
 import { Reflection } from "./reflection.ts";
-import { Agent, type QueueItem, type SubagentNotificationPayload } from "./agent.ts";
+import { Agent, type QueueItem } from "./agent.ts";
 import { EventBus } from "./events/bus.ts";
 
 // Main Agent's curated tool set
@@ -82,7 +84,6 @@ export interface InjectedSubsystems {
   projectManager: ProjectManager;
   projectAdapter: ProjectAdapter;
   imageManager: ImageManager | null;
-  tickManager: TickManager;
   reflectionOrchestrator: Reflection;
   /** Pre-wrapped MCP tools for MainAgent's tool registry (avoids double-wrapping). */
   mcpTools: Tool[];
@@ -109,7 +110,6 @@ export class MainAgent extends Agent {
   private mainStorePaths: AgentStorePaths;
   private ownerStore: OwnerStore;
   private _systemPrompt: string = "";
-  private tickManager!: TickManager;
 
   /** Injected subsystems from PegasusApp (stored for onStart MCP tool registration). */
   private injected: InjectedSubsystems;
@@ -172,7 +172,6 @@ export class MainAgent extends Agent {
     this.subAgentTypeRegistry = inj.subagentTypeRegistry;
     this.projectManager = inj.projectManager;
     this.projectAdapter = inj.projectAdapter;
-    this.tickManager = inj.tickManager;
   }
 
   // ═══════════════════════════════════════════════════
@@ -201,16 +200,14 @@ export class MainAgent extends Agent {
 
   /** Stop the Main Agent. */
   protected override async onStop(): Promise<void> {
-    // Stop tick timer (prevents new ticks from being queued)
-    this.tickManager.stop();
-
     // Wait for queue to finish processing the current item.
     // isRunning is already false (set by Agent.stop()), so _drainQueue
     // will exit after the current item — no risk of hanging.
+    // Tick is already stopped by Agent.stop() before onStop() is called.
     await this.waitForQueueDrain();
 
     // PegasusApp owns infrastructure shutdown.
-    // MainAgent only needs to stop tick + drain queue (done above).
+    // MainAgent only needs to drain queue (done above).
     logger.info("main_agent_stopped");
   }
 
@@ -231,16 +228,6 @@ export class MainAgent extends Agent {
     };
   }
 
-  /**
-   * Override subagent notification handler for tick management.
-   * Stops tick timer when no more active work (completed/failed, not progress updates).
-   */
-  protected override async onSubagentNotificationHandled(notification: SubagentNotificationPayload): Promise<void> {
-    if (notification.type !== "notify") {
-      this.tickManager.checkShouldStop();
-    }
-  }
-
   // ═══════════════════════════════════════════════════
   // Tool context — rich ToolContext for processStep
   // ═══════════════════════════════════════════════════
@@ -249,8 +236,8 @@ export class MainAgent extends Agent {
    * Build ToolContext by extending the base context with MainAgent-specific fields.
    * Inherits auto-injected fields (memoryDir, onReply, getMemorySnapshot) from Agent.
    */
-  protected override buildToolContext(taskId: string): ToolContext {
-    const ctx = super.buildToolContext(taskId);
+  protected override buildToolContext(agentId: string): ToolContext {
+    const ctx = super.buildToolContext(agentId);
     const imgMgr = this.imageManager;
 
     // MainAgent-specific fields (override/extend base context)
@@ -265,7 +252,6 @@ export class MainAgent extends Agent {
     } : undefined;
     ctx.resolveImage = imgMgr ? (idOrPath: string) => imgMgr.resolve(idOrPath) : undefined;
     ctx.skillRegistry = this.skillRegistry;
-    ctx.tickManager = this.tickManager;
     ctx.onSkillsReloaded = () => {
       this._reloadSkills();
       return this.skillRegistry.listAll().length;
@@ -287,30 +273,6 @@ export class MainAgent extends Agent {
       modelLimitsCache: this.modelLimitsCache,
     });
     return calculateMaxToolResultChars(budget.contextWindow, this.settings.context?.maxToolResultShare);
-  }
-
-  // ═══════════════════════════════════════════════════
-  // Active work tick (callback for TickManager)
-  // ═══════════════════════════════════════════════════
-
-  /**
-   * Tick callback — inject status summary and trigger a think cycle.
-   * Called by TickManager when active work exists and queue is idle.
-   */
-  private _handleTick(activeTasks: number, activeSubAgents: number): void {
-    // Build status summary
-    const parts: string[] = [];
-    if (activeTasks > 0) parts.push(`${activeTasks} task(s) running`);
-    if (activeSubAgents > 0) parts.push(`${activeSubAgents} subagent(s) running`);
-    const summary = `[System: ${parts.join(", ")}. No results yet — you may update the user if appropriate.]`;
-
-    const statusMsg: Message = { role: "user", content: summary };
-    this.sessionMessages.push(statusMsg);
-    this.sessionStore.append(statusMsg, { type: "tick" });
-
-    if (this.lastChannel) {
-      this.pushQueue({ kind: "think", channel: this.lastChannel } as QueueItem);
-    }
   }
 
   // ═══════════════════════════════════════════════════
@@ -409,13 +371,11 @@ export class MainAgent extends Agent {
     return this.ownerStore;
   }
 
-  /** Expose tick internals for testing. */
+  /** Expose tick internals for testing (delegates to Agent's built-in tick). */
   get _tick() {
     return {
-      start: () => this.tickManager.start(),
-      stop: () => this.tickManager.stop(),
-      fire: () => this.tickManager.fire(),
-      isRunning: () => this.tickManager.isRunning,
+      fire: () => this._tickFire(),
+      isRunning: () => this._tickIsRunning,
       sessionMessages: this.sessionMessages,
     };
   }
@@ -429,14 +389,6 @@ export class MainAgent extends Agent {
    */
   pushSubagentNotification(notification: SubagentNotification): void {
     this.pushQueue({ kind: "subagent_notify", notification } as QueueItem);
-  }
-
-  /**
-   * Handle a tick from PegasusApp's TickManager.
-   * Injects status summary and triggers a think cycle.
-   */
-  _handleTickFromApp(activeTasks: number, activeSubAgents: number): void {
-    this._handleTick(activeTasks, activeSubAgents);
   }
 
   /**

@@ -616,11 +616,11 @@ describe("PegasusApp", () => {
   });
 
   // ═══════════════════════════════════════════════════
-  // Coverage: TickManager closures (lines 385-392)
+  // Coverage: Agent internal tick (replaces TickManager)
   // ═══════════════════════════════════════════════════
 
-  describe("TickManager integration (coverage)", () => {
-    it("should fire tick callback through to MainAgent", async () => {
+  describe("Agent internal tick via PegasusApp (coverage)", () => {
+    it("should fire tick through MainAgent tick accessor", async () => {
       const model = createMonologueModel("thinking...");
       const app = new Pegasus({
         models: createMockModelRegistry(model),
@@ -641,13 +641,11 @@ describe("PegasusApp", () => {
 
       await Bun.sleep(50);
 
-      // Verify tick status was injected into session
+      // Verify agent processed the message (tick fires but auto-stops with no active subagents)
       const sessionFile = Bun.file(
         `${testDataDir}/agents/main/session/current.jsonl`,
       );
       const content = await sessionFile.text();
-      // Tick message may say "0 task(s) running" or similar status
-      // Just verify it didn't crash
       expect(content).toContain("hello");
 
       await app.stop();

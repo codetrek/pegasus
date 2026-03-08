@@ -19,7 +19,6 @@ describe("resume_subagent tool", () => {
         resume: async (_id: string, _input: string) => "sa-001",
         ...registryStubs,
       },
-      tickManager: { start: () => {} },
       ...overrides,
     };
   }
@@ -49,20 +48,6 @@ describe("resume_subagent tool", () => {
 
     // Verify resume was called with correct args
     expect(capturedArgs).toEqual(["sa-001", "continue with phase 2"]);
-  });
-
-  it("should start tickManager after resuming", async () => {
-    let tickStarted = false;
-    const ctx = makeContext({
-      tickManager: { start: () => { tickStarted = true; } },
-    });
-
-    await resume_subagent.execute(
-      { subagent_id: "sa-1", input: "go" },
-      ctx,
-    );
-
-    expect(tickStarted).toBe(true);
   });
 
   it("should return error when subagentRegistry is not available", async () => {
@@ -106,34 +91,6 @@ describe("resume_subagent tool", () => {
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain("still running");
-  });
-
-  it("should work without tickManager", async () => {
-    const ctx = makeContext({ tickManager: undefined });
-
-    const result = await resume_subagent.execute(
-      { subagent_id: "sa-1", input: "go" },
-      ctx,
-    );
-    expect(result.success).toBe(true);
-  });
-
-  it("should not start tickManager on error", async () => {
-    let tickStarted = false;
-    const ctx = makeContext({
-      subagentRegistry: {
-        submit: () => "",
-        resume: async () => { throw new Error("fail"); },
-        ...registryStubs,
-      },
-      tickManager: { start: () => { tickStarted = true; } },
-    });
-
-    await resume_subagent.execute(
-      { subagent_id: "sa-1", input: "go" },
-      ctx,
-    );
-    expect(tickStarted).toBe(false);
   });
 
   it("should include timing information", async () => {

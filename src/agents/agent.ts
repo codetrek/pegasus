@@ -42,7 +42,7 @@ import {
   type PendingWorkResult,
 } from "./base/agent-state.ts";
 import { ToolCallCollector, type ToolCallResult } from "./base/tool-call-collector.ts";
-import { createTaskState, type TaskExecutionState, type CreateTaskStateOptions } from "./base/task-execution-state.ts";
+import { createTaskState, type AgentExecutionState as AgentExecutionState, type CreateAgentStateOptions } from "./base/execution-state.ts";
 import { getLogger } from "../infra/logger.ts";
 import { createTokenCounter, type TokenCounter } from "../infra/token-counter.ts";
 import { shortId } from "../infra/id.ts";
@@ -85,7 +85,7 @@ export type SubagentNotification =
 export interface SubagentInfo {
   subagentId: string;
   input: string;
-  taskType: string;
+  agentType: string;
   description: string;
   source: string;
   startedAt: number;
@@ -255,8 +255,8 @@ export class Agent {
   /** How many recent turns to hydrate images for. */
   private _visionKeepLastNTurns: number;
 
-  /** Per-task execution state for event-driven processStep engine. */
-  protected taskStates = new Map<string, TaskExecutionState>();
+  /** Per-subagent execution state for event-driven processStep engine. */
+  protected subagentStates = new Map<string, AgentExecutionState>();
 
   /** Queue for events that arrive while agent is BUSY. */
   private _eventQueue: Event[] = [];
@@ -290,6 +290,12 @@ export class Agent {
   private _activeSubagents = new Map<string, SubagentInfo>();
   private _subagentToolRegistryCache = new Map<string, ToolRegistry>();
   private _additionalTools: Tool[] = [];
+
+  // ── Internal tick (auto-status when subagents are running) ──
+  private _tickTimer: ReturnType<typeof setTimeout> | null = null;
+  private _tickIsFirst = true;
+  private static readonly TICK_FIRST_MS = 30_000;
+  private static readonly TICK_INTERVAL_MS = 60_000;
 
   constructor(deps: AgentDeps) {
     this.agentId = deps.agentId;
@@ -336,6 +342,7 @@ export class Agent {
 
   async stop(): Promise<void> {
     this._running = false;
+    this._stopTick();
     await this.onStop();
     await this.eventBus.stop();
     logger.info({ agentId: this.agentId }, "agent_stopped");
@@ -391,7 +398,7 @@ export class Agent {
     }
 
     try {
-      await this._executeTask(this.agentId, messages, {
+      await this._executeAgent(this.agentId, messages, {
         maxIterations: opts?.maxIterations,
         persist: persistSession,
       });
@@ -410,34 +417,34 @@ export class Agent {
   // ═══════════════════════════════════════════════════
 
   /**
-   * Execute a task to completion: create TaskState → processStep loop → resolve.
+   * Execute an agent to completion: create AgentState → processStep loop → resolve.
    * Shared by run() (one-shot) and _think() (conversation).
    *
-   * @param taskId - unique task identifier
+   * @param agentId - unique agent identifier
    * @param messages - message array (may be shared reference like sessionMessages)
    * @param opts.maxIterations - override max iterations
    * @param opts.persist - enable incremental session persistence via onMessagesAppended
    */
-  private async _executeTask(
-    taskId: string,
+  private async _executeAgent(
+    agentId: string,
     messages: Message[],
     opts?: { maxIterations?: number; persist?: boolean },
   ): Promise<void> {
     if (opts?.persist) {
-      this._persistingTasks.add(taskId);
+      this._persistingTasks.add(agentId);
     }
 
     return new Promise<void>((resolve, reject) => {
-      this.createTaskExecutionState(taskId, messages, {
+      this.createAgentExecutionState(agentId, messages, {
         maxIterations: opts?.maxIterations ?? this.maxIterations,
         onComplete: () => {
-          this._persistingTasks.delete(taskId);
+          this._persistingTasks.delete(agentId);
           resolve();
         },
       });
 
-      this.processStep(taskId).catch((err) => {
-        this._persistingTasks.delete(taskId);
+      this.processStep(agentId).catch((err) => {
+        this._persistingTasks.delete(agentId);
         reject(err);
       });
     });
@@ -517,11 +524,11 @@ export class Agent {
   protected async onPendingWorkComplete(_result: PendingWorkResult): Promise<void> {}
 
   /**
-   * Hook called when new messages are added to task state during processStep.
+   * Hook called when new messages are added to agent state during processStep.
    * Persists messages incrementally for run(persistSession:true) tasks.
    */
-  protected async onMessagesAppended(taskId: string, newMessages: Message[]): Promise<void> {
-    if (this._persistingTasks.has(taskId)) {
+  protected async onMessagesAppended(agentId: string, newMessages: Message[]): Promise<void> {
+    if (this._persistingTasks.has(agentId)) {
       for (const msg of newMessages) {
         await this.sessionStore.append(msg);
       }
@@ -533,7 +540,7 @@ export class Agent {
   // ═══════════════════════════════════════════════════
 
   /** Build the system prompt. Called before each processStep LLM call. */
-  protected buildSystemPrompt(_taskId?: string): string {
+  protected buildSystemPrompt(_agentId?: string): string {
     if (typeof this._systemPromptSource === "function") {
       return this._systemPromptSource();
     }
@@ -553,10 +560,10 @@ export class Agent {
    * Build a ToolContext for tool execution. Subclasses override to inject
    * rich context (memory paths, callbacks, managers) for their tool set.
    *
-   * Default: minimal context with taskId + storeImage + injected toolContext.
+   * Default: minimal context with agentId + storeImage + injected toolContext.
    */
-  protected buildToolContext(taskId: string): ToolContext {
-    const ctx: ToolContext = { agentId: taskId };
+  protected buildToolContext(agentId: string): ToolContext {
+    const ctx: ToolContext = { agentId: agentId };
     if (this._storeImage) ctx.storeImage = this._storeImage;
     // Merge injected toolContext fields
     if (this._injectedToolContext) {
@@ -596,23 +603,23 @@ export class Agent {
    * Execute one LLM turn: call LLM, then dispatch tools (fire-and-forget) or complete.
    * NON-BLOCKING: returns after dispatching tools. Next turn triggered by _onAllToolsDone.
    */
-  protected async processStep(taskId: string): Promise<void> {
-    const state = this.taskStates.get(taskId);
+  protected async processStep(agentId: string): Promise<void> {
+    const state = this.subagentStates.get(agentId);
     if (!state || state.aborted) return;
 
     if (state.iteration >= state.maxIterations) {
-      await this.onTaskComplete(taskId, "", "max_iterations");
+      await this.onTaskComplete(agentId, "", "max_iterations");
       return;
     }
 
     this.stateManager.markBusy();
-    await this.beforeLLMCall(taskId);
+    await this.beforeLLMCall(agentId);
 
     const tools = this.getTools();
 
     try {
       const result = await this.model.generate({
-        system: this.buildSystemPrompt(taskId),
+        system: this.buildSystemPrompt(agentId),
         messages: state.messages,
         tools: tools.length ? tools : undefined,
         toolChoice: tools.length ? "auto" : undefined,
@@ -625,17 +632,17 @@ export class Agent {
       await this.onLLMUsage(result);
       this._overflowRetryCount = 0; // Reset on successful LLM call
 
-      // No tool calls → task complete
+      // No tool calls → agent complete
       if (!result.toolCalls?.length) {
         const assistantMsg: Message = { role: "assistant", content: result.text ?? "" };
         state.messages.push(assistantMsg);
-        await this.onMessagesAppended(taskId, [assistantMsg]);
+        await this.onMessagesAppended(agentId, [assistantMsg]);
         await this.eventBus.emit(createEvent(EventType.STEP_COMPLETED, {
-          source: this.agentId, taskId,
+          source: this.agentId, agentId: agentId,
           payload: { iteration: state.iteration, hasToolCalls: false },
         }));
         this.stateManager.markIdle();
-        await this.onTaskComplete(taskId, result.text, "complete");
+        await this.onTaskComplete(agentId, result.text, "complete");
         return;
       }
 
@@ -646,10 +653,10 @@ export class Agent {
         toolCalls: result.toolCalls,
       };
       state.messages.push(assistantMsg);
-      await this.onMessagesAppended(taskId, [assistantMsg]);
+      await this.onMessagesAppended(agentId, [assistantMsg]);
 
       await this.eventBus.emit(createEvent(EventType.STEP_COMPLETED, {
-        source: this.agentId, taskId,
+        source: this.agentId, agentId: agentId,
         payload: { iteration: state.iteration, hasToolCalls: true, toolCount: result.toolCalls.length },
       }));
 
@@ -657,29 +664,29 @@ export class Agent {
       const collector = new ToolCallCollector(
         result.toolCalls.length,
         () => {
-          this._onAllToolsDone(taskId).catch((err) => {
-            logger.error({ err, taskId, agentId: this.agentId }, "all_tools_done_error");
+          this._onAllToolsDone(agentId).catch((err) => {
+            logger.error({ err, agentId: agentId }, "all_tools_done_error");
             this.stateManager.markIdle();
-            this.onTaskComplete(taskId, "", "error").catch(() => {});
+            this.onTaskComplete(agentId, "", "error").catch(() => {});
           });
         },
       );
       state.activeCollector = collector;
 
       for (let i = 0; i < result.toolCalls.length; i++) {
-        this._executeToolAsync(taskId, result.toolCalls[i]!, i, collector);
+        this._executeToolAsync(agentId, result.toolCalls[i]!, i, collector);
       }
 
       this.stateManager.markIdle();
       // Return immediately — _onAllToolsDone will trigger next step
     } catch (err) {
       this.stateManager.markIdle();
-      const shouldRetry = await this.onLLMError(taskId, err);
+      const shouldRetry = await this.onLLMError(agentId, err);
       if (shouldRetry) {
-        await this.processStep(taskId);
+        await this.processStep(agentId);
       } else {
-        logger.error({ err, taskId, agentId: this.agentId }, "process_step_error");
-        await this.onTaskComplete(taskId, "", "error");
+        logger.error({ err, agentId: agentId }, "process_step_error");
+        await this.onTaskComplete(agentId, "", "error");
       }
     }
   }
@@ -688,17 +695,17 @@ export class Agent {
    * Called by ToolCallCollector when all tools in a batch complete.
    * Appends results to messages, then triggers next processStep.
    */
-  private async _onAllToolsDone(taskId: string): Promise<void> {
-    const state = this.taskStates.get(taskId);
+  private async _onAllToolsDone(agentId: string): Promise<void> {
+    const state = this.subagentStates.get(agentId);
     if (!state) return;
 
     // Check abort
     if (state.aborted) {
       await this.eventBus.emit(createEvent(EventType.TASK_SUSPENDED, {
-        source: this.agentId, taskId,
+        source: this.agentId, agentId: agentId,
         payload: { reason: "externally suspended" },
       }));
-      await this.onTaskComplete(taskId, "", "interrupted");
+      await this.onTaskComplete(agentId, "", "interrupted");
       return;
     }
 
@@ -714,10 +721,10 @@ export class Agent {
       state.messages.push(msg);
       newMessages.push(msg);
     }
-    await this.onMessagesAppended(taskId, newMessages);
+    await this.onMessagesAppended(agentId, newMessages);
 
     // Trigger next LLM call
-    await this.processStep(taskId);
+    await this.processStep(agentId);
   }
 
   /**
@@ -726,13 +733,13 @@ export class Agent {
    * Includes result formatting: string coercion, timestamp prefix, and truncation.
    */
   private _executeToolAsync(
-    taskId: string,
+    agentId: string,
     tc: ToolCall,
     index: number,
     collector: ToolCallCollector,
   ): void {
     (async () => {
-      const state = this.taskStates.get(taskId);
+      const state = this.subagentStates.get(agentId);
       if (state?.aborted) {
         collector.addResult(index, {
           toolCallId: tc.id,
@@ -741,7 +748,7 @@ export class Agent {
         return;
       }
 
-      const ctx = this.buildToolContext(taskId);
+      const ctx = this.buildToolContext(agentId);
       const result = await this.toolExecutor.execute(
         tc.name,
         tc.arguments,
@@ -762,7 +769,7 @@ export class Agent {
 
       collector.addResult(index, toolResult);
     })().catch((err) => {
-      logger.error({ err, taskId, toolName: tc.name }, "execute_tool_async_error");
+      logger.error({ err, agentId, toolName: tc.name }, "execute_tool_async_error");
       collector.addResult(index, {
         toolCallId: tc.id,
         content: JSON.stringify({ error: err instanceof Error ? err.message : String(err) }),
@@ -775,11 +782,11 @@ export class Agent {
   // ═══════════════════════════════════════════════════
 
   protected async onTaskComplete(
-    taskId: string,
+    agentId: string,
     text: string,
     finishReason: "complete" | "max_iterations" | "interrupted" | "error",
   ): Promise<void> {
-    const state = this.taskStates.get(taskId);
+    const state = this.subagentStates.get(agentId);
 
     // Collect unique image refs from tool result messages
     const imageRefs: Array<{ id: string; mimeType: string }> = [];
@@ -817,7 +824,7 @@ export class Agent {
         success ? EventType.TASK_COMPLETED : EventType.TASK_FAILED,
         {
           source: this.agentId,
-          taskId,
+          agentId: agentId,
           payload: { result: text, finishReason },
         },
       ),
@@ -827,7 +834,7 @@ export class Agent {
     state?.onComplete?.();
 
     // Cleanup
-    this.removeTaskState(taskId);
+    this.removeAgentState(agentId);
   }
 
   // ═══════════════════════════════════════════════════
@@ -838,18 +845,18 @@ export class Agent {
    * Hook called before each LLM call.
    * Hydrates images and checks token budget for compaction.
    */
-  protected async beforeLLMCall(taskId: string): Promise<void> {
-    await this.hydrateImagesForLLM(taskId);
-    await this.compactIfNeeded(taskId);
+  protected async beforeLLMCall(agentId: string): Promise<void> {
+    await this.hydrateImagesForLLM(agentId);
+    await this.compactIfNeeded(agentId);
   }
 
   /**
-   * Hydrate image references in task messages for LLM consumption.
+   * Hydrate image references in agent messages for LLM consumption.
    * Uses the ImageManager (with built-in caching) injected via AgentDeps.
    */
-  protected async hydrateImagesForLLM(taskId: string): Promise<void> {
+  protected async hydrateImagesForLLM(agentId: string): Promise<void> {
     if (!this.imageManager) return;
-    const state = this.taskStates.get(taskId);
+    const state = this.subagentStates.get(agentId);
     if (!state) return;
 
     const imgMgr = this.imageManager;
@@ -868,8 +875,8 @@ export class Agent {
   /**
    * Check token budget and trigger compaction if messages exceed threshold.
    */
-  protected async compactIfNeeded(taskId: string): Promise<void> {
-    const state = this.taskStates.get(taskId);
+  protected async compactIfNeeded(agentId: string): Promise<void> {
+    const state = this.subagentStates.get(agentId);
     if (!state || state.messages.length < 8) return;
 
     // Use actual token count from last API response when available;
@@ -890,7 +897,7 @@ export class Agent {
 
     if (estimatedTokens < budget.compactTrigger) return;
 
-    await this._compactState(taskId);
+    await this._compactState(agentId);
   }
 
   /**
@@ -910,43 +917,43 @@ export class Agent {
   /**
    * Hook called when LLM call fails in processStep.
    * Returns true to retry processStep on context overflow (after compaction),
-   * false to fail the task.
+   * false to fail the agent.
    */
-  protected async onLLMError(taskId: string, error: unknown): Promise<boolean> {
+  protected async onLLMError(agentId: string, error: unknown): Promise<boolean> {
     if (!isContextOverflowError(error)) return false;
     if (this._overflowRetryCount >= MAX_OVERFLOW_COMPACT_RETRIES) return false;
 
     this._overflowRetryCount++;
-    await this._compactState(taskId);
+    await this._compactState(agentId);
     return true;
   }
 
   /** Create and register a TaskExecutionState. */
-  protected createTaskExecutionState(
-    taskId: string,
+  protected createAgentExecutionState(
+    agentId: string,
     messages: Message[],
-    opts?: CreateTaskStateOptions,
-  ): TaskExecutionState {
-    const state = createTaskState(taskId, messages, {
+    opts?: CreateAgentStateOptions,
+  ): AgentExecutionState {
+    const state = createTaskState(agentId, messages, {
       maxIterations: opts?.maxIterations ?? this.maxIterations,
       ...opts,
     });
-    this.taskStates.set(taskId, state);
+    this.subagentStates.set(agentId, state);
     return state;
   }
 
-  /** Remove a task execution state. */
-  protected removeTaskState(taskId: string): void {
-    this.taskStates.delete(taskId);
+  /** Remove a agent execution state. */
+  protected removeAgentState(agentId: string): void {
+    this.subagentStates.delete(agentId);
   }
 
   /**
-   * Compact the message history for a task: summarize, archive, and reload.
+   * Compact the message history for a agent: summarize, archive, and reload.
    * Falls back to mechanical summary if LLM summarization fails.
    * After compaction, calls onCompacted() hook for post-compact actions.
    */
-  protected async _compactState(taskId: string): Promise<void> {
-    const state = this.taskStates.get(taskId);
+  protected async _compactState(agentId: string): Promise<void> {
+    const state = this.subagentStates.get(agentId);
     if (!state) return;
 
     const preCompactMessages = [...state.messages];
@@ -972,7 +979,7 @@ export class Agent {
     this.imageManager?.clearCache();
 
     logger.info(
-      { taskId, agentId: this.agentId },
+      { agentId },
       "state_compacted",
     );
 
@@ -1126,38 +1133,34 @@ export class Agent {
       this.pushQueue({ kind: "think", channel: lastChannel } as QueueItem);
     }
 
-    // Hook for tick management via callback or override
-    await this.onSubagentNotificationHandled(notification);
+    // Auto-stop tick when no active subagents remain (skip for progress updates)
+    if (notification.type !== "notify") {
+      this._checkStopTick();
+    }
   }
-
-  /**
-   * Hook called after subagent notification is handled.
-   * Subclasses override for tick management (e.g. checkShouldStop).
-   */
-  protected async onSubagentNotificationHandled(_notification: SubagentNotificationPayload): Promise<void> {}
 
   /**
    * Run thinking — delegates to _executeTask with session messages.
    * Session persistence is always enabled for conversation mode.
    */
   protected async _think(_channel: ChannelInfo): Promise<void> {
-    await this._executeTask("session", this.sessionMessages, { persist: true });
+    await this._executeAgent("session", this.sessionMessages, { persist: true });
   }
 
   // ═══════════════════════════════════════════════════
-  // EventBus (child task completion events)
+  // EventBus (child agent completion events)
   // ═══════════════════════════════════════════════════
 
   protected subscribeEvents(): void {
-    // Subscribe to child task completions (conversation-mode)
+    // Subscribe to child agent completions (conversation-mode)
     this.eventBus.subscribe(EventType.TASK_COMPLETED, async (event) => {
-      if (event.taskId && this.stateManager.pendingWork.has(event.taskId)) {
+      if (event.agentId && this.stateManager.pendingWork.has(event.agentId)) {
         this.queueEvent(event);
       }
     });
 
     this.eventBus.subscribe(EventType.TASK_FAILED, async (event) => {
-      if (event.taskId && this.stateManager.pendingWork.has(event.taskId)) {
+      if (event.agentId && this.stateManager.pendingWork.has(event.agentId)) {
         this.queueEvent(event);
       }
     });
@@ -1168,7 +1171,7 @@ export class Agent {
       // Child completion events
       case EventType.TASK_COMPLETED:
       case EventType.TASK_FAILED: {
-        const childId = event.taskId;
+        const childId = event.agentId;
         if (!childId) break;
 
         // Conversation mode: inject child result into session + trigger thinking
@@ -1321,6 +1324,89 @@ export class Agent {
   }
 
   // ═══════════════════════════════════════════════════
+  // Internal Tick — auto-status when subagents are running
+  // ═══════════════════════════════════════════════════
+
+  /** Start tick timer if not already running. Called automatically by _runSubagent(). */
+  private _startTick(): void {
+    if (this._tickTimer) return;
+    this._tickIsFirst = true;
+    this._scheduleTick();
+    logger.info({ agentId: this.agentId }, "tick_started");
+  }
+
+  /** Stop tick timer. */
+  private _stopTick(): void {
+    if (!this._tickTimer) return;
+    clearTimeout(this._tickTimer);
+    this._tickTimer = null;
+    this._tickIsFirst = true;
+    logger.info({ agentId: this.agentId }, "tick_stopped");
+  }
+
+  /** Stop tick if no active subagents remain. */
+  private _checkStopTick(): void {
+    if (this._activeSubagents.size === 0) {
+      this._stopTick();
+    }
+  }
+
+  private _scheduleTick(): void {
+    const delay = this._tickIsFirst ? Agent.TICK_FIRST_MS : Agent.TICK_INTERVAL_MS;
+    this._tickTimer = setTimeout(() => this._onTick(), delay);
+  }
+
+  private _onTick(): void {
+    this._tickTimer = null;
+
+    if (this._activeSubagents.size === 0) {
+      this._stopTick();
+      return;
+    }
+
+    // Skip if queue has pending work (avoid stale status before real results)
+    if (this.queue.length > 0) {
+      this._scheduleTick();
+      return;
+    }
+
+    // Inject status into session
+    this._onTickFired(this._activeSubagents.size);
+
+    this._tickIsFirst = false;
+    this._scheduleTick();
+  }
+
+  /**
+   * Called on each tick. Injects status summary into session queue so LLM
+   * gets a chance to respond (e.g. update the user, check subagent status).
+   * Subclasses can override for custom tick behavior.
+   */
+  protected _onTickFired(activeSubagentCount: number): void {
+    const summary = `[System: ${activeSubagentCount} subagent(s) running. No results yet — you may update the user if appropriate.]`;
+
+    const statusMsg: Message = { role: "user", content: summary };
+    this.sessionMessages.push(statusMsg);
+    this.sessionStore.append(statusMsg, { type: "tick" });
+
+    if (this.lastChannel) {
+      this.pushQueue({ kind: "think", channel: this.lastChannel } as QueueItem);
+    }
+  }
+
+  /** Whether the tick timer is currently running. */
+  get _tickIsRunning(): boolean {
+    return this._tickTimer !== null;
+  }
+
+  /**
+   * Fire a tick immediately (for testing). Equivalent to the timer callback firing.
+   */
+  _tickFire(): void {
+    this._onTick();
+  }
+
+  // ═══════════════════════════════════════════════════
   // Subagent Management (SubagentRegistryLike implementation)
   // ═══════════════════════════════════════════════════
 
@@ -1333,7 +1419,7 @@ export class Agent {
   submit(
     input: string,
     source: string,
-    taskType: string,
+    agentType: string,
     description: string,
     opts?: SubagentSubmitOpts,
   ): string {
@@ -1351,12 +1437,12 @@ export class Agent {
       effectiveInput = `[Available Memory]\n${opts.memorySnapshot}\n\n---\n\n${input}`;
     }
 
-    const toolRegistry = this._getSubagentToolRegistry(taskType, depth);
+    const toolRegistry = this._getSubagentToolRegistry(agentType, depth);
     const dateStr = new Date().toISOString().slice(0, 10);
     const sessionDir = path.join(config.subagentsDir, dateStr, subagentId);
 
     // Resolve model: SubAgentType's model field → resolveModel callback → parent's model
-    const typeModel = config.subagentTypeRegistry.getModel(taskType);
+    const typeModel = config.subagentTypeRegistry.getModel(agentType);
     const model = (typeModel && config.resolveModel)
       ? config.resolveModel(typeModel)
       : this.model;
@@ -1367,7 +1453,7 @@ export class Agent {
       toolRegistry,
       systemPrompt: this._buildSubagentPrompt(
         description,
-        config.subagentTypeRegistry.getPrompt(taskType),
+        config.subagentTypeRegistry.getPrompt(agentType),
         depth,
       ),
       sessionDir,
@@ -1382,21 +1468,21 @@ export class Agent {
     });
 
     // Write subagent index entry (for subagent_list tool)
-    this._appendSubagentIndex(subagentId, dateStr, { description, taskType, source, depth }).catch((err) => {
+    this._appendSubagentIndex(subagentId, dateStr, { description, agentType, source, depth }).catch((err) => {
       logger.warn({ subagentId, err }, "subagent_index_append_failed");
     });
 
     const info: SubagentInfo = {
       subagentId,
       input: effectiveInput,
-      taskType,
+      agentType: agentType,
       description,
       source,
       startedAt: Date.now(),
       depth,
     };
 
-    this._runSubagent(agent, subagentId, effectiveInput, taskType, info);
+    this._runSubagent(agent, subagentId, effectiveInput, agentType, info);
 
     return subagentId;
   }
@@ -1410,7 +1496,7 @@ export class Agent {
   async resume(
     subagentId: string,
     newInput: string,
-    taskType?: string,
+    agentType?: string,
     description?: string,
   ): Promise<string> {
     if (!this._subagentConfig) {
@@ -1433,7 +1519,7 @@ export class Agent {
     const sessionStore = new SessionStore(sessionDir);
     await sessionStore.append({ role: "user", content: newInput });
 
-    const resolvedType = taskType ?? entry.taskType ?? "general";
+    const resolvedType = agentType ?? entry.agentType ?? "general";
     const resolvedDescription = description ?? `Resumed subagent ${subagentId}`;
     const depth = entry.depth ?? 0;
     const toolRegistry = this._getSubagentToolRegistry(resolvedType, depth);
@@ -1466,7 +1552,7 @@ export class Agent {
     const info: SubagentInfo = {
       subagentId,
       input: newInput,
-      taskType: resolvedType,
+      agentType: resolvedType,
       description: resolvedDescription,
       source: "resume",
       startedAt: Date.now(),
@@ -1515,13 +1601,14 @@ export class Agent {
     agent: Agent,
     subagentId: string,
     input: string,
-    taskType: string,
+    agentType: string,
     info: SubagentInfo,
   ): void {
     if (!this._subagentConfig) return;
     const config = this._subagentConfig;
 
     this._activeSubagents.set(subagentId, info);
+    this._startTick();
 
     agent
       .run(input, { persistSession: true })
@@ -1542,7 +1629,7 @@ export class Agent {
           });
         }
         logger.info(
-          { subagentId, taskType, success: result.success, llmCalls: result.llmCallCount },
+          { subagentId, agentType: agentType, success: result.success, llmCalls: result.llmCallCount },
           "subagent_completed",
         );
       })
@@ -1554,7 +1641,7 @@ export class Agent {
           subagentId,
           error: errorMsg,
         });
-        logger.error({ subagentId, taskType, err }, "subagent_error");
+        logger.error({ subagentId, agentType: agentType, err }, "subagent_error");
       });
   }
 
@@ -1562,16 +1649,16 @@ export class Agent {
    * Read the subagent index file (index.jsonl) and return a map of subagentId → entry.
    * Returns an empty map if the file does not exist.
    */
-  private async _loadSubagentIndex(): Promise<Map<string, { date: string; depth?: number; taskType?: string }>> {
+  private async _loadSubagentIndex(): Promise<Map<string, { date: string; depth?: number; agentType?: string }>> {
     if (!this._subagentConfig) return new Map();
     const indexPath = path.join(this._subagentConfig.subagentsDir, "index.jsonl");
-    const map = new Map<string, { date: string; depth?: number; taskType?: string }>();
+    const map = new Map<string, { date: string; depth?: number; agentType?: string }>();
     try {
       const content = await readFile(indexPath, "utf-8");
       const lines = content.trim().split("\n").filter(Boolean);
       for (const line of lines) {
-        const entry = JSON.parse(line) as { subagentId: string; date: string; depth?: number; taskType?: string };
-        map.set(entry.subagentId, { date: entry.date, depth: entry.depth, taskType: entry.taskType });
+        const entry = JSON.parse(line) as { subagentId: string; date: string; depth?: number; agentType?: string };
+        map.set(entry.subagentId, { date: entry.date, depth: entry.depth, agentType: entry.agentType });
       }
     } catch {
       // File doesn't exist or unreadable — return empty map
@@ -1587,18 +1674,18 @@ export class Agent {
    * When depth === 0, spawn_subagent and resume_subagent are added
    * (L1 agents can spawn L2 sub-agents). depth >= 1 agents cannot.
    */
-  private _getSubagentToolRegistry(taskType: string, depth: number = 0): ToolRegistry {
+  private _getSubagentToolRegistry(agentType: string, depth: number = 0): ToolRegistry {
     if (!this._subagentConfig) {
       throw new Error("Agent not configured for subagent management (missing subagentConfig)");
     }
     const config = this._subagentConfig;
 
-    const cacheKey = `${taskType}:d${depth}`;
+    const cacheKey = `${agentType}:d${depth}`;
     const cached = this._subagentToolRegistryCache.get(cacheKey);
     if (cached) return cached;
 
     const registry = new ToolRegistry();
-    const toolNames = config.subagentTypeRegistry.getToolNames(taskType);
+    const toolNames = config.subagentTypeRegistry.getToolNames(agentType);
     const toolNameSet = new Set(toolNames);
 
     // Inherit tools from parent — filtered by SubAgentType's tool list.
@@ -1665,14 +1752,14 @@ export class Agent {
   private async _appendSubagentIndex(
     subagentId: string,
     date: string,
-    meta?: { description?: string; taskType?: string; source?: string; depth?: number },
+    meta?: { description?: string; agentType?: string; source?: string; depth?: number },
   ): Promise<void> {
     if (!this._subagentConfig) return;
     await mkdir(this._subagentConfig.subagentsDir, { recursive: true });
     const indexPath = path.join(this._subagentConfig.subagentsDir, "index.jsonl");
     const entry: Record<string, string | number> = { subagentId, date };
     if (meta?.description) entry.description = meta.description;
-    if (meta?.taskType) entry.taskType = meta.taskType;
+    if (meta?.agentType) entry.agentType = meta.agentType;
     if (meta?.source) entry.source = meta.source;
     if (meta?.depth !== undefined) entry.depth = meta.depth;
     const line = JSON.stringify(entry) + "\n";

@@ -171,10 +171,6 @@ function createMainAgent(opts: {
   });
   const agent = new MainAgent({ models, persona, settings, injected });
   activeAgents.push(agent);
-  // Wire TickManager to call agent._handleTickFromApp when tick fires
-  if ('_wireTickToAgent' in injected) {
-    (injected as any)._wireTickToAgent(agent);
-  }
   return agent;
 }
 
@@ -695,9 +691,9 @@ describe("MainAgent", () => {
           }
           if (mainCallCount === 2) {
             // After task completion notification: resume the task
-            // Extract taskId from session messages
+            // Extract agentId from session messages
             const toolMsgs = (options.messages ?? []).filter(
-              (m: Message) => m.role === "tool" && m.content.includes("taskId"),
+              (m: Message) => m.role === "tool" && m.content.includes("agentId"),
             );
             if (toolMsgs.length > 0) {
               try {
@@ -705,7 +701,7 @@ describe("MainAgent", () => {
                 const content = toolMsgs[0]!.content;
                 const jsonLine = content.split("\n").find((l: string) => l.startsWith("{")) ?? content;
                 const parsed = JSON.parse(jsonLine);
-                spawnedTaskId = parsed.taskId;
+                spawnedTaskId = parsed.agentId;
               } catch { /* ignore */ }
             }
             if (spawnedTaskId) {
