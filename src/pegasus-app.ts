@@ -195,6 +195,19 @@ export class PegasusApp {
       } else {
         logger.warn({ channel: msg.channel.type }, "no_adapter_for_channel");
       }
+
+      // Mirror all non-cli messages to cli adapter (TUI console shows everything)
+      if (msg.channel.type !== "cli") {
+        const cli = this._adapters.find((a) => a.type === "cli");
+        if (cli) {
+          cli.deliver(msg).catch((err) =>
+            logger.error(
+              { channel: msg.channel.type, error: errorToString(err) },
+              "cli_mirror_failed",
+            ),
+          );
+        }
+      }
     };
     this._replyCallback = routingCallback;
 

@@ -1,16 +1,25 @@
 /**
  * InputBar — bottom input prompt with real text input.
  *
- * Uses opentui's <textarea> (not <input>) in uncontrolled mode, same as opencode.
- * On submit, reads plainText from ref and clears. opentui manages its own buffer.
+ * Uses opentui's <textarea> in uncontrolled mode (same as opencode).
+ * On submit, reads plainText from ref and clears.
+ *
+ * Focus is deferred 500ms after mount to avoid capturing terminal
+ * capability response sequences (DA, DECRPM, pixel resolution) that
+ * opentui's input pipeline leaks as individual character keypresses
+ * when textarea is focused during renderer initialization.
  */
-import { Show } from "solid-js"
+import { Show, onMount } from "solid-js"
 import type { TextareaRenderable } from "@opentui/core"
 import { THEME } from "../theme.tsx"
 import { sendInput, statusHint } from "../store.ts"
 
 export function InputBar() {
   let inputRef: TextareaRenderable
+
+  onMount(() => {
+    setTimeout(() => inputRef?.focus(), 500)
+  })
 
   function submit() {
     if (!inputRef) return
@@ -34,7 +43,6 @@ export function InputBar() {
         ref={(r: TextareaRenderable) => { inputRef = r }}
         onSubmit={submit}
         placeholder="Type a message... (/help for commands)"
-        focused={true}
         minHeight={1}
         maxHeight={4}
         backgroundColor={THEME.bgPanel}

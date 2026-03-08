@@ -10,7 +10,7 @@ import type {
   InboundMessage,
   OutboundMessage,
 } from "./types.ts";
-import { addMessage, setOnSend, clearOnSend } from "../tui/store.ts";
+import { addMessage, setOnSend, clearOnSend, getCurrentAgent } from "../tui/store.ts";
 
 /** Handle slash commands. Returns true if handled, "exit" to quit. */
 function handleCommand(input: string): boolean | "exit" {
@@ -68,7 +68,7 @@ export class TuiAdapter implements ChannelAdapter {
       // Forward to agent
       agent.send({
         text: trimmed,
-        channel: { type: "cli", channelId: "main" },
+        channel: { type: "cli", channelId: getCurrentAgent() },
       });
     });
   }

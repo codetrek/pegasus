@@ -16,7 +16,7 @@ import { initLogger } from "./infra/logger.ts";
 import { ModelRegistry } from "./infra/model-registry.ts";
 import { TuiAdapter } from "./channels/tui-adapter.ts";
 import { renderApp } from "./tui/main.tsx";
-import { setOnShutdown } from "./tui/store.ts";
+import { setOnShutdown, loadMessages } from "./tui/store.ts";
 
 /** Start the TUI with full PegasusApp backend. */
 export async function startTUI(): Promise<void> {
@@ -57,8 +57,11 @@ export async function startTUI(): Promise<void> {
   // Wire input routing
   await tuiAdapter.start({ send: (msg) => app.routeMessage(msg) });
 
+  // Load session history from MainAgent's in-memory messages
+  loadMessages("main", app.mainAgent.messages);
+
   // Render TUI — blocks (opentui event loop)
-  // Disable opentui's built-in Ctrl+C handler; we manage exit ourselves (double Ctrl+C).
+  // exitOnCtrlC: false — we manage exit ourselves via useKeyboard double Ctrl+C
   renderApp({ exitOnCtrlC: false });
 }
 
