@@ -62,7 +62,6 @@ export interface ProjectManagerLike {
   get(name: string): { name: string; projectDir: string } | null;
   disable(name: string): void;
   enable(name: string): void;
-  complete(name: string): void;
   archive(name: string): void;
 }
 

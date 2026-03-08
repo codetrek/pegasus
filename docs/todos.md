@@ -124,16 +124,15 @@ Tracked features, improvements, and ideas — what's done and what's next.
   - Remaining: TaskRunner is still a flat tracker (not hierarchical tree). If needed later, can add parent-child tracking.
 
 ### ToolContext Redesign
-- [ ] ToolContext is a god bag — 16 optional fields, 10 typed as `unknown`
-  - Current: flat interface with all fields optional, tools do `as SomeLike` type assertions internally
-  - Problem: no type safety, every field is MainAgent-specific coupling, `Object.assign` on every tool call
-  - Options:
-    - A) Simplify to `Record<string, unknown>` (honest bag, tools declare what they need)
-    - B) Typed per-tool context via generics or intersection types
-  - Done: `subAgentManager` field removed (SubAgentManager deleted)
-  - Also: `userId`, `allowedPaths` fields are never set — dead fields
-  - Also: `storeImage` callback should move to ImageManager (already has `store()`)
-  - Related: Agent.buildToolContext() and MainAgent.buildToolContext() can be simplified once ToolContext is cleaner
+- [x] ToolContext Like interfaces extracted to shared `src/tools/tool-context.ts`
+  - Done: 10 `unknown` fields → properly typed with Like interfaces
+  - Done: Dead `userId` field removed
+  - Done: ~15 local Like interface duplicates across 8 tool files → centralized
+  - Done: ~15 `as XxxLike` type assertions in tools → zero (direct field access)
+  - Done: `isTaskRunner` runtime type guard removed from task_status tool
+  - Done: TaskRegistryLike extended with getStatus/listAll/activeCount
+  - Remaining: `storeImage` callback could move to ImageManager (low priority)
+  - Remaining: Consider further simplification of buildToolContext() injection pattern
 
 ### Unified spawn_subagent
 - [x] spawn_task and spawn_subagent merged into single `spawn_subagent` tool
