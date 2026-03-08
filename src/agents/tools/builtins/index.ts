@@ -224,21 +224,32 @@ export const subAgentWorkerTools: Tool[] = [
   subagent_status,
 ];
 
-/** Tools for Main Agent (curated simple tools + spawn_subagent + resume_subagent + reply + project tools). */
+/** Tools for Main Agent — file tools + memory + delegation + projects + security. */
 export const mainAgentTools: Tool[] = [
   current_time,
+  // File tools — fast local operations, MainAgent handles directly
+  read_file,
+  write_file,
+  list_files,
+  edit_file,
+  grep_files,
+  glob_files,
+  // Memory
   memory_list,
   memory_read,
   memory_write,
   memory_patch,
   memory_append,
+  // Subagent management
   subagent_list,
   subagent_status,
   session_archive_read,
   image_read,
   spawn_subagent,
   resume_subagent,
+  // Communication
   reply,
+  // Skills & projects & security
   use_skill,
   reload_skills,
   create_project,
