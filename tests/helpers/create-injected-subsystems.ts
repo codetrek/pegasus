@@ -17,7 +17,7 @@ import { ProjectManager } from "@pegasus/projects/manager.ts";
 import { ProjectAdapter } from "@pegasus/projects/project-adapter.ts";
 import { ImageManager } from "@pegasus/media/image-manager.ts";
 import { TickManager } from "@pegasus/agents/tick-manager.ts";
-import { ReflectionOrchestrator } from "@pegasus/agents/reflection-orchestrator.ts";
+import { Reflection } from "@pegasus/agents/reflection.ts";
 import { AuthManager } from "@pegasus/agents/auth-manager.ts";
 import { ModelLimitsCache } from "@pegasus/context/index.ts";
 import { ToolRegistry } from "@pegasus/tools/registry.ts";
@@ -32,7 +32,7 @@ export interface CreateInjectedOpts {
   models: ModelRegistry;
   /** Settings — must include dataDir. */
   settings: Settings;
-  /** Persona for ReflectionOrchestrator. */
+  /** Persona for Reflection. */
   persona: Persona;
   /** Optional custom ProjectAdapter (e.g., with mock WorkerAdapter). */
   projectAdapter?: ProjectAdapter;
@@ -114,7 +114,7 @@ export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubs
     },
   });
 
-  // ReflectionOrchestrator
+  // Reflection
   const toolRegistry = new ToolRegistry();
   toolRegistry.registerMany(mainAgentTools);
   const toolExecutor = new ToolExecutor(
@@ -122,7 +122,7 @@ export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubs
     { emit: () => {} },
     (settings.tools?.timeout ?? 30) * 1000,
   );
-  const reflectionOrchestrator = new ReflectionOrchestrator({
+  const reflectionOrchestrator = new Reflection({
     models,
     persona,
     toolExecutor,

@@ -37,7 +37,7 @@ import { ProjectManager } from "./projects/manager.ts";
 import { ProjectAdapter } from "./projects/project-adapter.ts";
 import { ImageManager } from "./media/image-manager.ts";
 import { TickManager } from "./agents/tick-manager.ts";
-import { ReflectionOrchestrator } from "./agents/reflection-orchestrator.ts";
+import { Reflection } from "./agents/reflection.ts";
 import { ToolRegistry } from "./tools/registry.ts";
 import { ToolExecutor } from "./tools/executor.ts";
 import { mainAgentTools } from "./tools/builtins/index.ts";
@@ -78,7 +78,7 @@ export class PegasusApp {
   private projectAdapter!: ProjectAdapter;
   private imageManager: ImageManager | null = null;
   private tickManager!: TickManager;
-  private reflectionOrchestrator!: ReflectionOrchestrator;
+  private reflectionOrchestrator!: Reflection;
 
   // ── MainAgent ──
   private _mainAgent: MainAgent | null = null;
@@ -226,7 +226,7 @@ export class PegasusApp {
    *
    * Dependency order matches MainAgent.onStart() exactly:
    *   1. ModelLimitsCache
-   *   2. ReflectionOrchestrator
+   *   2. Reflection
    *   3. AuthManager (Codex + Copilot + model limits)
    *   4. MCP (connect + register tools + token refresh)
    *   5. Skills
@@ -251,7 +251,7 @@ export class PegasusApp {
     // Security: create OwnerStore for message classification
     this.ownerStore = new OwnerStore(this.settings.authDir);
 
-    // Intentional separate ToolRegistry — ReflectionOrchestrator runs independently
+    // Intentional separate ToolRegistry — Reflection runs independently
     // (fire-and-forget after compaction) and needs its own tool execution pipeline.
     // Sharing MainAgent's ToolExecutor would couple their lifecycles unnecessarily.
     const toolRegistry = new ToolRegistry();
@@ -262,8 +262,8 @@ export class PegasusApp {
       (this.settings.tools?.timeout ?? 30) * 1000,
     );
 
-    // 2. ReflectionOrchestrator
-    this.reflectionOrchestrator = new ReflectionOrchestrator({
+    // 2. Reflection
+    this.reflectionOrchestrator = new Reflection({
       models: this.models,
       persona: this.persona,
       toolExecutor: mainToolExecutor,

@@ -7,7 +7,7 @@
  *
  * Memory injection and reflection are handled by Agent (built-in capabilities):
  *   - Agent auto-injects memory index on fresh session start and after compaction
- *   - Agent auto-runs reflection after compaction via injected ReflectionOrchestrator
+ *   - Agent auto-runs reflection after compaction via injected Reflection
  *   - Agent auto-injects getMemorySnapshot into ToolContext when memoryDir is set
  *
  * All infrastructure subsystems (auth, MCP, skills, tasks, etc.) are injected
@@ -41,7 +41,7 @@ import { ProjectAdapter } from "../projects/project-adapter.ts";
 import { OwnerStore } from "../security/owner-store.ts";
 import { TickManager } from "./tick-manager.ts";
 import { AuthManager } from "./auth-manager.ts";
-import { ReflectionOrchestrator } from "./reflection-orchestrator.ts";
+import { Reflection } from "./reflection.ts";
 import { Agent, type QueueItem, type TaskNotificationPayload } from "./agent.ts";
 import { EventBus } from "../events/bus.ts";
 
@@ -72,7 +72,7 @@ export interface InjectedSubsystems {
   projectAdapter: ProjectAdapter;
   imageManager: ImageManager | null;
   tickManager: TickManager;
-  reflectionOrchestrator: ReflectionOrchestrator;
+  reflectionOrchestrator: Reflection;
   /** Pre-wrapped MCP tools for MainAgent's tool registry (avoids double-wrapping). */
   mcpTools: Tool[];
   /** Owner trust store — created by PegasusApp, used in ToolContext. */

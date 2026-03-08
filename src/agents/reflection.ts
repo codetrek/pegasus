@@ -1,5 +1,5 @@
 /**
- * ReflectionOrchestrator — post-session reflection for memory extraction.
+ * Reflection — post-session reflection for memory extraction.
  *
  * Extracted from MainAgent. Wraps PostTaskReflector to decide when and how
  * to run reflection on archived sessions. Extracts facts and episodes
@@ -20,7 +20,7 @@ import { getLogger } from "../infra/logger.ts";
 
 const logger = getLogger("reflection_orchestrator");
 
-export interface ReflectionOrchestratorDeps {
+export interface ReflectionDeps {
   models: ModelRegistry;
   persona: Persona;
   toolExecutor: ToolExecutor;
@@ -29,7 +29,7 @@ export interface ReflectionOrchestratorDeps {
   modelLimitsCache?: ModelLimitsCache;
 }
 
-export class ReflectionOrchestrator {
+export class Reflection {
   private readonly models: ModelRegistry;
   private readonly persona: Persona;
   private readonly toolExecutor: ToolExecutor;
@@ -37,7 +37,7 @@ export class ReflectionOrchestrator {
   private readonly settings: Settings;
   private readonly modelLimitsCache?: ModelLimitsCache;
 
-  constructor(deps: ReflectionOrchestratorDeps) {
+  constructor(deps: ReflectionDeps) {
     this.models = deps.models;
     this.persona = deps.persona;
     this.toolExecutor = deps.toolExecutor;
