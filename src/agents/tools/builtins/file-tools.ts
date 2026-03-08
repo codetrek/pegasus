@@ -208,23 +208,25 @@ export const write_file: Tool = {
 
 export const list_files: Tool = {
   name: "list_files",
-  description: "List files in a directory. For pattern-based search across directories, prefer glob_files.",
+  description: "List files and directories. Output is compact text (one entry per line). For pattern-based search, prefer glob_files.",
   category: "file" as ToolCategory,
   parameters: z.object({
     path: z.string().default(".").describe("Directory path to list"),
     recursive: z.boolean().optional().default(false).describe("List recursively"),
     pattern: z.string().optional().describe("Filter by pattern (e.g., '*.ts')"),
+    limit: z.number().optional().default(200).describe("Max entries to return (default 200, max 2000)"),
   }),
   async execute(params: unknown, context: ToolContext): Promise<ToolResult> {
     const startedAt = Date.now();
-    const { path: originalPath = ".", recursive, pattern } = params as {
+    const { path: originalPath = ".", recursive, pattern, limit = 200 } = params as {
       path?: string;
       recursive?: boolean;
       pattern?: string;
+      limit?: number;
     };
+    const maxEntries = Math.min(Math.max(1, limit), 2000);
 
     try {
-      // Check path permissions
       const allowedPaths = context.allowedPaths;
       const dirPath = normalizePath(originalPath || ".");
 
@@ -234,11 +236,6 @@ export const list_files: Tool = {
         }
       }
 
-      // List files - if directory doesn't exist, return empty list
-      let files: Array<{ name: string; path: string; isDir: boolean; size: number }> = [];
-
-      // Check if directory exists - use access instead of Bun.file().exists()
-      // since Bun.file().exists() only works for files, not directories
       let dirExists = false;
       try {
         await access(dirPath);
@@ -250,86 +247,50 @@ export const list_files: Tool = {
       if (!dirExists) {
         return {
           success: true,
-          result: {
-            path: dirPath,
-            recursive: recursive || false,
-            files: [],
-            count: 0,
-          },
+          result: `${dirPath}: directory not found`,
           startedAt,
           completedAt: Date.now(),
           durationMs: Date.now() - startedAt,
         };
       }
 
-      if (recursive) {
-        // Recursive listing
-        const scanDir = async (currentPath: string, relativePath: string = ""): Promise<void> => {
-          const entries = await readdir(currentPath, { withFileTypes: true });
-          for (const entry of entries) {
-            const entryPath = path.join(currentPath, entry.name);
-            const entryRelativePath = path.join(relativePath, entry.name);
-            const stat = await Bun.file(entryPath).stat();
+      const lines: string[] = [];
+      let truncated = false;
+      const patternRe = pattern ? new RegExp(pattern) : null;
 
-            if (stat.isDirectory()) {
-              // Add directory and recurse
-              files.push({
-                name: entryRelativePath,
-                path: entryPath,
-                isDir: true,
-                size: 0,
-              });
-              await scanDir(entryPath, entryRelativePath);
-            } else if (stat.isFile()) {
-              // Apply pattern filter
-              if (pattern && !entry.name.match(new RegExp(pattern))) {
-                continue;
-              }
-              files.push({
-                name: entryRelativePath,
-                path: entryPath,
-                isDir: false,
-                size: stat.size,
-              });
-            }
-          }
-        };
-
-        await scanDir(dirPath);
-      } else {
-        // Non-recursive listing
-        const entries = await readdir(dirPath, { withFileTypes: true });
+      const scanDir = async (currentPath: string, prefix: string = ""): Promise<void> => {
+        if (truncated) return;
+        const entries = await readdir(currentPath, { withFileTypes: true });
         for (const entry of entries) {
-          const entryPath = path.join(dirPath, entry.name);
-          const stat = await Bun.file(entryPath).stat();
+          if (truncated) return;
+          const entryPath = path.join(currentPath, entry.name);
+          const displayName = prefix ? path.join(prefix, entry.name) : entry.name;
 
-          // Skip directories in non-recursive mode
-          if (stat.isDirectory()) {
-            continue;
+          if (entry.isDirectory()) {
+            lines.push(`${displayName}/`);
+            if (lines.length >= maxEntries) { truncated = true; return; }
+            if (recursive) {
+              await scanDir(entryPath, displayName);
+            }
+          } else if (entry.isFile()) {
+            if (patternRe && !patternRe.test(entry.name)) continue;
+            const stat = await Bun.file(entryPath).stat();
+            lines.push(`${displayName}  ${formatSize(stat.size)}`);
+            if (lines.length >= maxEntries) { truncated = true; return; }
           }
-
-          // Apply pattern filter
-          if (pattern && !entry.name.match(new RegExp(pattern))) {
-            continue;
-          }
-
-          files.push({
-            name: entry.name,
-            path: entryPath,
-            isDir: false,
-            size: stat.size,
-          });
         }
+      };
+
+      await scanDir(dirPath);
+
+      let output = lines.join("\n");
+      if (truncated) {
+        output += `\n\n[Truncated: showing ${maxEntries} of more entries. Use a more specific path or pattern.]`;
       }
 
       return {
         success: true,
-        result: {
-          path: dirPath,
-          recursive: recursive || false,
-          files,
-          count: files.length,
-        },
+        result: output,
         startedAt,
         completedAt: Date.now(),
         durationMs: Date.now() - startedAt,
@@ -345,6 +306,13 @@ export const list_files: Tool = {
     }
   },
 };
+
+/** Format file size for compact display. */
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}K`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}M`;
+}
 
 // ── edit_file ──────────────────────────────────
 
