@@ -18,9 +18,9 @@ export function ChatPanel() {
           <For each={chatStore.messages}>
             {(msg) => (
               <box flexDirection="column">
-                {/* Role + timestamp + channel */}
+                {/* Role label + metadata header */}
                 <text fg={msg.role === "user" ? THEME.cyan : msg.role === "system" ? THEME.warning : THEME.success}>
-                  [{msg.role} {msg.time}]{msg.channel ? ` [${msg.channel}]` : ""}
+                  {msg.role === "user" ? "User" : "Assistant"}: {msg.header || `[${msg.time}]`}
                 </text>
 
                 {/* Message text */}
