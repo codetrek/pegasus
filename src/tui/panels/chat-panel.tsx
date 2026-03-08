@@ -13,7 +13,7 @@ export function ChatPanel() {
     <box flexDirection="column" flexGrow={1} paddingLeft={1} paddingRight={1}>
       <SectionHeader icon="💬" title="Conversation" info={`${chatStore.messages.length} msgs`} />
 
-      <scrollbox flexGrow={1} paddingTop={1}>
+      <scrollbox flexGrow={1} paddingTop={1} stickyScroll={true} stickyStart="bottom">
         <box flexDirection="column" gap={1}>
           <For each={chatStore.messages}>
             {(msg) => (
