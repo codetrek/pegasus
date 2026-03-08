@@ -41,7 +41,22 @@ export async function startTUI(): Promise<void> {
     await app.stop();
     process.exit(0);
   };
-  process.on("SIGINT", shutdown);
+
+  // Double Ctrl+C to exit: first press warns, second press exits.
+  // Prevents accidental termination during long-running agent tasks.
+  let ctrlcCount = 0;
+  let ctrlcTimer: ReturnType<typeof setTimeout> | null = null;
+  process.on("SIGINT", () => {
+    ctrlcCount++;
+    if (ctrlcCount >= 2) {
+      shutdown();
+      return;
+    }
+    // First press — warn and reset after 2 seconds
+    process.stderr.write("\n(Press Ctrl+C again to exit)\n");
+    if (ctrlcTimer) clearTimeout(ctrlcTimer);
+    ctrlcTimer = setTimeout(() => { ctrlcCount = 0; }, 2000);
+  });
   process.on("SIGTERM", shutdown);
 
   // Register TUI adapter
@@ -54,7 +69,7 @@ export async function startTUI(): Promise<void> {
   // Wire input routing
   await tuiAdapter.start({ send: (msg) => app.routeMessage(msg) });
 
-  // Render TUI — this blocks (opentui event loop)
+  // Render TUI — blocks (opentui event loop)
   renderApp();
 }
 
