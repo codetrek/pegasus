@@ -9,12 +9,18 @@ import {
   setOnSend,
   clearOnSend,
   sendInput,
+  statusHint,
+  showHint,
+  setOnShutdown,
+  clearOnShutdown,
+  requestShutdown,
 } from "@pegasus/tui/store.ts";
 
 describe("TUI Store", () => {
   beforeEach(() => {
     clearMessages();
     clearOnSend();
+    clearOnShutdown();
   });
 
   describe("addMessage", () => {
@@ -93,6 +99,48 @@ describe("TUI Store", () => {
 
       expect(first).toEqual(["a"]);
       expect(second).toEqual(["b"]);
+    });
+  });
+
+  describe("statusHint / showHint", () => {
+    it("should show hint text", () => {
+      expect(statusHint()).toBe("");
+      showHint("test hint", 5000);
+      expect(statusHint()).toBe("test hint");
+    });
+
+    it("should auto-clear after timeout", async () => {
+      showHint("will disappear", 50);
+      expect(statusHint()).toBe("will disappear");
+      await Bun.sleep(100);
+      expect(statusHint()).toBe("");
+    });
+
+    it("should replace previous hint", () => {
+      showHint("first", 5000);
+      showHint("second", 5000);
+      expect(statusHint()).toBe("second");
+    });
+  });
+
+  describe("requestShutdown / setOnShutdown", () => {
+    it("should call registered shutdown callback", () => {
+      let called = false;
+      setOnShutdown(() => { called = true; });
+      requestShutdown();
+      expect(called).toBe(true);
+    });
+
+    it("should do nothing if no callback registered", () => {
+      requestShutdown(); // should not throw
+    });
+
+    it("clearOnShutdown should remove callback", () => {
+      let called = false;
+      setOnShutdown(() => { called = true; });
+      clearOnShutdown();
+      requestShutdown();
+      expect(called).toBe(false);
     });
   });
 });

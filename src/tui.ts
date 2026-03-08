@@ -16,6 +16,7 @@ import { initLogger } from "./infra/logger.ts";
 import { ModelRegistry } from "./infra/model-registry.ts";
 import { TuiAdapter } from "./channels/tui-adapter.ts";
 import { renderApp } from "./tui/main.tsx";
+import { setOnShutdown } from "./tui/store.ts";
 
 /** Start the TUI with full PegasusApp backend. */
 export async function startTUI(): Promise<void> {
@@ -41,23 +42,10 @@ export async function startTUI(): Promise<void> {
     await app.stop();
     process.exit(0);
   };
-
-  // Double Ctrl+C to exit: first press warns, second press exits.
-  // Prevents accidental termination during long-running agent tasks.
-  let ctrlcCount = 0;
-  let ctrlcTimer: ReturnType<typeof setTimeout> | null = null;
-  process.on("SIGINT", () => {
-    ctrlcCount++;
-    if (ctrlcCount >= 2) {
-      shutdown();
-      return;
-    }
-    // First press — warn and reset after 2 seconds
-    process.stderr.write("\n(Press Ctrl+C again to exit)\n");
-    if (ctrlcTimer) clearTimeout(ctrlcTimer);
-    ctrlcTimer = setTimeout(() => { ctrlcCount = 0; }, 2000);
-  });
   process.on("SIGTERM", shutdown);
+
+  // Register shutdown bridge — App component calls requestShutdown() on double Ctrl+C
+  setOnShutdown(() => { shutdown(); });
 
   // Register TUI adapter
   const tuiAdapter = new TuiAdapter(shutdown);

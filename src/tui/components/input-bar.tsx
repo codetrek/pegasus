@@ -4,9 +4,9 @@
  * Uses opentui's <input> component. On Enter, sends text via store bridge
  * to TuiAdapter. Always focused (v1 has no panel switching).
  */
-import { createSignal } from "solid-js"
+import { createSignal, Show } from "solid-js"
 import { THEME } from "../theme.tsx"
-import { sendInput } from "../store.ts"
+import { sendInput, statusHint } from "../store.ts"
 
 export function InputBar() {
   const [value, setValue] = createSignal("")
@@ -42,7 +42,9 @@ export function InputBar() {
         placeholderColor={THEME.textMuted}
       />
       <text fg={THEME.textMuted}>
-        [Ctrl+C] 退出
+        <Show when={statusHint()} fallback={"[Ctrl+C] Quit"}>
+          <span style={{ fg: THEME.warning }}>{statusHint()}</span>
+        </Show>
       </text>
     </box>
   )
