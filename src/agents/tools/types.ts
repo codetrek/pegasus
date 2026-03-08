@@ -8,7 +8,7 @@ import type { LanguageModel } from "../../infra/llm-types.ts";
 import type { BackgroundTaskManager } from "./background.ts";
 import type { ImageAttachment } from "../../media/types.ts";
 import type {
-  TaskRegistryLike,
+  SubagentRegistryLike,
   TickManagerLike,
   OwnerStoreLike,
   SkillRegistryLike,
@@ -77,12 +77,12 @@ export interface ToolResult {
  * Context passed to tool execution.
  */
 export interface ToolContext {
-  taskId: string;
+  agentId: string;
   allowedPaths?: string[];
   memoryDir?: string;
   sessionDir?: string;
-  tasksDir?: string;
-  taskRegistry?: TaskRegistryLike;
+  subagentsDir?: string;
+  subagentRegistry?: SubagentRegistryLike;
   projectManager?: ProjectManagerLike;
   ownerStore?: OwnerStoreLike;
   browserManager?: BrowserManagerLike;

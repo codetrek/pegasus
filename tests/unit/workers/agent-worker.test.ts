@@ -34,7 +34,7 @@ import {
   _setProxyModelFactoryForTest,
   _createProjectAgent,
 } from "@pegasus/workers/agent-worker.ts";
-import type { TaskNotification } from "@pegasus/agents/agent.ts";
+import type { SubagentNotification } from "@pegasus/agents/agent.ts";
 import { setSettings, resetSettings } from "@pegasus/infra/config.ts";
 import type { Settings } from "@pegasus/infra/config.ts";
 
@@ -118,73 +118,73 @@ let lastMockProxy = createMockProxyModel();
 
 describe("notificationToText", () => {
   it("should extract response string from completed notification with object result", () => {
-    const notification: TaskNotification = {
+    const notification: SubagentNotification = {
       type: "completed",
-      taskId: "t1",
-      result: { taskId: "t1", input: "test", response: "Hello world", iterations: 1 },
+      subagentId: "t1",
+      result: { agentId: "t1", input: "test", response: "Hello world", iterations: 1 },
     };
     expect(notificationToText(notification)).toBe("Hello world");
   });
 
   it("should JSON.stringify object result without string response", () => {
-    const notification: TaskNotification = {
+    const notification: SubagentNotification = {
       type: "completed",
-      taskId: "t1",
-      result: { taskId: "t1", data: 42, iterations: 2 },
+      subagentId: "t1",
+      result: { agentId: "t1", data: 42, iterations: 2 },
     };
     const text = notificationToText(notification);
     expect(text).toContain('"data":42');
   });
 
   it("should handle null result in completed notification", () => {
-    const notification: TaskNotification = {
+    const notification: SubagentNotification = {
       type: "completed",
-      taskId: "t1",
+      subagentId: "t1",
       result: null,
     };
-    expect(notificationToText(notification)).toBe("[Task completed]");
+    expect(notificationToText(notification)).toBe("[Subagent completed]");
   });
 
   it("should handle undefined result in completed notification", () => {
-    const notification: TaskNotification = {
+    const notification: SubagentNotification = {
       type: "completed",
-      taskId: "t1",
+      subagentId: "t1",
       result: undefined,
     };
-    expect(notificationToText(notification)).toBe("[Task completed]");
+    expect(notificationToText(notification)).toBe("[Subagent completed]");
   });
 
   it("should handle string result in completed notification", () => {
-    const notification: TaskNotification = {
+    const notification: SubagentNotification = {
       type: "completed",
-      taskId: "t1",
+      subagentId: "t1",
       result: "Direct string result",
     };
     expect(notificationToText(notification)).toBe("Direct string result");
   });
 
   it("should handle numeric result in completed notification", () => {
-    const notification: TaskNotification = {
+    const notification: SubagentNotification = {
       type: "completed",
-      taskId: "t1",
+      subagentId: "t1",
       result: 42,
     };
     expect(notificationToText(notification)).toBe("42");
   });
 
   it("should format failed notification with error message", () => {
-    const notification: TaskNotification = {
+    const notification: SubagentNotification = {
       type: "failed",
-      taskId: "t1",
+      subagentId: "t1",
       error: "timeout exceeded",
     };
-    expect(notificationToText(notification)).toBe("[Task failed: timeout exceeded]");
+    expect(notificationToText(notification)).toBe("[Subagent failed: timeout exceeded]");
   });
 
   it("should return message for notify type", () => {
-    const notification: TaskNotification = {
+    const notification: SubagentNotification = {
       type: "notify",
-      taskId: "t1",
+      subagentId: "t1",
       message: "Processing step 2...",
     };
     expect(notificationToText(notification)).toBe("Processing step 2...");
@@ -193,16 +193,16 @@ describe("notificationToText", () => {
   it("should return empty string for notify with no message", () => {
     const notification = {
       type: "notify" as const,
-      taskId: "t1",
+      subagentId: "t1",
       message: undefined,
-    } as unknown as TaskNotification;
+    } as unknown as SubagentNotification;
     expect(notificationToText(notification)).toBe("");
   });
 
   it("should handle object result with non-string response property", () => {
-    const notification: TaskNotification = {
+    const notification: SubagentNotification = {
       type: "completed",
-      taskId: "t1",
+      subagentId: "t1",
       result: { response: 123, other: "data" },
     };
     const text = notificationToText(notification);
@@ -210,9 +210,9 @@ describe("notificationToText", () => {
   });
 
   it("should handle array result (object but not with response)", () => {
-    const notification: TaskNotification = {
+    const notification: SubagentNotification = {
       type: "completed",
-      taskId: "t1",
+      subagentId: "t1",
       result: [1, 2, 3],
     };
     expect(notificationToText(notification)).toBe("[1,2,3]");
@@ -793,7 +793,7 @@ describe("initProject", () => {
     expect(_notifyCallback).not.toBeNull();
 
     // Trigger the callback with a completed notification
-    _notifyCallback!({ type: "completed", taskId: "t1", result: { response: "Done" } });
+    _notifyCallback!({ type: "completed", subagentId: "t1", result: { response: "Done" } });
 
     // Should have sent a notify message
     const notifyMsgs = (messages as any[]).filter(m => m.type === "notify");
@@ -944,7 +944,7 @@ describe("_createProjectAgent", () => {
     const agent = _createProjectAgent({
       model: { modelId: "test", provider: "test", generate: async () => ({}) } as any,
       subagentTypeRegistry: registry,
-      tasksDir: `${TMP}/tasks`,
+      subagentsDir: `${TMP}/tasks`,
       onNotification: (n) => notifications.push(n),
       sessionDir: `${TMP}/session`,
       channelId: "test-project",

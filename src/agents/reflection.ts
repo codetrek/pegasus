@@ -85,7 +85,7 @@ export class Reflection {
       const listResult = await this.toolExecutor.execute(
         "memory_list",
         {},
-        { taskId: context.id, memoryDir: this.memoryDir },
+        { agentId: context.id, memoryDir: this.memoryDir },
       );
       if (listResult.success && Array.isArray(listResult.result)) {
         const entries = listResult.result as Array<{ path: string; summary: string; size: number }>;
@@ -95,7 +95,7 @@ export class Reflection {
             const readResult = await this.toolExecutor.execute(
               "memory_read",
               { path: entry.path },
-              { taskId: context.id, memoryDir: this.memoryDir },
+              { agentId: context.id, memoryDir: this.memoryDir },
             );
             if (readResult.success && typeof readResult.result === "string") {
               existingFacts.push({ path: entry.path, content: readResult.result });

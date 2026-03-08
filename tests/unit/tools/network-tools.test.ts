@@ -68,7 +68,7 @@ afterAll(() => {
 
 // ── Context helper ──────────────────────────────
 
-const context = { taskId: "test-task-id" };
+const context = { agentId: "test-task-id" };
 
 // ── http_get ────────────────────────────────────
 
@@ -286,7 +286,7 @@ describe("web_search with mock Tavily", () => {
   it("should return structured search results", async () => {
     const result = await web_search.execute(
       { query: "test query" },
-      { taskId: "test" },
+      { agentId: "test" },
     );
 
     expect(result.success).toBe(true);
@@ -302,7 +302,7 @@ describe("web_search with mock Tavily", () => {
   it("should truncate long content snippets at 1000 chars", async () => {
     const result = await web_search.execute(
       { query: "long content" },
-      { taskId: "test" },
+      { agentId: "test" },
     );
 
     expect(result.success).toBe(true);
@@ -317,7 +317,7 @@ describe("web_search with mock Tavily", () => {
   it("should respect max_results parameter", async () => {
     const result = await web_search.execute(
       { query: "limited", max_results: 2 },
-      { taskId: "test" },
+      { agentId: "test" },
     );
 
     expect(result.success).toBe(true);
@@ -344,7 +344,7 @@ describe("web_search with mock Tavily", () => {
 
     const result = await web_search.execute(
       { query: "should fail" },
-      { taskId: "test" },
+      { agentId: "test" },
     );
 
     expect(result.success).toBe(false);
@@ -437,7 +437,7 @@ describe("web_fetch tool", () => {
   it("should return extracted content from HTML page", async () => {
     const result = await web_fetch.execute(
       { url: `${fetchBaseUrl}/html`, prompt: "What is on this page?" },
-      { taskId: "test", extractModel: mockExtractModel },
+      { agentId: "test", extractModel: mockExtractModel },
     );
 
     expect(result.success).toBe(true);
@@ -452,7 +452,7 @@ describe("web_fetch tool", () => {
 
   it("should cache results (15-min TTL)", async () => {
     const params = { url: `${fetchBaseUrl}/html`, prompt: "Cache test" };
-    const ctx = { taskId: "test", extractModel: mockExtractModel };
+    const ctx = { agentId: "test", extractModel: mockExtractModel };
 
     // First call — not cached
     const result1 = await web_fetch.execute(params, ctx);
@@ -470,7 +470,7 @@ describe("web_fetch tool", () => {
   it("should detect cross-domain redirect", async () => {
     const result = await web_fetch.execute(
       { url: `${fetchBaseUrl}/redirect-cross`, prompt: "test" },
-      { taskId: "test" },
+      { agentId: "test" },
     );
 
     expect(result.success).toBe(true);
@@ -483,7 +483,7 @@ describe("web_fetch tool", () => {
   it("should follow same-domain redirect", async () => {
     const result = await web_fetch.execute(
       { url: `${fetchBaseUrl}/redirect-same`, prompt: "What heading?" },
-      { taskId: "test", extractModel: mockExtractModel },
+      { agentId: "test", extractModel: mockExtractModel },
     );
 
     expect(result.success).toBe(true);
@@ -496,7 +496,7 @@ describe("web_fetch tool", () => {
   it("should truncate oversized content", async () => {
     const result = await web_fetch.execute(
       { url: `${fetchBaseUrl}/large`, prompt: "test" },
-      { taskId: "test" }, // no extractModel — raw markdown returned
+      { agentId: "test" }, // no extractModel — raw markdown returned
     );
 
     expect(result.success).toBe(true);
@@ -510,7 +510,7 @@ describe("web_fetch tool", () => {
   it("should return markdown when no extractModel", async () => {
     const result = await web_fetch.execute(
       { url: `${fetchBaseUrl}/text`, prompt: "Get the text" },
-      { taskId: "test" }, // no extractModel
+      { agentId: "test" }, // no extractModel
     );
 
     expect(result.success).toBe(true);
@@ -522,7 +522,7 @@ describe("web_fetch tool", () => {
 
   it("should clear cache via clearWebFetchCache", async () => {
     const params = { url: `${fetchBaseUrl}/text`, prompt: "Clear test" };
-    const ctx = { taskId: "test" };
+    const ctx = { agentId: "test" };
 
     // First call populates cache
     await web_fetch.execute(params, ctx);
@@ -543,7 +543,7 @@ describe("web_fetch tool", () => {
     // localhost URLs should NOT be upgraded — our test server is http://localhost
     const result = await web_fetch.execute(
       { url: `${fetchBaseUrl}/text`, prompt: "Get the text" },
-      { taskId: "test" },
+      { agentId: "test" },
     );
 
     // Should succeed — proves localhost was NOT upgraded to https (which would fail)
@@ -557,7 +557,7 @@ describe("web_fetch tool", () => {
     // The upgraded URL will fail to connect, proving the upgrade happened
     const result = await web_fetch.execute(
       { url: "http://example-nonexistent-test.invalid/page", prompt: "test" },
-      { taskId: "test" },
+      { agentId: "test" },
     );
 
     expect(result.success).toBe(false);

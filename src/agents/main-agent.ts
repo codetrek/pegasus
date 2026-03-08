@@ -2,7 +2,7 @@
  * MainAgent — persistent LLM conversation partner.
  *
  * Extends Agent to inherit queue processing, session management,
- * reply routing, and the processStep-based thinking engine. Adds task/subagent
+ * reply routing, and the processStep-based thinking engine. Adds subagent
  * delegation, skills, MCP integration, vision, and compaction.
  *
  * Memory injection and reflection are handled by Agent (built-in capabilities):
@@ -10,7 +10,7 @@
  *   - Agent auto-runs reflection after compaction via injected Reflection
  *   - Agent auto-injects getMemorySnapshot into ToolContext when memoryDir is set
  *
- * All infrastructure subsystems (auth, MCP, skills, tasks, etc.) are injected
+ * All infrastructure subsystems (auth, MCP, skills, subagents, etc.) are injected
  * by PegasusApp — MainAgent never self-initializes them.
  *
  * Key overrides:
@@ -18,7 +18,7 @@
  *   - onStart()/onStop()      → session lifecycle (MCP tools, prompt; tick + drain)
  *   - getMaxToolResultChars() → truncation budget from model context window
  *   - computeBudgetOptions()  → ModelRegistry-aware compaction budget
- *   - onTaskNotificationHandled() → tick management (checkShouldStop)
+ *   - onSubagentNotificationHandled() → tick management (checkShouldStop)
  */
 
 import type { Message } from "../infra/llm-types.ts";
@@ -28,9 +28,9 @@ import type { Settings } from "../infra/config.ts";
 import { getSettings } from "../infra/config.ts";
 import { getLogger } from "../infra/logger.ts";
 import { ToolRegistry } from "./tools/registry.ts";
-import { allTaskTools } from "./tools/builtins/index.ts";
+import { allSubagentTools } from "./tools/builtins/index.ts";
 import { ImageManager } from "../media/image-manager.ts";
-import type { TaskNotification } from "./agent.ts";
+import type { SubagentNotification } from "./agent.ts";
 import { computeTokenBudget, calculateMaxToolResultChars, ModelLimitsCache } from "../context/index.ts";
 import type { ModelRegistry } from "../infra/model-registry.ts";
 import path from "node:path";
@@ -42,7 +42,7 @@ import { OwnerStore } from "../security/owner-store.ts";
 import { TickManager } from "./tick-manager.ts";
 import { AuthManager } from "./auth-manager.ts";
 import { Reflection } from "./reflection.ts";
-import { Agent, type QueueItem, type TaskNotificationPayload } from "./agent.ts";
+import { Agent, type QueueItem, type SubagentNotificationPayload } from "./agent.ts";
 import { EventBus } from "./events/bus.ts";
 
 // Main Agent's curated tool set
@@ -139,13 +139,13 @@ export class MainAgent extends Agent {
       reflectionOrchestrator: deps.injected.reflectionOrchestrator,
       subagentConfig: {
         subagentTypeRegistry: deps.injected.subagentTypeRegistry,
-        tasksDir: mainStorePaths.tasks,
-        onNotification: (n) => this.pushTaskNotification(n),
-        // Subagents get the full task tool set (file, shell, network, etc.)
+        subagentsDir: mainStorePaths.subagents,
+        onNotification: (n) => this.pushSubagentNotification(n),
+        // Subagents get the full subagent tool set (file, shell, network, etc.)
         // MINUS MainAgent-only privileged tools (reply, trust, project mgmt, skill reload).
         // Note: MainAgent's own toolRegistry is a curated subset (no shell/file tools),
-        // so we use allTaskTools as the base for subagent tool inheritance.
-        parentTools: allTaskTools.filter(t => !PRIVILEGED_TOOL_NAMES.has(t.name)),
+        // so we use allSubagentTools as the base for subagent tool inheritance.
+        parentTools: allSubagentTools.filter(t => !PRIVILEGED_TOOL_NAMES.has(t.name)),
         // Image storage for subagent tools (e.g. browser screenshots)
         storeImage: deps.injected.imageManager
           ? async (buffer: Buffer, mimeType: string, source: string) => {
@@ -232,10 +232,10 @@ export class MainAgent extends Agent {
   }
 
   /**
-   * Override task notification handler for tick management.
+   * Override subagent notification handler for tick management.
    * Stops tick timer when no more active work (completed/failed, not progress updates).
    */
-  protected override async onTaskNotificationHandled(notification: TaskNotificationPayload): Promise<void> {
+  protected override async onSubagentNotificationHandled(notification: SubagentNotificationPayload): Promise<void> {
     if (notification.type !== "notify") {
       this.tickManager.checkShouldStop();
     }
@@ -255,7 +255,7 @@ export class MainAgent extends Agent {
 
     // MainAgent-specific fields (override/extend base context)
     ctx.sessionDir = this.mainStorePaths.session;
-    ctx.tasksDir = this.mainStorePaths.tasks;
+    ctx.subagentsDir = this.mainStorePaths.subagents;
     ctx.projectManager = this.projectManager;
     ctx.ownerStore = this.ownerStore;
     ctx.mediaDir = imgMgr ? path.join(this.settings.dataDir, "media") : undefined;
@@ -362,8 +362,8 @@ export class MainAgent extends Agent {
   }
 
   /**
-   * Expose self as task registry for testing.
-   * Agent now implements TaskRegistryLike directly.
+   * Expose self as subagent registry for testing.
+   * Agent now implements SubagentRegistryLike directly.
    */
   get _taskRunner(): MainAgent {
     return this;
@@ -425,10 +425,10 @@ export class MainAgent extends Agent {
   // ═══════════════════════════════════════════════════
 
   /**
-   * Push a task notification into the queue (used by Agent's subagent callbacks).
+   * Push a subagent notification into the queue (used by Agent's subagent callbacks).
    */
-  pushTaskNotification(notification: TaskNotification): void {
-    this.pushQueue({ kind: "task_notify", notification } as QueueItem);
+  pushSubagentNotification(notification: SubagentNotification): void {
+    this.pushQueue({ kind: "subagent_notify", notification } as QueueItem);
   }
 
   /**

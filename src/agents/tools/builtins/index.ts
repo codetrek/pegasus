@@ -57,20 +57,19 @@ const memory_append = memoryToolsModule.memory_append;
 
 export { memory_list, memory_read, memory_write, memory_patch, memory_append };
 
-// Task tools
-import * as taskToolsModule from "./task-tools.ts";
-const task_list = taskToolsModule.task_list;
-const task_replay = taskToolsModule.task_replay;
+// Subagent list tool
+import * as subagentListModule from "./subagent-list-tool.ts";
+const subagent_list = subagentListModule.subagent_list;
 
-export { task_list, task_replay };
+export { subagent_list };
 
-// Spawn subagent tool (for L1 agents — added by TaskRunner based on depth)
+// Spawn subagent tool (for L1 agents — added by Agent based on depth)
 import * as spawnSubagentModule from "./spawn-subagent-tool.ts";
 const spawn_subagent = spawnSubagentModule.spawn_subagent;
 
 export { spawn_subagent };
 
-// Resume subagent tool (for L1 agents — added by TaskRunner based on depth)
+// Resume subagent tool (for L1 agents — added by Agent based on depth)
 import * as resumeSubagentModule from "./resume-subagent-tool.ts";
 const resume_subagent = resumeSubagentModule.resume_subagent;
 
@@ -107,17 +106,17 @@ const trust = trustToolModule.trust;
 
 export { trust };
 
-// Notify tool (for Task Agent → MainAgent communication)
+// Notify tool (for Subagent → MainAgent communication)
 import * as notifyToolModule from "./notify-tool.ts";
 const notify = notifyToolModule.notify;
 
 export { notify };
 
-// Task status tool (runtime task query)
-import * as taskStatusModule from "./task-status-tool.ts";
-const task_status = taskStatusModule.task_status;
+// Subagent status tool (runtime subagent query)
+import * as subagentStatusModule from "./subagent-status-tool.ts";
+const subagent_status = subagentStatusModule.subagent_status;
 
-export { task_status };
+export { subagent_status };
 
 // Session tools
 import * as sessionToolsModule from "./session-tools.ts";
@@ -161,7 +160,7 @@ export { browser_navigate, browser_snapshot, browser_screenshot, browser_click, 
 
 // Re-export all tools as arrays
 
-/** System tools available to Task System. */
+/** System tools available to subagents. */
 export const systemTools: Tool[] = [
   current_time,
   sleep,
@@ -197,9 +196,8 @@ export const memoryTools: Tool[] = [
   memory_append,
 ];
 
-export const taskTools: Tool[] = [
-  task_list,
-  task_replay,
+export const subagentTools: Tool[] = [
+  subagent_list,
 ];
 
 export const backgroundTools: Tool[] = [
@@ -210,24 +208,24 @@ export const backgroundTools: Tool[] = [
 
 export { _browserTools as browserTools };
 
-/** All tools for Task System (base set — does NOT include spawn_subagent or reply). */
-export const allTaskTools: Tool[] = [
+/** All tools for subagents (base set — does NOT include spawn_subagent or reply). */
+export const allSubagentTools: Tool[] = [
   ...systemTools,
   ...fileTools,
   ...networkTools,
   ...dataTools,
   ...memoryTools,
-  ...taskTools,
+  ...subagentTools,
   ...backgroundTools,
   ..._browserTools,
   ...imageTools,
   notify,
 ];
 
-/** Tools for SubAgent Workers — base task tools + task_status for monitoring. spawn_subagent is added by TaskRunner based on depth. */
-export const subAgentTools: Tool[] = [
-  ...allTaskTools,
-  task_status,
+/** Tools for SubAgent Workers — base subagent tools + subagent_status for monitoring. spawn_subagent is added by Agent based on depth. */
+export const subAgentWorkerTools: Tool[] = [
+  ...allSubagentTools,
+  subagent_status,
 ];
 
 /** Tools for Main Agent (curated simple tools + spawn_subagent + resume_subagent + reply + project tools). */
@@ -238,9 +236,8 @@ export const mainAgentTools: Tool[] = [
   memory_write,
   memory_patch,
   memory_append,
-  task_list,
-  task_replay,
-  task_status,
+  subagent_list,
+  subagent_status,
   session_archive_read,
   image_read,
   spawn_subagent,
@@ -259,5 +256,5 @@ export const mainAgentTools: Tool[] = [
 /** Memory tools available to PostTaskReflector (no memory_list — info is pre-loaded). */
 export const reflectionTools: Tool[] = [memory_read, memory_write, memory_patch, memory_append];
 
-/** @deprecated Use allTaskTools or mainAgentTools instead. */
-export const allBuiltInTools = allTaskTools;
+/** @deprecated Use allSubagentTools or mainAgentTools instead. */
+export const allBuiltInTools = allSubagentTools;

@@ -67,7 +67,7 @@ import { sanitizeForPrompt } from "../infra/sanitize.ts";
 import { formatSize } from "./prompts/index.ts";
 import type { Reflection } from "./reflection.ts";
 import type { SubAgentTypeRegistry } from "./subagents/registry.ts";
-import { allTaskTools } from "./tools/builtins/index.ts";
+import { allSubagentTools } from "./tools/builtins/index.ts";
 import { spawn_subagent } from "./tools/builtins/spawn-subagent-tool.ts";
 import { resume_subagent } from "./tools/builtins/resume-subagent-tool.ts";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
@@ -75,15 +75,15 @@ import path from "node:path";
 
 const logger = getLogger("agent");
 
-// ── Subagent Types (moved from task-runner.ts) ───────
+// ── Subagent Types ───────
 
-export type TaskNotification =
-  | { type: "completed"; taskId: string; result: unknown; imageRefs?: Array<{ id: string; mimeType: string }> }
-  | { type: "failed"; taskId: string; error: string }
-  | { type: "notify"; taskId: string; message: string; imageRefs?: Array<{ id: string; mimeType: string }> };
+export type SubagentNotification =
+  | { type: "completed"; subagentId: string; result: unknown; imageRefs?: Array<{ id: string; mimeType: string }> }
+  | { type: "failed"; subagentId: string; error: string }
+  | { type: "notify"; subagentId: string; message: string; imageRefs?: Array<{ id: string; mimeType: string }> };
 
-export interface TaskInfo {
-  taskId: string;
+export interface SubagentInfo {
+  subagentId: string;
   input: string;
   taskType: string;
   description: string;
@@ -93,7 +93,7 @@ export interface TaskInfo {
 }
 
 /** Options for submit(). */
-export interface SubmitOpts {
+export interface SubagentSubmitOpts {
   memorySnapshot?: string;
   depth?: number;
 }
@@ -101,13 +101,13 @@ export interface SubmitOpts {
 /** Configuration for subagent management capabilities. */
 export interface SubagentConfig {
   subagentTypeRegistry: SubAgentTypeRegistry;
-  tasksDir: string;
-  onNotification: (notification: TaskNotification) => void;
+  subagentsDir: string;
+  onNotification: (notification: SubagentNotification) => void;
   /**
    * Tools that subagents can inherit from this parent Agent.
    * SubAgentType's `tools` field filters from this set (not from a global list).
    * Privileged tools (e.g. trust, project management) should be excluded.
-   * If omitted, falls back to allTaskTools for backward compatibility.
+   * If omitted, falls back to allSubagentTools for backward compatibility.
    */
   parentTools?: Tool[];
   /** Store image callback passed to subagents for image persistence. */
@@ -154,7 +154,7 @@ export interface AgentDeps {
   toolContext?: Partial<ToolContext>;
   /** Reflection for post-compaction reflection. Optional. */
   reflectionOrchestrator?: Reflection;
-  /** Subagent management config. When set, Agent implements TaskRegistryLike. */
+  /** Subagent management config. When set, Agent implements SubagentRegistryLike. */
   subagentConfig?: SubagentConfig;
 }
 
@@ -209,19 +209,19 @@ export interface CustomQueueItem {
 }
 
 /**
- * Task notification payload — mirrors TaskRunner's TaskNotification type
- * without coupling Agent to the task-runner module.
+ * Subagent notification payload — type for processing subagent
+ * notifications without coupling Agent to external modules.
  */
-export type TaskNotificationPayload =
-  | { type: "completed"; taskId: string; result: unknown; imageRefs?: Array<{ id: string; mimeType: string }> }
-  | { type: "failed"; taskId: string; error: string }
-  | { type: "notify"; taskId: string; message: string; imageRefs?: Array<{ id: string; mimeType: string }> };
+export type SubagentNotificationPayload =
+  | { type: "completed"; subagentId: string; result: unknown; imageRefs?: Array<{ id: string; mimeType: string }> }
+  | { type: "failed"; subagentId: string; error: string }
+  | { type: "notify"; subagentId: string; message: string; imageRefs?: Array<{ id: string; mimeType: string }> };
 
 /** Queue item — what arrives from the outside world. */
 export type QueueItem =
   | { kind: "message"; message: InboundMessage }
   | { kind: "think"; channel: ChannelInfo }
-  | { kind: "task_notify"; notification: TaskNotificationPayload }
+  | { kind: "subagent_notify"; notification: SubagentNotificationPayload }
   | CustomQueueItem;
 
 // ── Agent ────────────────────────────────────────────
@@ -287,7 +287,7 @@ export class Agent {
 
   // ── Subagent management (when subagentConfig is set) ──
   private _subagentConfig?: SubagentConfig;
-  private _activeSubagents = new Map<string, TaskInfo>();
+  private _activeSubagents = new Map<string, SubagentInfo>();
   private _subagentToolRegistryCache = new Map<string, ToolRegistry>();
   private _additionalTools: Tool[] = [];
 
@@ -556,7 +556,7 @@ export class Agent {
    * Default: minimal context with taskId + storeImage + injected toolContext.
    */
   protected buildToolContext(taskId: string): ToolContext {
-    const ctx: ToolContext = { taskId };
+    const ctx: ToolContext = { agentId: taskId };
     if (this._storeImage) ctx.storeImage = this._storeImage;
     // Merge injected toolContext fields
     if (this._injectedToolContext) {
@@ -571,9 +571,9 @@ export class Agent {
     if (this._memoryDir && !ctx.getMemorySnapshot) {
       ctx.getMemorySnapshot = () => this._getMemorySnapshot();
     }
-    // Auto-inject taskRegistry when subagentConfig is set
-    if (this._subagentConfig && !ctx.taskRegistry) {
-      ctx.taskRegistry = this;
+    // Auto-inject subagentRegistry when subagentConfig is set
+    if (this._subagentConfig && !ctx.subagentRegistry) {
+      ctx.subagentRegistry = this;
     }
     return ctx;
   }
@@ -1036,9 +1036,9 @@ export class Agent {
             await this._think(ti.channel);
             break;
           }
-          case "task_notify": {
-            const ni = item as { kind: "task_notify"; notification: TaskNotificationPayload };
-            await this._handleTaskNotify(ni.notification);
+          case "subagent_notify": {
+            const ni = item as { kind: "subagent_notify"; notification: SubagentNotificationPayload };
+            await this._handleSubagentNotify(ni.notification);
             break;
           }
           default:
@@ -1092,17 +1092,17 @@ export class Agent {
   }
 
   /**
-   * Handle a task notification (completed, failed, or progress update).
+   * Handle a subagent notification (completed, failed, or progress update).
    * Formats the notification text, injects into session, and triggers thinking.
    */
-  protected async _handleTaskNotify(notification: TaskNotificationPayload): Promise<void> {
+  protected async _handleSubagentNotify(notification: SubagentNotificationPayload): Promise<void> {
     let resultText: string;
     if (notification.type === "failed") {
-      resultText = `[Task ${notification.taskId} failed]\nError: ${notification.error}`;
+      resultText = `[Subagent ${notification.subagentId} failed]\nError: ${notification.error}`;
     } else if (notification.type === "notify") {
-      resultText = `[Task ${notification.taskId} update]\n${notification.message}`;
+      resultText = `[Subagent ${notification.subagentId} update]\n${notification.message}`;
     } else {
-      resultText = `[Task ${notification.taskId} completed]\nResult: ${JSON.stringify(notification.result)}`;
+      resultText = `[Subagent ${notification.subagentId} completed]\nResult: ${JSON.stringify(notification.result)}`;
     }
 
     const systemMsg: Message = { role: "user", content: resultText };
@@ -1117,8 +1117,8 @@ export class Agent {
 
     this.sessionMessages.push(systemMsg);
     await this.sessionStore.append(systemMsg, {
-      type: "task_notify",
-      taskId: notification.taskId,
+      type: "subagent_notify",
+      subagentId: notification.subagentId,
     });
 
     const lastChannel = this.lastChannel;
@@ -1127,14 +1127,14 @@ export class Agent {
     }
 
     // Hook for tick management via callback or override
-    await this.onTaskNotificationHandled(notification);
+    await this.onSubagentNotificationHandled(notification);
   }
 
   /**
-   * Hook called after task notification is handled.
+   * Hook called after subagent notification is handled.
    * Subclasses override for tick management (e.g. checkShouldStop).
    */
-  protected async onTaskNotificationHandled(_notification: TaskNotificationPayload): Promise<void> {}
+  protected async onSubagentNotificationHandled(_notification: SubagentNotificationPayload): Promise<void> {}
 
   /**
    * Run thinking — delegates to _executeTask with session messages.
@@ -1213,7 +1213,7 @@ export class Agent {
     const listResult = await this.toolExecutor.execute(
       "memory_list",
       {},
-      { taskId: this.agentId, memoryDir },
+      { agentId: this.agentId, memoryDir },
     );
     if (!listResult.success || !Array.isArray(listResult.result) || listResult.result.length === 0) return null;
 
@@ -1226,7 +1226,7 @@ export class Agent {
           const readResult = await this.toolExecutor.execute(
             "memory_read",
             { path: e.path },
-            { taskId: this.agentId, memoryDir },
+            { agentId: this.agentId, memoryDir },
           );
           loaded.push({
             ...e,
@@ -1321,11 +1321,11 @@ export class Agent {
   }
 
   // ═══════════════════════════════════════════════════
-  // Subagent Management (TaskRegistryLike implementation)
+  // Subagent Management (SubagentRegistryLike implementation)
   // ═══════════════════════════════════════════════════
 
   /**
-   * Submit a subagent task for execution. Returns taskId immediately.
+   * Submit a subagent for execution. Returns subagentId immediately.
    * The child Agent runs fire-and-forget in the background.
    *
    * Requires subagentConfig to be set — throws if not configured.
@@ -1335,14 +1335,14 @@ export class Agent {
     source: string,
     taskType: string,
     description: string,
-    opts?: SubmitOpts,
+    opts?: SubagentSubmitOpts,
   ): string {
     if (!this._subagentConfig) {
       throw new Error("Agent not configured for subagent management (missing subagentConfig)");
     }
     const config = this._subagentConfig;
 
-    const taskId = shortId();
+    const subagentId = shortId();
     const depth = opts?.depth ?? 0;
 
     // Prepend memory snapshot to input when available
@@ -1353,7 +1353,7 @@ export class Agent {
 
     const toolRegistry = this._getSubagentToolRegistry(taskType, depth);
     const dateStr = new Date().toISOString().slice(0, 10);
-    const sessionDir = path.join(config.tasksDir, dateStr, taskId);
+    const sessionDir = path.join(config.subagentsDir, dateStr, subagentId);
 
     // Resolve model: SubAgentType's model field → resolveModel callback → parent's model
     const typeModel = config.subagentTypeRegistry.getModel(taskType);
@@ -1362,7 +1362,7 @@ export class Agent {
       : this.model;
 
     const agent = new Agent({
-      agentId: taskId,
+      agentId: subagentId,
       model,
       toolRegistry,
       systemPrompt: this._buildSubagentPrompt(
@@ -1374,20 +1374,20 @@ export class Agent {
       storeImage: config.storeImage,
       contextWindow: this.contextWindow,
       toolContext: {
-        taskRegistry: this,
+        subagentRegistry: this,
         onNotify: (message: string) => {
-          config.onNotification({ type: "notify", taskId, message });
+          config.onNotification({ type: "notify", subagentId, message });
         },
       },
     });
 
-    // Write task index entry (for task_list / task_replay tools)
-    this._appendSubagentIndex(taskId, dateStr, { description, taskType, source, depth }).catch((err) => {
-      logger.warn({ taskId, err }, "subagent_index_append_failed");
+    // Write subagent index entry (for subagent_list tool)
+    this._appendSubagentIndex(subagentId, dateStr, { description, taskType, source, depth }).catch((err) => {
+      logger.warn({ subagentId, err }, "subagent_index_append_failed");
     });
 
-    const info: TaskInfo = {
-      taskId,
+    const info: SubagentInfo = {
+      subagentId,
       input: effectiveInput,
       taskType,
       description,
@@ -1396,19 +1396,19 @@ export class Agent {
       depth,
     };
 
-    this._runSubagent(agent, taskId, effectiveInput, taskType, info);
+    this._runSubagent(agent, subagentId, effectiveInput, taskType, info);
 
-    return taskId;
+    return subagentId;
   }
 
   /**
    * Resume a previously-submitted subagent by appending new user input
    * and re-running the Agent from its persisted session.
    *
-   * Returns taskId immediately; the agent runs fire-and-forget in the background.
+   * Returns subagentId immediately; the agent runs fire-and-forget in the background.
    */
   async resume(
-    taskId: string,
+    subagentId: string,
     newInput: string,
     taskType?: string,
     description?: string,
@@ -1418,23 +1418,23 @@ export class Agent {
     }
     const config = this._subagentConfig;
 
-    // Guard: cannot resume a task that is still running
-    if (this._activeSubagents.has(taskId)) {
-      throw new Error(`Task ${taskId} is still running, cannot resume`);
+    // Guard: cannot resume a subagent that is still running
+    if (this._activeSubagents.has(subagentId)) {
+      throw new Error(`Subagent ${subagentId} is still running, cannot resume`);
     }
 
     const index = await this._loadSubagentIndex();
-    const entry = index.get(taskId);
+    const entry = index.get(subagentId);
     if (!entry) {
-      throw new Error(`Task ${taskId} not found in task index`);
+      throw new Error(`Subagent ${subagentId} not found in subagent index`);
     }
 
-    const sessionDir = path.join(config.tasksDir, entry.date, taskId);
+    const sessionDir = path.join(config.subagentsDir, entry.date, subagentId);
     const sessionStore = new SessionStore(sessionDir);
     await sessionStore.append({ role: "user", content: newInput });
 
     const resolvedType = taskType ?? entry.taskType ?? "general";
-    const resolvedDescription = description ?? `Resumed task ${taskId}`;
+    const resolvedDescription = description ?? `Resumed subagent ${subagentId}`;
     const depth = entry.depth ?? 0;
     const toolRegistry = this._getSubagentToolRegistry(resolvedType, depth);
 
@@ -1445,7 +1445,7 @@ export class Agent {
       : this.model;
 
     const agent = new Agent({
-      agentId: taskId,
+      agentId: subagentId,
       model,
       toolRegistry,
       systemPrompt: this._buildSubagentPrompt(
@@ -1456,15 +1456,15 @@ export class Agent {
       sessionDir,
       storeImage: config.storeImage,
       toolContext: {
-        taskRegistry: this,
+        subagentRegistry: this,
         onNotify: (message: string) => {
-          config.onNotification({ type: "notify", taskId, message });
+          config.onNotification({ type: "notify", subagentId, message });
         },
       },
     });
 
-    const info: TaskInfo = {
-      taskId,
+    const info: SubagentInfo = {
+      subagentId,
       input: newInput,
       taskType: resolvedType,
       description: resolvedDescription,
@@ -1473,9 +1473,9 @@ export class Agent {
       depth,
     };
 
-    this._runSubagent(agent, taskId, newInput, resolvedType, info);
+    this._runSubagent(agent, subagentId, newInput, resolvedType, info);
 
-    return taskId;
+    return subagentId;
   }
 
   /** Number of currently running subagents. */
@@ -1484,12 +1484,12 @@ export class Agent {
   }
 
   /** Get info about a running subagent, or null if not found / already completed. */
-  getStatus(taskId: string): TaskInfo | null {
-    return this._activeSubagents.get(taskId) ?? null;
+  getStatus(subagentId: string): SubagentInfo | null {
+    return this._activeSubagents.get(subagentId) ?? null;
   }
 
   /** List all currently active subagents. */
-  listAll(): TaskInfo[] {
+  listAll(): SubagentInfo[] {
     return [...this._activeSubagents.values()];
   }
 
@@ -1513,65 +1513,65 @@ export class Agent {
    */
   private _runSubagent(
     agent: Agent,
-    taskId: string,
+    subagentId: string,
     input: string,
     taskType: string,
-    info: TaskInfo,
+    info: SubagentInfo,
   ): void {
     if (!this._subagentConfig) return;
     const config = this._subagentConfig;
 
-    this._activeSubagents.set(taskId, info);
+    this._activeSubagents.set(subagentId, info);
 
     agent
       .run(input, { persistSession: true })
       .then((result: AgentResult) => {
-        this._activeSubagents.delete(taskId);
+        this._activeSubagents.delete(subagentId);
         if (result.success) {
           config.onNotification({
             type: "completed",
-            taskId,
+            subagentId,
             result: result.result,
             ...(result.imageRefs?.length ? { imageRefs: result.imageRefs } : {}),
           });
         } else {
           config.onNotification({
             type: "failed",
-            taskId,
+            subagentId,
             error: result.error ?? "Unknown error",
           });
         }
         logger.info(
-          { taskId, taskType, success: result.success, llmCalls: result.llmCallCount },
+          { subagentId, taskType, success: result.success, llmCalls: result.llmCallCount },
           "subagent_completed",
         );
       })
       .catch((err: unknown) => {
-        this._activeSubagents.delete(taskId);
+        this._activeSubagents.delete(subagentId);
         const errorMsg = err instanceof Error ? err.message : String(err);
         config.onNotification({
           type: "failed",
-          taskId,
+          subagentId,
           error: errorMsg,
         });
-        logger.error({ taskId, taskType, err }, "subagent_error");
+        logger.error({ subagentId, taskType, err }, "subagent_error");
       });
   }
 
   /**
-   * Read the subagent index file (index.jsonl) and return a map of taskId → entry.
+   * Read the subagent index file (index.jsonl) and return a map of subagentId → entry.
    * Returns an empty map if the file does not exist.
    */
   private async _loadSubagentIndex(): Promise<Map<string, { date: string; depth?: number; taskType?: string }>> {
     if (!this._subagentConfig) return new Map();
-    const indexPath = path.join(this._subagentConfig.tasksDir, "index.jsonl");
+    const indexPath = path.join(this._subagentConfig.subagentsDir, "index.jsonl");
     const map = new Map<string, { date: string; depth?: number; taskType?: string }>();
     try {
       const content = await readFile(indexPath, "utf-8");
       const lines = content.trim().split("\n").filter(Boolean);
       for (const line of lines) {
-        const entry = JSON.parse(line) as { taskId: string; date: string; depth?: number; taskType?: string };
-        map.set(entry.taskId, { date: entry.date, depth: entry.depth, taskType: entry.taskType });
+        const entry = JSON.parse(line) as { subagentId: string; date: string; depth?: number; taskType?: string };
+        map.set(entry.subagentId, { date: entry.date, depth: entry.depth, taskType: entry.taskType });
       }
     } catch {
       // File doesn't exist or unreadable — return empty map
@@ -1582,7 +1582,7 @@ export class Agent {
   /**
    * Build or retrieve a cached ToolRegistry for a given subagent type + depth.
    * Uses SubAgentTypeRegistry.getToolNames() to resolve which tools
-   * are available. Falls back to allTaskTools for unknown types.
+   * are available. Falls back to allSubagentTools for unknown types.
    *
    * When depth === 0, spawn_subagent and resume_subagent are added
    * (L1 agents can spawn L2 sub-agents). depth >= 1 agents cannot.
@@ -1603,8 +1603,8 @@ export class Agent {
 
     // Inherit tools from parent — filtered by SubAgentType's tool list.
     // If parentTools is set, subagents only see what the parent allows.
-    // Falls back to allTaskTools for backward compatibility (e.g. agent-worker).
-    const availableTools = config.parentTools ?? allTaskTools;
+    // Falls back to allSubagentTools for backward compatibility (e.g. agent-worker).
+    const availableTools = config.parentTools ?? allSubagentTools;
     for (const tool of availableTools) {
       if (toolNameSet.has(tool.name)) {
         registry.register(tool);
@@ -1638,7 +1638,7 @@ export class Agent {
       "Complete the task using your available tools. Be efficient and focused.",
       "When done, provide your final result as text output.",
       "",
-      "Use notify(message) to report significant progress to your coordinator.",
+      "Use notify(message) only for critical updates during long-running work (>30s). Do NOT notify routine progress or final summaries — your result is returned automatically.",
     ];
 
     if (depth === 0) {
@@ -1660,17 +1660,17 @@ export class Agent {
   }
 
   /**
-   * Append a subagent entry to the index.jsonl file (for task_list / task_replay).
+   * Append a subagent entry to the index.jsonl file (for subagent_list tool).
    */
   private async _appendSubagentIndex(
-    taskId: string,
+    subagentId: string,
     date: string,
     meta?: { description?: string; taskType?: string; source?: string; depth?: number },
   ): Promise<void> {
     if (!this._subagentConfig) return;
-    await mkdir(this._subagentConfig.tasksDir, { recursive: true });
-    const indexPath = path.join(this._subagentConfig.tasksDir, "index.jsonl");
-    const entry: Record<string, string | number> = { taskId, date };
+    await mkdir(this._subagentConfig.subagentsDir, { recursive: true });
+    const indexPath = path.join(this._subagentConfig.subagentsDir, "index.jsonl");
+    const entry: Record<string, string | number> = { subagentId, date };
     if (meta?.description) entry.description = meta.description;
     if (meta?.taskType) entry.taskType = meta.taskType;
     if (meta?.source) entry.source = meta.source;

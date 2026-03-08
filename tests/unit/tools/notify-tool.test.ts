@@ -7,7 +7,7 @@ describe("notify tool", () => {
     const onNotify = mock((_msg: string) => {});
     const result = await notify.execute(
       { message: "Found 3 results, analyzing..." },
-      { taskId: "task-123", onNotify },
+      { agentId: "task-123", onNotify },
     );
 
     expect(result.success).toBe(true);
@@ -19,20 +19,20 @@ describe("notify tool", () => {
   test("falls back to signal result when onNotify is not set", async () => {
     const result = await notify.execute(
       { message: "Found 3 results, analyzing..." },
-      { taskId: "task-123" },
+      { agentId: "task-123" },
     );
 
     expect(result.success).toBe(true);
-    const data = result.result as { action: string; message: string; taskId: string };
+    const data = result.result as { action: string; message: string; agentId: string };
     expect(data.action).toBe("notify");
     expect(data.message).toBe("Found 3 results, analyzing...");
-    expect(data.taskId).toBe("task-123");
+    expect(data.agentId).toBe("task-123");
   });
 
   test("includes timing metadata", async () => {
     const result = await notify.execute(
       { message: "progress" },
-      { taskId: "test" },
+      { agentId: "test" },
     );
 
     expect(result.startedAt).toBeGreaterThan(0);

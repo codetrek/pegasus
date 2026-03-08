@@ -10,7 +10,7 @@
  */
 
 import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
-import { Agent, type TaskNotification } from "../../../src/agents/agent.ts";
+import { Agent, type SubagentNotification } from "../../../src/agents/agent.ts";
 import type { LanguageModel } from "../../../src/infra/llm-types.ts";
 import { SubAgentTypeRegistry } from "../../../src/agents/subagents/registry.ts";
 import { ToolRegistry } from "../../../src/agents/tools/registry.ts";
@@ -65,7 +65,7 @@ let tempDir: string;
 
 interface CreateAgentOpts {
   model?: LanguageModel;
-  onNotification?: (n: TaskNotification) => void;
+  onNotification?: (n: SubagentNotification) => void;
 }
 
 function createAgentWithSubagents(overrides?: CreateAgentOpts): Agent {
@@ -77,30 +77,30 @@ function createAgentWithSubagents(overrides?: CreateAgentOpts): Agent {
     sessionDir: path.join(tempDir, "session"),
     subagentConfig: {
       subagentTypeRegistry: new SubAgentTypeRegistry(),
-      tasksDir: tempDir,
-      onNotification: overrides?.onNotification ?? mock((_n: TaskNotification) => {}),
+      subagentsDir: tempDir,
+      onNotification: overrides?.onNotification ?? mock((_n: SubagentNotification) => {}),
     },
   });
 }
 
 /** Write an index.jsonl with given entries. */
 async function writeIndex(
-  tasksDir: string,
-  entries: Array<{ taskId: string; date: string }>,
+  subagentsDir: string,
+  entries: Array<{ subagentId: string; date: string }>,
 ): Promise<void> {
-  await mkdir(tasksDir, { recursive: true });
+  await mkdir(subagentsDir, { recursive: true });
   const content = entries.map((e) => JSON.stringify(e)).join("\n") + "\n";
-  await writeFile(path.join(tasksDir, "index.jsonl"), content, "utf-8");
+  await writeFile(path.join(subagentsDir, "index.jsonl"), content, "utf-8");
 }
 
 /** Write a minimal session file so Agent.run() can load it. */
 async function writeSession(
-  tasksDir: string,
+  subagentsDir: string,
   date: string,
   taskId: string,
   messages: Array<{ role: string; content: string }>,
 ): Promise<void> {
-  const sessionDir = path.join(tasksDir, date, taskId);
+  const sessionDir = path.join(subagentsDir, date, taskId);
   await mkdir(sessionDir, { recursive: true });
   const lines = messages
     .map((m) => JSON.stringify({ ts: Date.now(), role: m.role, content: m.content }))
@@ -129,7 +129,7 @@ describe("Agent.resume", () => {
       const date = "2026-03-06";
 
       // Set up index and existing session
-      await writeIndex(tempDir, [{ taskId, date }]);
+      await writeIndex(tempDir, [{ subagentId: taskId, date }]);
       await writeSession(tempDir, date, taskId, [
         { role: "user", content: "original input" },
         { role: "assistant", content: "original response" },
@@ -157,13 +157,13 @@ describe("Agent.resume", () => {
       const taskId = "task123running1";
       const date = "2026-03-06";
 
-      await writeIndex(tempDir, [{ taskId, date }]);
+      await writeIndex(tempDir, [{ subagentId: taskId, date }]);
       await writeSession(tempDir, date, taskId, [
         { role: "user", content: "original" },
       ]);
 
-      const notifications: TaskNotification[] = [];
-      const onNotification = mock((n: TaskNotification) => {
+      const notifications: SubagentNotification[] = [];
+      const onNotification = mock((n: SubagentNotification) => {
         notifications.push(n);
       });
 
@@ -174,7 +174,7 @@ describe("Agent.resume", () => {
 
       const completed = notifications.find((n) => n.type === "completed");
       expect(completed).toBeDefined();
-      expect(completed!.taskId).toBe(taskId);
+      expect(completed!.subagentId).toBe(taskId);
     }, 5000);
   });
 
@@ -186,7 +186,7 @@ describe("Agent.resume", () => {
 
       await expect(
         agent.resume("nonexistent-id", "some input"),
-      ).rejects.toThrow("Task nonexistent-id not found in task index");
+      ).rejects.toThrow("Subagent nonexistent-id not found in subagent index");
     }, 5000);
 
     test("throws when index file does not exist", async () => {
@@ -195,7 +195,7 @@ describe("Agent.resume", () => {
 
       await expect(
         agent.resume("missing-id", "some input"),
-      ).rejects.toThrow("Task missing-id not found in task index");
+      ).rejects.toThrow("Subagent missing-id not found in subagent index");
     }, 5000);
   });
 
@@ -204,7 +204,7 @@ describe("Agent.resume", () => {
       const taskId = "agent-run-test1";
       const date = "2026-03-05";
 
-      await writeIndex(tempDir, [{ taskId, date }]);
+      await writeIndex(tempDir, [{ subagentId: taskId, date }]);
       await writeSession(tempDir, date, taskId, [
         { role: "user", content: "first message" },
       ]);
@@ -237,7 +237,7 @@ describe("Agent.resume", () => {
       const taskId = "custom-type-test";
       const date = "2026-03-04";
 
-      await writeIndex(tempDir, [{ taskId, date }]);
+      await writeIndex(tempDir, [{ subagentId: taskId, date }]);
       await writeSession(tempDir, date, taskId, [
         { role: "user", content: "start" },
       ]);
@@ -258,7 +258,7 @@ describe("Agent.resume", () => {
       const taskId = "default-type-tst";
       const date = "2026-03-03";
 
-      await writeIndex(tempDir, [{ taskId, date }]);
+      await writeIndex(tempDir, [{ subagentId: taskId, date }]);
       await writeSession(tempDir, date, taskId, [
         { role: "user", content: "start" },
       ]);
@@ -277,9 +277,9 @@ describe("Agent.resume", () => {
   describe("_loadSubagentIndex", () => {
     test("parses index.jsonl correctly with multiple entries", async () => {
       await writeIndex(tempDir, [
-        { taskId: "task-aaa", date: "2026-03-01" },
-        { taskId: "task-bbb", date: "2026-03-02" },
-        { taskId: "task-ccc", date: "2026-03-03" },
+        { subagentId: "task-aaa", date: "2026-03-01" },
+        { subagentId: "task-bbb", date: "2026-03-02" },
+        { subagentId: "task-ccc", date: "2026-03-03" },
       ]);
 
       // We test _loadSubagentIndex indirectly: resume succeeds for known IDs,
@@ -298,7 +298,7 @@ describe("Agent.resume", () => {
       // Should not find task-zzz
       await expect(
         agent.resume("task-zzz", "nope"),
-      ).rejects.toThrow("Task task-zzz not found in task index");
+      ).rejects.toThrow("Subagent task-zzz not found in subagent index");
     }, 5000);
 
     test("returns empty map when index file is missing", async () => {
@@ -308,11 +308,11 @@ describe("Agent.resume", () => {
 
       await expect(
         agent.resume("any-id", "input"),
-      ).rejects.toThrow("Task any-id not found in task index");
+      ).rejects.toThrow("Subagent any-id not found in subagent index");
     }, 5000);
 
     test("handles index with single entry", async () => {
-      await writeIndex(tempDir, [{ taskId: "solo-task", date: "2026-01-15" }]);
+      await writeIndex(tempDir, [{ subagentId: "solo-task", date: "2026-01-15" }]);
       await writeSession(tempDir, "2026-01-15", "solo-task", [
         { role: "user", content: "original" },
       ]);
@@ -331,13 +331,13 @@ describe("Agent.resume", () => {
       const taskId = "fail-resume-tst";
       const date = "2026-03-06";
 
-      await writeIndex(tempDir, [{ taskId, date }]);
+      await writeIndex(tempDir, [{ subagentId: taskId, date }]);
       await writeSession(tempDir, date, taskId, [
         { role: "user", content: "start" },
       ]);
 
-      const notifications: TaskNotification[] = [];
-      const onNotification = mock((n: TaskNotification) => {
+      const notifications: SubagentNotification[] = [];
+      const onNotification = mock((n: SubagentNotification) => {
         notifications.push(n);
       });
 
@@ -355,7 +355,7 @@ describe("Agent.resume", () => {
 
         const failedCall = notifications.find((n) => n.type === "failed");
         expect(failedCall).toBeDefined();
-        expect(failedCall!.taskId).toBe(taskId);
+        expect(failedCall!.subagentId).toBe(taskId);
         expect((failedCall as any).error).toBe("agent crashed on resume");
         expect(agent.activeCount).toBe(0);
       } finally {

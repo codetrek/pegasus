@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { Agent, type AgentResult, type TaskNotificationPayload } from "@pegasus/agents/agent.ts";
+import { Agent, type AgentResult, type SubagentNotificationPayload } from "@pegasus/agents/agent.ts";
 import type { LanguageModel, GenerateTextResult } from "@pegasus/infra/llm-types.ts";
 import { ToolRegistry } from "@pegasus/agents/tools/registry";
 import { rm, mkdir, writeFile } from "node:fs/promises";
@@ -201,19 +201,19 @@ describe("Agent coverage", () => {
       await Bun.sleep(30);
 
       // Push task notification
-      const notification: TaskNotificationPayload = {
+      const notification: SubagentNotificationPayload = {
         type: "completed",
-        taskId: "task-1",
+        subagentId: "task-1",
         result: { response: "done" },
       };
-      (agent as any).pushQueue({ kind: "task_notify", notification });
+      (agent as any).pushQueue({ kind: "subagent_notify", notification });
 
       await Bun.sleep(50);
 
       // Verify the notification was added to session
       const sessionFile = Bun.file(`${testDataDir}/session/current.jsonl`);
       const content = await sessionFile.text();
-      expect(content).toContain("[Task task-1 completed]");
+      expect(content).toContain("[Subagent task-1 completed]");
       expect(content).toContain("done");
 
       await agent.stop();
@@ -229,17 +229,17 @@ describe("Agent coverage", () => {
       agent.send({ text: "hi", channel: { type: "cli", channelId: "test" } });
       await Bun.sleep(30);
 
-      const notification: TaskNotificationPayload = {
+      const notification: SubagentNotificationPayload = {
         type: "failed",
-        taskId: "task-2",
+        subagentId: "task-2",
         error: "something broke",
       };
-      (agent as any).pushQueue({ kind: "task_notify", notification });
+      (agent as any).pushQueue({ kind: "subagent_notify", notification });
 
       await Bun.sleep(50);
 
       const content = await Bun.file(`${testDataDir}/session/current.jsonl`).text();
-      expect(content).toContain("[Task task-2 failed]");
+      expect(content).toContain("[Subagent task-2 failed]");
       expect(content).toContain("something broke");
 
       await agent.stop();
@@ -255,17 +255,17 @@ describe("Agent coverage", () => {
       agent.send({ text: "hi", channel: { type: "cli", channelId: "test" } });
       await Bun.sleep(30);
 
-      const notification: TaskNotificationPayload = {
+      const notification: SubagentNotificationPayload = {
         type: "notify",
-        taskId: "task-3",
+        subagentId: "task-3",
         message: "50% progress",
       };
-      (agent as any).pushQueue({ kind: "task_notify", notification });
+      (agent as any).pushQueue({ kind: "subagent_notify", notification });
 
       await Bun.sleep(50);
 
       const content = await Bun.file(`${testDataDir}/session/current.jsonl`).text();
-      expect(content).toContain("[Task task-3 update]");
+      expect(content).toContain("[Subagent task-3 update]");
       expect(content).toContain("50% progress");
 
       await agent.stop();
@@ -281,18 +281,18 @@ describe("Agent coverage", () => {
       agent.send({ text: "hi", channel: { type: "cli", channelId: "test" } });
       await Bun.sleep(30);
 
-      const notification: TaskNotificationPayload = {
+      const notification: SubagentNotificationPayload = {
         type: "completed",
-        taskId: "task-img",
+        subagentId: "task-img",
         result: "screenshot taken",
         imageRefs: [{ id: "img_1", mimeType: "image/png" }],
       };
-      (agent as any).pushQueue({ kind: "task_notify", notification });
+      (agent as any).pushQueue({ kind: "subagent_notify", notification });
 
       await Bun.sleep(50);
 
       const content = await Bun.file(`${testDataDir}/session/current.jsonl`).text();
-      expect(content).toContain("[Task task-img completed]");
+      expect(content).toContain("[Subagent task-img completed]");
       // Images should be attached to the message
       expect(content).toContain("img_1");
 

@@ -6,7 +6,7 @@ import type { ToolContext } from "../../../src/agents/tools/types.ts";
 describe("reply tool", () => {
   function makeContext(overrides?: Partial<ToolContext>): ToolContext {
     return {
-      taskId: "main-agent",
+      agentId: "main-agent",
       onReply: () => {},
       resolveImage: async () => null,
       ...overrides,
@@ -128,7 +128,7 @@ describe("reply tool", () => {
   it("should return error when onReply is not available", async () => {
     const result = await reply.execute(
       { text: "Hello", channelType: "cli", channelId: "main" },
-      { taskId: "test" },
+      { agentId: "test" },
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain("onReply not available");

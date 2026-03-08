@@ -31,7 +31,7 @@ describe("image_read tool", () => {
     const ref = await manager.store(TEST_PNG, "image/png", "test");
     const result = await image_read.execute(
       { source: ref.id },
-      { taskId: "test", mediaDir: tmpDir },
+      { agentId: "test", mediaDir: tmpDir },
     );
     expect(result.success).toBe(true);
     expect(result.images).toBeDefined();
@@ -47,7 +47,7 @@ describe("image_read tool", () => {
     const ref = await manager.store(TEST_PNG, "image/png", "test");
     const result = await image_read.execute(
       { source: ref.id },
-      { taskId: "test", mediaDir: tmpDir },
+      { agentId: "test", mediaDir: tmpDir },
     );
     expect(result.result).toContain(ref.id);
     expect(result.result).toContain("bytes");
@@ -56,7 +56,7 @@ describe("image_read tool", () => {
   it("should fail for non-existent image", async () => {
     const result = await image_read.execute(
       { source: "nonexistent1" },
-      { taskId: "test", mediaDir: tmpDir },
+      { agentId: "test", mediaDir: tmpDir },
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain("not found");
@@ -66,7 +66,7 @@ describe("image_read tool", () => {
   it("should fail when mediaDir is not configured", async () => {
     const result = await image_read.execute(
       { source: "abc" },
-      { taskId: "test" }, // no mediaDir
+      { agentId: "test" }, // no mediaDir
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain("mediaDir");
@@ -75,7 +75,7 @@ describe("image_read tool", () => {
   it("should fail gracefully when images directory does not exist", async () => {
     const result = await image_read.execute(
       { source: "abc" },
-      { taskId: "test", mediaDir: "/tmp/nonexistent-media-dir" },
+      { agentId: "test", mediaDir: "/tmp/nonexistent-media-dir" },
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain("not found");
@@ -96,7 +96,7 @@ describe("image_read tool", () => {
 
     const result = await image_read.execute(
       { source: fakeId },
-      { taskId: "test", mediaDir: tmpDir },
+      { agentId: "test", mediaDir: tmpDir },
     );
     expect(result.success).toBe(true);
     expect(result.images).toBeDefined();
@@ -111,7 +111,7 @@ describe("image_read tool", () => {
 
     const result = await image_read.execute(
       { source: fakeId },
-      { taskId: "test", mediaDir: tmpDir },
+      { agentId: "test", mediaDir: tmpDir },
     );
     expect(result.success).toBe(true);
     expect(result.images).toBeDefined();
@@ -126,7 +126,7 @@ describe("image_read tool", () => {
 
     const result = await image_read.execute(
       { source: fakeId },
-      { taskId: "test", mediaDir: tmpDir },
+      { agentId: "test", mediaDir: tmpDir },
     );
     expect(result.success).toBe(true);
     expect(result.images![0]!.mimeType).toBe("image/jpeg");
@@ -142,7 +142,7 @@ describe("image_read tool", () => {
 
     const result = await image_read.execute(
       { source: fakeId },
-      { taskId: "test", mediaDir: tmpDir },
+      { agentId: "test", mediaDir: tmpDir },
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain("Failed to read image");
@@ -157,7 +157,7 @@ describe("image_read tool", () => {
 
     const result = await image_read.execute(
       { source: testImagePath },
-      { taskId: "test", mediaDir: tmpDir },
+      { agentId: "test", mediaDir: tmpDir },
     );
     expect(result.success).toBe(true);
     expect(result.images).toBeDefined();
@@ -185,7 +185,7 @@ describe("image_read tool", () => {
 
     const result = await image_read.execute(
       { source: testImagePath },
-      { taskId: "test", mediaDir: tmpDir, storeImage: mockStoreImage },
+      { agentId: "test", mediaDir: tmpDir, storeImage: mockStoreImage },
     );
     expect(result.success).toBe(true);
     expect(storeImageCalled).toBe(true);
@@ -197,7 +197,7 @@ describe("image_read tool", () => {
   it("should return error for non-existent file path", async () => {
     const result = await image_read.execute(
       { source: "/tmp/nonexistent-image-file-12345.png" },
-      { taskId: "test", mediaDir: tmpDir },
+      { agentId: "test", mediaDir: tmpDir },
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain("Failed to read image");
@@ -208,7 +208,7 @@ describe("image_read tool", () => {
     const ref = await manager.store(TEST_PNG, "image/png", "test");
     const result = await image_read.execute(
       { source: ref.id },
-      { taskId: "test", mediaDir: tmpDir },
+      { agentId: "test", mediaDir: tmpDir },
     );
     expect(result.success).toBe(true);
     expect(result.images).toBeDefined();
@@ -222,7 +222,7 @@ describe("image_read tool", () => {
     // This path won't exist, so we expect an error from readImageFile
     const result = await image_read.execute(
       { source: "C:\\Users\\test\\image.png" },
-      { taskId: "test", mediaDir: tmpDir },
+      { agentId: "test", mediaDir: tmpDir },
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain("Failed to read image");

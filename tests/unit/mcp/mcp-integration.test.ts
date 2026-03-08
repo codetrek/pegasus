@@ -240,7 +240,7 @@ describe("MCP Integration", () => {
       const result = await executor.execute(
         "srv__search",
         { query: "test" },
-        { taskId: "t1" },
+        { agentId: "t1" },
       );
 
       expect(result.success).toBe(true);
@@ -262,7 +262,7 @@ describe("MCP Integration", () => {
       const result = await executor.execute(
         "srv__search",
         { arbitrary: true, nested: { x: 1 } },
-        { taskId: "t1" },
+        { agentId: "t1" },
       );
 
       expect(result.success).toBe(true);
@@ -283,7 +283,7 @@ describe("MCP Integration", () => {
       const result = await executor.execute(
         "srv__search",
         { query: "missing" },
-        { taskId: "t1" },
+        { agentId: "t1" },
       );
 
       // MCP tool returns { success: false } — ToolExecutor does not re-throw
@@ -309,7 +309,7 @@ describe("MCP Integration", () => {
       const result = await executor.execute(
         "slow__search",
         {},
-        { taskId: "t1" },
+        { agentId: "t1" },
       );
 
       expect(result.success).toBe(false);

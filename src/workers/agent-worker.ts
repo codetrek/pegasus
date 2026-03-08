@@ -13,7 +13,7 @@ declare var self: Worker;
 
 import path from "node:path";
 import { Agent } from "../agents/agent.ts";
-import type { TaskNotification } from "../agents/agent.ts";
+import type { SubagentNotification } from "../agents/agent.ts";
 import { SubAgentTypeRegistry } from "../agents/subagents/registry.ts";
 import { loadSubAgentTypeDefinitions } from "../agents/subagents/loader.ts";
 import { ToolRegistry } from "../agents/tools/registry.ts";
@@ -182,8 +182,8 @@ export async function initProject(config: ProjectConfig): Promise<void> {
     (msg: unknown) => postToParent(msg),
   );
 
-  // 4-5. (Persona and agentSettings no longer needed — TaskRunner uses
-  //  ExecutionAgent internally, which builds its own system prompt.)
+  // 4-5. (Persona and agentSettings no longer needed — Agent builds
+  //  its own system prompt for subagent execution.)
 
   // 6. Build project SkillRegistry (project-specific > global > builtin)
   projectSkillRegistry = new SkillRegistry();
@@ -209,14 +209,14 @@ export async function initProject(config: ProjectConfig): Promise<void> {
 
   const storePaths = buildProjectAgentPaths(projectPath);
 
-  // 9. Create dispatcher Agent with subagent management (replaces TaskRunner)
+  // 9. Create dispatcher Agent with subagent management
   //    This Agent is never run() itself — it acts as a dispatcher that
   //    creates child Agents via submit() for each incoming message.
   projectAgent = _createProjectAgent({
     model: proxyModel,
     subagentTypeRegistry: subAgentTypeRegistry,
-    tasksDir: storePaths.tasks,
-    onNotification: (notification: TaskNotification) => {
+    subagentsDir: storePaths.subagents,
+    onNotification: (notification: SubagentNotification) => {
       sendNotify(notificationToText(notification));
     },
     sessionDir: storePaths.session,
@@ -288,10 +288,10 @@ export function splitModelSpec(
 }
 
 /**
- * Convert a TaskNotification to a display string.
+ * Convert a SubagentNotification to a display string.
  * Exported for unit testing.
  */
-export function notificationToText(notification: TaskNotification): string {
+export function notificationToText(notification: SubagentNotification): string {
   switch (notification.type) {
     case "completed": {
       const result = notification.result;
@@ -302,10 +302,10 @@ export function notificationToText(notification: TaskNotification): string {
         if (typeof response === "string") return response;
         return JSON.stringify(result);
       }
-      return String(result ?? "[Task completed]");
+      return String(result ?? "[Subagent completed]");
     }
     case "failed":
-      return `[Task failed: ${notification.error}]`;
+      return `[Subagent failed: ${notification.error}]`;
     default:
       // "notify"
       return notification.message ?? "";
@@ -382,8 +382,8 @@ export function _setExitProcessForTest(fn: (code: number) => void): () => void {
 export interface ProjectAgentFactoryDeps {
   model: ProxyLanguageModel;
   subagentTypeRegistry: SubAgentTypeRegistry;
-  tasksDir: string;
-  onNotification: (notification: TaskNotification) => void;
+  subagentsDir: string;
+  onNotification: (notification: SubagentNotification) => void;
   sessionDir: string;
   channelId: string;
 }
@@ -400,11 +400,7 @@ export function _setProjectAgentFactoryForTest(fn: ProjectAgentFactory): () => v
   return () => { _projectAgentFactory = null; };
 }
 
-/**
- * Backward-compat alias.
- * @deprecated Use _setProjectAgentFactoryForTest instead.
- */
-export const _setTaskRunnerFactoryForTest = _setProjectAgentFactoryForTest;
+/** @deprecated Use _setProjectAgentFactoryForTest instead. */
 export const _setAgentFactoryForTest = _setProjectAgentFactoryForTest;
 
 /** Override ProxyLanguageModel constructor for testing. Returns cleanup function. */
@@ -424,7 +420,7 @@ export function _createProjectAgent(deps: ProjectAgentFactoryDeps): Agent {
     sessionDir: deps.sessionDir,
     subagentConfig: {
       subagentTypeRegistry: deps.subagentTypeRegistry,
-      tasksDir: deps.tasksDir,
+      subagentsDir: deps.subagentsDir,
       onNotification: deps.onNotification,
     },
   });

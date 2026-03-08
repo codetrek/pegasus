@@ -22,7 +22,7 @@ const TINY_PNG = Buffer.from(
 
 /** Create a minimal ToolContext for testing. */
 function makeContext(overrides: Partial<ToolContext> = {}): ToolContext {
-  return { taskId: "test-task", ...overrides };
+  return { agentId: "test-task", ...overrides };
 }
 
 // ── Tests ─────────────────────────────────────────────

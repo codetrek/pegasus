@@ -200,7 +200,7 @@ describe("wrapMCPTools", () => {
       const tools = wrapMCPTools("srv", [sampleMcpTool], manager);
       const result = await tools[0]!.execute(
         { path: "/tmp/test.txt" },
-        { taskId: "t1" },
+        { agentId: "t1" },
       );
 
       expect(result.success).toBe(true);
@@ -219,7 +219,7 @@ describe("wrapMCPTools", () => {
         ],
       });
       const tools = wrapMCPTools("srv", [sampleMcpTool], manager);
-      const result = await tools[0]!.execute({}, { taskId: "t1" });
+      const result = await tools[0]!.execute({}, { agentId: "t1" });
 
       expect(result.success).toBe(true);
       expect(result.result).toBe("line 1\nline 2\nline 3");
@@ -230,14 +230,14 @@ describe("wrapMCPTools", () => {
         content: [{ type: "text", text: "single" }],
       });
       const tools = wrapMCPTools("srv", [sampleMcpTool], manager);
-      const result = await tools[0]!.execute({}, { taskId: "t1" });
+      const result = await tools[0]!.execute({}, { agentId: "t1" });
       expect(result.result).toBe("single");
     });
 
     it("should handle empty content array", async () => {
       const manager = createMockManager({ content: [] });
       const tools = wrapMCPTools("srv", [sampleMcpTool], manager);
-      const result = await tools[0]!.execute({}, { taskId: "t1" });
+      const result = await tools[0]!.execute({}, { agentId: "t1" });
 
       expect(result.success).toBe(true);
       expect(result.result).toBe("");
@@ -249,7 +249,7 @@ describe("wrapMCPTools", () => {
       });
       const tools = wrapMCPTools("srv", [sampleMcpTool], manager);
       const before = Date.now();
-      const result = await tools[0]!.execute({}, { taskId: "t1" });
+      const result = await tools[0]!.execute({}, { agentId: "t1" });
       const after = Date.now();
 
       expect(result.startedAt).toBeGreaterThanOrEqual(before);
@@ -267,7 +267,7 @@ describe("wrapMCPTools", () => {
         ],
       });
       const tools = wrapMCPTools("srv", [sampleMcpTool], manager);
-      const result = await tools[0]!.execute({}, { taskId: "t1" });
+      const result = await tools[0]!.execute({}, { agentId: "t1" });
 
       expect(result.success).toBe(true);
       expect(result.result).toContain("[image:");
@@ -282,7 +282,7 @@ describe("wrapMCPTools", () => {
         ],
       } as CallToolResult);
       const tools = wrapMCPTools("srv", [sampleMcpTool], manager);
-      const result = await tools[0]!.execute({}, { taskId: "t1" });
+      const result = await tools[0]!.execute({}, { agentId: "t1" });
 
       expect(result.success).toBe(true);
       expect(result.result).toContain("[image: unknown");
@@ -298,7 +298,7 @@ describe("wrapMCPTools", () => {
         ],
       } as CallToolResult);
       const tools = wrapMCPTools("srv", [sampleMcpTool], manager);
-      const result = await tools[0]!.execute({}, { taskId: "t1" });
+      const result = await tools[0]!.execute({}, { agentId: "t1" });
 
       expect(result.success).toBe(true);
       expect(result.result).toContain("[resource:");
@@ -312,7 +312,7 @@ describe("wrapMCPTools", () => {
         ],
       } as CallToolResult);
       const tools = wrapMCPTools("srv", [sampleMcpTool], manager);
-      const result = await tools[0]!.execute({}, { taskId: "t1" });
+      const result = await tools[0]!.execute({}, { agentId: "t1" });
 
       expect(result.success).toBe(true);
       expect(result.result).toContain("[resource: unknown]");
@@ -323,7 +323,7 @@ describe("wrapMCPTools", () => {
         content: [{ type: "audio" as any, data: "audiodata" }],
       } as CallToolResult);
       const tools = wrapMCPTools("srv", [sampleMcpTool], manager);
-      const result = await tools[0]!.execute({}, { taskId: "t1" });
+      const result = await tools[0]!.execute({}, { agentId: "t1" });
 
       expect(result.success).toBe(true);
       expect(result.result).toContain("[audio: unsupported content type]");
@@ -342,7 +342,7 @@ describe("wrapMCPTools", () => {
         ],
       } as CallToolResult);
       const tools = wrapMCPTools("srv", [sampleMcpTool], manager);
-      const result = await tools[0]!.execute({}, { taskId: "t1" });
+      const result = await tools[0]!.execute({}, { agentId: "t1" });
 
       expect(result.success).toBe(true);
       const text = result.result as string;
@@ -364,7 +364,7 @@ describe("wrapMCPTools", () => {
       const tools = wrapMCPTools("srv", [sampleMcpTool], manager);
       const result = await tools[0]!.execute(
         { path: "/nonexistent" },
-        { taskId: "t1" },
+        { agentId: "t1" },
       );
 
       expect(result.success).toBe(false);
@@ -377,7 +377,7 @@ describe("wrapMCPTools", () => {
         isError: true,
       });
       const tools = wrapMCPTools("srv", [sampleMcpTool], manager);
-      const result = await tools[0]!.execute({}, { taskId: "t1" });
+      const result = await tools[0]!.execute({}, { agentId: "t1" });
 
       expect(result.success).toBe(false);
       expect(result.error).toBe("MCP tool returned an error");
@@ -391,7 +391,7 @@ describe("wrapMCPTools", () => {
         isError: true,
       });
       const tools = wrapMCPTools("srv", [sampleMcpTool], manager);
-      const result = await tools[0]!.execute({}, { taskId: "t1" });
+      const result = await tools[0]!.execute({}, { agentId: "t1" });
 
       expect(result.success).toBe(false);
       // The image metadata string is truthy, so it should be used as error
@@ -406,7 +406,7 @@ describe("wrapMCPTools", () => {
       const tools = wrapMCPTools("srv", [sampleMcpTool], manager);
       const result = await tools[0]!.execute(
         { path: "/tmp/test.txt" },
-        { taskId: "t1" },
+        { agentId: "t1" },
       );
 
       expect(result.success).toBe(false);
@@ -416,7 +416,7 @@ describe("wrapMCPTools", () => {
     it("should handle non-Error throws (string)", async () => {
       const manager = createMockManager(undefined, "raw string error" as any);
       const tools = wrapMCPTools("srv", [sampleMcpTool], manager);
-      const result = await tools[0]!.execute({}, { taskId: "t1" });
+      const result = await tools[0]!.execute({}, { agentId: "t1" });
 
       expect(result.success).toBe(false);
       expect(result.error).toBe("raw string error");
@@ -425,7 +425,7 @@ describe("wrapMCPTools", () => {
     it("should set timing fields even on error", async () => {
       const manager = createMockManager(undefined, new Error("fail"));
       const tools = wrapMCPTools("srv", [sampleMcpTool], manager);
-      const result = await tools[0]!.execute({}, { taskId: "t1" });
+      const result = await tools[0]!.execute({}, { agentId: "t1" });
 
       expect(result.success).toBe(false);
       expect(result.startedAt).toBeGreaterThan(0);
@@ -440,7 +440,7 @@ describe("wrapMCPTools", () => {
         content: [{ type: "text", text: "ok" }],
       });
       const tools = wrapMCPTools("srv", [sampleMcpTool], manager);
-      await tools[0]!.execute(null, { taskId: "t1" });
+      await tools[0]!.execute(null, { agentId: "t1" });
 
       expect(manager.callTool).toHaveBeenCalledWith("srv", "read_file", {});
     });
@@ -450,7 +450,7 @@ describe("wrapMCPTools", () => {
         content: [{ type: "text", text: "ok" }],
       });
       const tools = wrapMCPTools("srv", [sampleMcpTool], manager);
-      await tools[0]!.execute(undefined, { taskId: "t1" });
+      await tools[0]!.execute(undefined, { agentId: "t1" });
 
       expect(manager.callTool).toHaveBeenCalledWith("srv", "read_file", {});
     });
@@ -464,7 +464,7 @@ describe("wrapMCPTools", () => {
         nested: { arr: [1, 2, 3], flag: true },
         str: "hello",
       };
-      await tools[0]!.execute(complexParams, { taskId: "t1" });
+      await tools[0]!.execute(complexParams, { agentId: "t1" });
 
       expect(manager.callTool).toHaveBeenCalledWith(
         "srv",

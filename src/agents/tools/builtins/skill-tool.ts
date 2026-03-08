@@ -47,11 +47,11 @@ export const use_skill: Tool = {
     try {
       if (skill.context === "fork") {
         // Fork: submit as background task
-        const taskRegistry = context.taskRegistry;
-        if (!taskRegistry) {
+        const subagentRegistry = context.subagentRegistry;
+        if (!subagentRegistry) {
           return {
             success: false,
-            error: "taskRegistry not available for fork skill execution",
+            error: "subagentRegistry not available for fork skill execution",
             startedAt,
             completedAt: Date.now(),
             durationMs: Date.now() - startedAt,
@@ -60,7 +60,7 @@ export const use_skill: Tool = {
 
         const body = registry.loadBody(skillName, skillArgs);
         const taskType = skill.agent || "general";
-        const taskId = taskRegistry.submit(body ?? "", "skill:" + skillName, taskType, `Skill: ${skillName}`);
+        const subagentId = subagentRegistry.submit(body ?? "", "skill:" + skillName, taskType, `Skill: ${skillName}`);
 
         // Start tick manager to poll for task completion
         const tick = context.tickManager;
@@ -68,7 +68,7 @@ export const use_skill: Tool = {
 
         return {
           success: true,
-          result: { taskId, status: "spawned", skill: skillName },
+          result: { subagentId, status: "spawned", skill: skillName },
           startedAt,
           completedAt: Date.now(),
           durationMs: Date.now() - startedAt,

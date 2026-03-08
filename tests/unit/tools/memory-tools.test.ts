@@ -84,7 +84,7 @@ describe("memory tools", () => {
 
   describe("getMemoryDir (via memory_list)", () => {
     it("should crash when memoryDir is missing from context", async () => {
-      const context = { taskId: "t1" } as any;
+      const context = { agentId: "t1" } as any;
       await expect(memory_list.execute({}, context)).rejects.toThrow(
         "memoryDir is required but missing",
       );
@@ -93,7 +93,7 @@ describe("memory tools", () => {
 
   describe("memory_list", () => {
     it("should return empty list when no memory files exist", async () => {
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const result = await memory_list.execute({}, context);
 
       expect(result.success).toBe(true);
@@ -107,7 +107,7 @@ describe("memory tools", () => {
         "# User Facts\n\n> Summary: user name, language\n\n- Name: Test\n",
       );
 
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const result = await memory_list.execute({}, context);
 
       expect(result.success).toBe(true);
@@ -124,7 +124,7 @@ describe("memory tools", () => {
         "# 2026-02 Episodes\n\n> Summary: logger fix, short ID\n\n## Entry\n- Summary: details\n",
       );
 
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const result = await memory_list.execute({}, context);
 
       expect(result.success).toBe(true);
@@ -144,7 +144,7 @@ describe("memory tools", () => {
         "# Feb\n\n> Summary: episode stuff\n\n## Entry\n",
       );
 
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const result = await memory_list.execute({}, context);
 
       expect(result.success).toBe(true);
@@ -160,7 +160,7 @@ describe("memory tools", () => {
     it("should return empty summary when > Summary: line is missing", async () => {
       await Bun.write(`${testDir}/facts/bare.md`, "# Bare\n\n- no summary line\n");
 
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const result = await memory_list.execute({}, context);
 
       const data = result.result as Array<{ path: string; summary: string; size: number }>;
@@ -168,7 +168,7 @@ describe("memory tools", () => {
     });
 
     it("should handle non-existent memory directory gracefully", async () => {
-      const context = { taskId: "t1", memoryDir: "/tmp/pegasus-nonexistent" };
+      const context = { agentId: "t1", memoryDir: "/tmp/pegasus-nonexistent" };
       const result = await memory_list.execute({}, context);
 
       expect(result.success).toBe(true);
@@ -179,7 +179,7 @@ describe("memory tools", () => {
       await Bun.write(`${testDir}/facts/user.md`, "# User\n\n> Summary: user\n");
       await Bun.write(`${testDir}/facts/notes.txt`, "not markdown");
 
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const result = await memory_list.execute({}, context);
 
       const data = result.result as Array<{ path: string; summary: string; size: number }>;
@@ -190,7 +190,7 @@ describe("memory tools", () => {
     it("should skip files in root memory directory (only scans subdirs)", async () => {
       await Bun.write(`${testDir}/root-file.md`, "# Root\n\n> Summary: root\n");
 
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const result = await memory_list.execute({}, context);
 
       const data = result.result as Array<{ path: string; summary: string; size: number }>;
@@ -198,7 +198,7 @@ describe("memory tools", () => {
     });
 
     it("should include timing metadata", async () => {
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const result = await memory_list.execute({}, context);
 
       expect(result.startedAt).toBeGreaterThan(0);
@@ -214,7 +214,7 @@ describe("memory tools", () => {
       const content = "# User Facts\n\n> Summary: user name\n\n- Name: Test\n";
       await Bun.write(`${testDir}/facts/user.md`, content);
 
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const result = await memory_read.execute({ path: "facts/user.md" }, context);
 
       expect(result.success).toBe(true);
@@ -222,7 +222,7 @@ describe("memory tools", () => {
     });
 
     it("should fail on non-existent file", async () => {
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const result = await memory_read.execute({ path: "facts/missing.md" }, context);
 
       expect(result.success).toBe(false);
@@ -230,7 +230,7 @@ describe("memory tools", () => {
     });
 
     it("should reject directory traversal", async () => {
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const result = await memory_read.execute({ path: "../../etc/passwd" }, context);
 
       expect(result.success).toBe(false);
@@ -240,7 +240,7 @@ describe("memory tools", () => {
     it("should include timing metadata", async () => {
       await Bun.write(`${testDir}/facts/user.md`, "test");
 
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const result = await memory_read.execute({ path: "facts/user.md" }, context);
 
       expect(result.startedAt).toBeGreaterThan(0);
@@ -252,7 +252,7 @@ describe("memory tools", () => {
 
   describe("memory_write", () => {
     it("should write a new memory file", async () => {
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const content = "# User Facts\n\n> Summary: user name\n\n- Name: Test\n";
       const result = await memory_write.execute(
         { path: "facts/user.md", content },
@@ -267,7 +267,7 @@ describe("memory tools", () => {
     it("should overwrite an existing file", async () => {
       await Bun.write(`${testDir}/facts/user.md`, "old content");
 
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const result = await memory_write.execute(
         { path: "facts/user.md", content: "new content" },
         context,
@@ -279,7 +279,7 @@ describe("memory tools", () => {
     });
 
     it("should create parent directories if needed", async () => {
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const result = await memory_write.execute(
         { path: "new-category/file.md", content: "hello" },
         context,
@@ -291,7 +291,7 @@ describe("memory tools", () => {
     });
 
     it("should reject directory traversal", async () => {
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const result = await memory_write.execute(
         { path: "../../tmp/evil.md", content: "bad" },
         context,
@@ -302,7 +302,7 @@ describe("memory tools", () => {
     });
 
     it("should return written path and size", async () => {
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const result = await memory_write.execute(
         { path: "facts/user.md", content: "12345" },
         context,
@@ -319,7 +319,7 @@ describe("memory tools", () => {
 
       const result = await memory_write.execute(
         { path: "facts/configuration.md", content: "# Config\n> Summary: config stuff" },
-        { taskId: "test", memoryDir: testDir },
+        { agentId: "test", memoryDir: testDir },
       );
 
       expect(result.success).toBe(false);
@@ -331,7 +331,7 @@ describe("memory tools", () => {
 
       const result = await memory_write.execute(
         { path: "facts/user.md", content: "# User\n> Summary: test user" },
-        { taskId: "test", memoryDir: testDir },
+        { agentId: "test", memoryDir: testDir },
       );
 
       expect(result.success).toBe(true);
@@ -342,7 +342,7 @@ describe("memory tools", () => {
 
       const result = await memory_write.execute(
         { path: "facts/memory.md", content: "# Memory\n> Summary: learned things" },
-        { taskId: "test", memoryDir: testDir },
+        { agentId: "test", memoryDir: testDir },
       );
 
       expect(result.success).toBe(true);
@@ -353,7 +353,7 @@ describe("memory tools", () => {
 
       const result = await memory_write.execute(
         { path: "episodes/2026-02.md", content: "# Feb 2026\n> Summary: events" },
-        { taskId: "test", memoryDir: testDir },
+        { agentId: "test", memoryDir: testDir },
       );
 
       expect(result.success).toBe(true);
@@ -369,7 +369,7 @@ describe("memory tools", () => {
       // Try to write memory.md that would push total over 15KB
       const result = await memory_write.execute(
         { path: "facts/memory.md", content: "# Memory\n> Summary: test\n\n" + "y".repeat(2_000) },
-        { taskId: "test", memoryDir: testDir },
+        { agentId: "test", memoryDir: testDir },
       );
 
       expect(result.success).toBe(false);
@@ -384,7 +384,7 @@ describe("memory tools", () => {
       const content = "# User Facts\n\n> Summary: user name\n\n- Name: Alice\n- Lang: EN\n";
       await Bun.write(`${testDir}/facts/user.md`, content);
 
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const result = await memory_patch.execute(
         { path: "facts/user.md", old_str: "- Name: Alice", new_str: "- Name: Bob" },
         context,
@@ -399,7 +399,7 @@ describe("memory tools", () => {
     it("should fail if string not found", async () => {
       await Bun.write(`${testDir}/facts/user.md`, "# User\n\n- Name: Alice\n");
 
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const result = await memory_patch.execute(
         { path: "facts/user.md", old_str: "- Name: Charlie", new_str: "- Name: Bob" },
         context,
@@ -412,7 +412,7 @@ describe("memory tools", () => {
     it("should fail if string appears multiple times", async () => {
       await Bun.write(`${testDir}/facts/user.md`, "hello world\nhello world\n");
 
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const result = await memory_patch.execute(
         { path: "facts/user.md", old_str: "hello world", new_str: "goodbye" },
         context,
@@ -423,7 +423,7 @@ describe("memory tools", () => {
     });
 
     it("should reject directory traversal", async () => {
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const result = await memory_patch.execute(
         { path: "../../etc/passwd", old_str: "root", new_str: "hacked" },
         context,
@@ -439,7 +439,7 @@ describe("memory tools", () => {
 
       const result = await memory_patch.execute(
         { path: "facts/config.md", old_str: "old text", new_str: "new text" },
-        { taskId: "test", memoryDir: testDir },
+        { agentId: "test", memoryDir: testDir },
       );
 
       expect(result.success).toBe(false);
@@ -455,7 +455,7 @@ describe("memory tools", () => {
       await Bun.write(`${testDir}/episodes/2026-02.md`, existing);
 
       const entry = "\n## New Entry\n- Summary: new thing\n- Date: 2026-02-25\n";
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const result = await memory_append.execute(
         { path: "episodes/2026-02.md", entry },
         context,
@@ -469,7 +469,7 @@ describe("memory tools", () => {
 
     it("should create file with entry if it does not exist", async () => {
       const entry = "\n## First Entry\n- Summary: first\n- Date: 2026-02-25\n";
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const result = await memory_append.execute(
         { path: "episodes/2026-03.md", entry },
         context,
@@ -481,7 +481,7 @@ describe("memory tools", () => {
     });
 
     it("should reject directory traversal", async () => {
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const result = await memory_append.execute(
         { path: "../../tmp/evil.md", entry: "bad" },
         context,
@@ -494,7 +494,7 @@ describe("memory tools", () => {
     it("should return appended path and total size", async () => {
       await Bun.write(`${testDir}/episodes/test.md`, "existing");
 
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const result = await memory_append.execute(
         { path: "episodes/test.md", entry: " appended" },
         context,
@@ -507,7 +507,7 @@ describe("memory tools", () => {
     });
 
     it("should create parent directories for new paths", async () => {
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const result = await memory_append.execute(
         { path: "new-dir/log.md", entry: "first entry" },
         context,
@@ -522,7 +522,7 @@ describe("memory tools", () => {
       const existing = "# 2026-02 Episodes\n\n> Summary: old stuff\n\n## Old Entry\n- done\n";
       await Bun.write(`${testDir}/episodes/2026-02.md`, existing);
 
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const result = await memory_append.execute(
         { path: "episodes/2026-02.md", entry: "\n## New Entry\n- new\n", summary: "old stuff, new thing" },
         context,
@@ -539,7 +539,7 @@ describe("memory tools", () => {
       const existing = "# 2026-02 Episodes\n\n> Summary: original\n\n## Entry\n";
       await Bun.write(`${testDir}/episodes/2026-02.md`, existing);
 
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const result = await memory_append.execute(
         { path: "episodes/2026-02.md", entry: "\n## Another\n" },
         context,
@@ -554,7 +554,7 @@ describe("memory tools", () => {
       const existing = "# 2026-03 Episodes\n\n## Entry 1\n- done\n";
       await Bun.write(`${testDir}/episodes/2026-03.md`, existing);
 
-      const context = { taskId: "t1", memoryDir: testDir };
+      const context = { agentId: "t1", memoryDir: testDir };
       const result = await memory_append.execute(
         { path: "episodes/2026-03.md", entry: "\n## Entry 2\n- more\n", summary: "entry 1, entry 2" },
         context,

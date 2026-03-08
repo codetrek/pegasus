@@ -1,11 +1,8 @@
 /**
- * spawn_subagent tool — launch a sub-agent via TaskRunner.
+ * spawn_subagent tool — launch a sub-agent.
  *
- * Self-executing: collects memory snapshot, calls taskRegistry.submit(),
+ * Self-executing: collects memory snapshot, calls subagentRegistry.submit(),
  * and starts tickManager directly, eliminating signal interception.
- *
- * Replaces both the old spawn_task and spawn_subagent (SubAgentManager)
- * tools with a unified interface backed by TaskRunner.
  */
 
 import { z } from "zod";
@@ -42,11 +39,11 @@ export const spawn_subagent: Tool = {
       type?: string;
     };
 
-    const registry = context.taskRegistry;
+    const registry = context.subagentRegistry;
     if (!registry) {
       return {
         success: false,
-        error: "taskRegistry not available in this context",
+        error: "subagentRegistry not available in this context",
         startedAt,
         completedAt: Date.now(),
         durationMs: Date.now() - startedAt,
@@ -58,7 +55,7 @@ export const spawn_subagent: Tool = {
       const getSnapshot = context.getMemorySnapshot;
       const memorySnapshot = getSnapshot ? await getSnapshot() : undefined;
 
-      const taskId = registry.submit(input, context.taskId, type ?? "general", description, {
+      const subagentId = registry.submit(input, context.agentId, type ?? "general", description, {
         memorySnapshot,
         depth: 1,
       });
@@ -67,11 +64,11 @@ export const spawn_subagent: Tool = {
       const tick = context.tickManager;
       if (tick) tick.start();
 
-      logger.info({ subagentId: taskId, description, type }, "subagent_spawned");
+      logger.info({ subagentId, description, type }, "subagent_spawned");
 
       return {
         success: true,
-        result: { subagentId: taskId, status: "spawned", type: type ?? "general", description },
+        result: { subagentId, status: "spawned", type: type ?? "general", description },
         startedAt,
         completedAt: Date.now(),
         durationMs: Date.now() - startedAt,

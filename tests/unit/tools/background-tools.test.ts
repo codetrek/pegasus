@@ -55,7 +55,7 @@ function makeExecutor(tools: Tool[], timeout = 10_000): ToolExecutor {
 
 /** Minimal ToolContext for tests. */
 function ctx(extras?: Partial<ToolContext>): ToolContext {
-  return { taskId: "test-task", ...extras };
+  return { agentId: "test-task", ...extras };
 }
 
 // ── BackgroundTaskManager ───────────────────────────

@@ -26,7 +26,7 @@ describe("session_archive_read", () => {
 
     const result = await session_archive_read.execute(
       { file: "20260225T143000.jsonl" },
-      { taskId: "main-agent", sessionDir },
+      { agentId: "main-agent", sessionDir },
     );
     expect(result.success).toBe(true);
     expect(result.result).toBe(archiveContent);
@@ -35,7 +35,7 @@ describe("session_archive_read", () => {
   it("rejects path traversal attempts", async () => {
     const result = await session_archive_read.execute(
       { file: "../../../etc/passwd" },
-      { taskId: "main-agent", sessionDir },
+      { agentId: "main-agent", sessionDir },
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain("escapes");
@@ -45,7 +45,7 @@ describe("session_archive_read", () => {
     await writeFile(path.join(sessionDir, "current.jsonl"), '{"ts":1}\n');
     const result = await session_archive_read.execute(
       { file: "current.jsonl" },
-      { taskId: "main-agent", sessionDir },
+      { agentId: "main-agent", sessionDir },
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain("current");
@@ -54,7 +54,7 @@ describe("session_archive_read", () => {
   it("returns error for non-existent file", async () => {
     const result = await session_archive_read.execute(
       { file: "nonexistent.jsonl" },
-      { taskId: "main-agent", sessionDir },
+      { agentId: "main-agent", sessionDir },
     );
     expect(result.success).toBe(false);
   }, 5_000);
@@ -62,7 +62,7 @@ describe("session_archive_read", () => {
   it("returns error when sessionDir is missing from context", async () => {
     const result = await session_archive_read.execute(
       { file: "archive.jsonl" },
-      { taskId: "main-agent" },
+      { agentId: "main-agent" },
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain("sessionDir");

@@ -1,7 +1,7 @@
 /**
- * notify tool — Task Agent → MainAgent communication channel.
+ * notify tool — Subagent → MainAgent communication channel.
  *
- * Allows a running task to send messages back to the MainAgent:
+ * Allows a running subagent to send messages back to the MainAgent:
  * progress updates, interim results, clarification requests, warnings, etc.
  *
  * Self-executing: if context.onNotify is set, calls it directly and returns { notified: true }.
@@ -42,7 +42,7 @@ export const notify: Tool = {
     // Fallback: signal tool behavior (agent intercepts this result)
     return {
       success: true,
-      result: { action: "notify", message, taskId: context.taskId },
+      result: { action: "notify", message, agentId: context.agentId },
       startedAt,
       completedAt: Date.now(),
       durationMs: Date.now() - startedAt,
