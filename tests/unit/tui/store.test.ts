@@ -6,6 +6,7 @@ import {
   chatStore,
   addMessage,
   clearMessages,
+  setMessages,
   setOnSend,
   clearOnSend,
   sendInput,
@@ -14,13 +15,18 @@ import {
   setOnShutdown,
   clearOnShutdown,
   requestShutdown,
+  getCurrentAgent,
+  setCurrentAgent,
+  loadMessages,
 } from "@pegasus/tui/store.ts";
+import type { Message } from "@pegasus/infra/llm-types.ts";
 
 describe("TUI Store", () => {
   beforeEach(() => {
     clearMessages();
     clearOnSend();
     clearOnShutdown();
+    setCurrentAgent("main");
   });
 
   describe("addMessage", () => {
@@ -72,7 +78,6 @@ describe("TUI Store", () => {
     });
 
     it("should do nothing if no callback is registered", () => {
-      // Should not throw
       sendInput("orphan message");
     });
 
@@ -123,6 +128,115 @@ describe("TUI Store", () => {
     });
   });
 
+  describe("currentAgent", () => {
+    it("should default to main", () => {
+      expect(getCurrentAgent()).toBe("main");
+    });
+
+    it("setCurrentAgent should update and clear messages", () => {
+      addMessage({ role: "user", time: "10:00", text: "hello" });
+      setCurrentAgent("project:EmailProcessor");
+      expect(getCurrentAgent()).toBe("project:EmailProcessor");
+      expect(chatStore.messages).toHaveLength(0);
+    });
+  });
+
+  describe("setMessages", () => {
+    it("should replace all messages", () => {
+      addMessage({ role: "user", time: "10:00", text: "old" });
+      setMessages([
+        { role: "user", time: "11:00", text: "new1" },
+        { role: "assistant", time: "11:01", text: "new2" },
+      ]);
+      expect(chatStore.messages).toHaveLength(2);
+      expect(chatStore.messages[0]!.text).toBe("new1");
+    });
+  });
+
+  describe("loadMessages", () => {
+    it("should convert user messages", () => {
+      const messages: Message[] = [
+        { role: "user", content: "hello" },
+      ];
+      loadMessages("main", messages);
+      expect(getCurrentAgent()).toBe("main");
+      expect(chatStore.messages).toHaveLength(1);
+      expect(chatStore.messages[0]!.role).toBe("user");
+      expect(chatStore.messages[0]!.text).toBe("hello");
+    });
+
+    it("should extract reply tool calls from assistant messages", () => {
+      const messages: Message[] = [
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{ id: "tc1", name: "reply", arguments: { text: "hi back", channelType: "cli" } }],
+        },
+      ];
+      loadMessages("main", messages);
+      expect(chatStore.messages).toHaveLength(1);
+      expect(chatStore.messages[0]!.role).toBe("assistant");
+      expect(chatStore.messages[0]!.text).toBe("hi back");
+      expect(chatStore.messages[0]!.channel).toBe("cli");
+    });
+
+    it("should handle assistant direct text (no toolCalls)", () => {
+      const messages: Message[] = [
+        { role: "assistant", content: "direct response" },
+      ];
+      loadMessages("main", messages);
+      expect(chatStore.messages).toHaveLength(1);
+      expect(chatStore.messages[0]!.text).toBe("direct response");
+    });
+
+    it("should skip non-reply tool calls", () => {
+      const messages: Message[] = [
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{ id: "tc1", name: "shell_exec", arguments: { command: "ls" } }],
+        },
+      ];
+      loadMessages("main", messages);
+      expect(chatStore.messages).toHaveLength(0);
+    });
+
+    it("should skip system and tool role messages", () => {
+      const messages: Message[] = [
+        { role: "system", content: "system prompt" },
+        { role: "user", content: "hello" },
+        { role: "tool", content: "tool result" },
+      ];
+      loadMessages("main", messages);
+      expect(chatStore.messages).toHaveLength(1);
+      expect(chatStore.messages[0]!.text).toBe("hello");
+    });
+
+    it("should handle reply with string arguments (runtime edge case)", () => {
+      const messages: Message[] = [
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{ id: "tc1", name: "reply", arguments: { text: "parsed", channelType: "telegram" } as Record<string, unknown> }],
+        },
+      ];
+      loadMessages("main", messages);
+      expect(chatStore.messages).toHaveLength(1);
+      expect(chatStore.messages[0]!.text).toBe("parsed");
+      expect(chatStore.messages[0]!.channel).toBe("telegram");
+    });
+
+    it("should set currentAgent", () => {
+      loadMessages("project:MyProj", []);
+      expect(getCurrentAgent()).toBe("project:MyProj");
+    });
+
+    it("should handle empty messages array", () => {
+      loadMessages("main", []);
+      expect(chatStore.messages).toHaveLength(0);
+    });
+  });
+
   describe("requestShutdown / setOnShutdown", () => {
     it("should call registered shutdown callback", () => {
       let called = false;
@@ -132,7 +246,7 @@ describe("TUI Store", () => {
     });
 
     it("should do nothing if no callback registered", () => {
-      requestShutdown(); // should not throw
+      requestShutdown();
     });
 
     it("clearOnShutdown should remove callback", () => {

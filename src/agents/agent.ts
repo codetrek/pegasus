@@ -183,6 +183,11 @@ export class Agent {
   protected maxIterations: number;
   protected sessionStore: SessionStore;
   protected sessionMessages: Message[] = [];
+
+  /** Read-only access to session messages (for TUI display etc.). */
+  get messages(): ReadonlyArray<Message> {
+    return this.sessionMessages;
+  }
   protected contextWindow?: number;
   protected modelLimitsCache?: ModelLimitsCache;
   protected persona?: Persona;

@@ -1,51 +1,66 @@
 /**
  * InputBar — bottom input prompt with real text input.
  *
- * Uses opentui's <input> component. On Enter, sends text via store bridge
- * to TuiAdapter. Always focused (v1 has no panel switching).
+ * Uses opentui's <textarea> in uncontrolled mode (same as opencode).
+ * On submit, reads plainText from ref and clears.
+ *
+ * Focus is deferred 500ms after mount to avoid capturing terminal
+ * capability response sequences (DA, DECRPM, pixel resolution) that
+ * opentui's input pipeline leaks as individual character keypresses
+ * when textarea is focused during renderer initialization.
  */
-import { createSignal, Show } from "solid-js"
+import { Show, onMount } from "solid-js"
+import type { TextareaRenderable } from "@opentui/core"
 import { THEME } from "../theme.tsx"
 import { sendInput, statusHint } from "../store.ts"
 
 export function InputBar() {
-  const [value, setValue] = createSignal("")
+  let inputRef: TextareaRenderable
 
-  const handleSubmit = () => {
-    const text = value()
-    if (!text.trim()) return
+  onMount(() => {
+    setTimeout(() => inputRef?.focus(), 500)
+  })
+
+  function submit() {
+    if (!inputRef) return
+    const text = inputRef.plainText
+    if (!text?.trim()) return
     sendInput(text)
-    setValue("")
+    inputRef.clear()
   }
 
   return (
     <box
       flexShrink={0}
-      flexDirection="row"
-      justifyContent="space-between"
+      flexDirection="column"
       paddingLeft={1}
       paddingRight={1}
       backgroundColor={THEME.bgPanel}
       border={["top"]}
       borderColor={THEME.border}
     >
-      <input
-        value={value()}
-        onChange={setValue}
-        onSubmit={handleSubmit}
+      <textarea
+        ref={(r: TextareaRenderable) => { inputRef = r }}
+        onSubmit={submit}
         placeholder="Type a message... (/help for commands)"
-        focused={true}
+        minHeight={1}
+        maxHeight={4}
         backgroundColor={THEME.bgPanel}
         focusedBackgroundColor={THEME.bgPanel}
         textColor={THEME.text}
         focusedTextColor={THEME.text}
         placeholderColor={THEME.textMuted}
+        keyBindings={[
+          { name: "return", action: "submit" as const },
+        ]}
       />
-      <text fg={THEME.textMuted}>
-        <Show when={statusHint()} fallback={"[Ctrl+C] Quit"}>
-          <span style={{ fg: THEME.warning }}>{statusHint()}</span>
-        </Show>
-      </text>
+      <box flexDirection="row" justifyContent="flex-end">
+        <text fg={THEME.textMuted}>
+          <Show when={statusHint()} fallback={"[Ctrl+C] Quit"}>
+            <span style={{ fg: THEME.warning }}>{statusHint()}</span>
+          </Show>
+        </text>
+      </box>
     </box>
   )
 }
