@@ -151,9 +151,11 @@ describe("Multi-channel routing", () => {
     expect(telegramMock.delivered.length).toBeGreaterThanOrEqual(1);
     expect(telegramMock.delivered[0]!.text).toBe("Hello!");
 
-    // CLI should also receive the telegram reply (mirrored for console)
-    expect(cliMock.delivered).toHaveLength(1);
-    expect(cliMock.delivered[0]!.text).toBe("Hello!");
+    // CLI should also receive mirrored telegram inbound + telegram reply
+    expect(cliMock.delivered).toHaveLength(2);
+    expect(cliMock.delivered[0]!.metadata?.mirrorInbound).toBe(true);
+    expect(cliMock.delivered[0]!.text).toBe("hello");
+    expect(cliMock.delivered[1]!.text).toBe("Hello!");
 
     await app.stop();
   }, 10_000);
@@ -196,8 +198,10 @@ describe("Multi-channel routing", () => {
     });
     await Bun.sleep(100);
 
-    // CLI should receive mirrored sms reply (console sees everything)
-    expect(cliMock.delivered).toHaveLength(1);
+    // CLI should receive mirrored sms inbound + mirrored sms reply (console sees everything)
+    expect(cliMock.delivered).toHaveLength(2);
+    expect(cliMock.delivered[0]!.metadata?.mirrorInbound).toBe(true);
+    expect(cliMock.delivered[0]!.text).toBe("hello");
 
     // No crash — the warning is logged but no error thrown
     await app.stop();
@@ -273,10 +277,12 @@ describe("Multi-channel routing", () => {
     });
     await Bun.sleep(100);
 
-    // CLI receives its own reply + mirrored telegram reply
-    expect(cliMock.delivered).toHaveLength(2);
+    // CLI receives its own reply + mirrored telegram inbound + mirrored telegram reply
+    expect(cliMock.delivered).toHaveLength(3);
     expect(cliMock.delivered[0]!.text).toBe("CLI reply");
-    expect(cliMock.delivered[1]!.text).toBe("TG reply");
+    expect(cliMock.delivered[1]!.text).toBe("hello from telegram");
+    expect(cliMock.delivered[1]!.metadata?.mirrorInbound).toBe(true);
+    expect(cliMock.delivered[2]!.text).toBe("TG reply");
 
     expect(telegramMock.delivered).toHaveLength(1);
     expect(telegramMock.delivered[0]!.text).toBe("TG reply");

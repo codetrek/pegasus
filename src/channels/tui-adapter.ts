@@ -74,10 +74,13 @@ export class TuiAdapter implements ChannelAdapter {
   }
 
   async deliver(message: OutboundMessage): Promise<void> {
+    const isMirrorInbound = message.metadata?.mirrorInbound === true;
+    const channel = message.channel.type !== "cli" ? message.channel.type : undefined;
     addMessage({
-      role: "assistant",
+      role: isMirrorInbound ? "user" : "assistant",
       time: formatTime(),
       text: message.text,
+      channel,
     });
   }
 

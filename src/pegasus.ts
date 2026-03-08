@@ -149,6 +149,18 @@ export class Pegasus {
       return;
     }
 
+    // Mirror inbound non-cli messages to cli adapter (TUI sees all conversations)
+    if (message.channel.type !== "cli") {
+      const cli = this._adapters.find((a) => a.type === "cli");
+      if (cli) {
+        cli.deliver({
+          text: message.text,
+          channel: message.channel,
+          metadata: { mirrorInbound: true },
+        } as OutboundMessage).catch(() => {});
+      }
+    }
+
     // Security classification
     const classification = classifyMessage(message, this.ownerStore);
 
