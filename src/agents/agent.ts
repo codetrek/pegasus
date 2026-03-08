@@ -62,7 +62,7 @@ import type {
   OutboundMessage,
 } from "../channels/types.ts";
 import { sanitizeForPrompt } from "../infra/sanitize.ts";
-import { formatSize } from "../prompts/index.ts";
+import { formatSize } from "./prompts/index.ts";
 import type { Reflection } from "./reflection.ts";
 
 const logger = getLogger("agent");

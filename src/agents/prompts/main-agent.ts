@@ -17,7 +17,7 @@
  *   each iteration via Thinker.run(). This is acceptable because task conversations
  *   are short-lived and don't benefit from cross-turn prompt caching.
  */
-import type { Persona } from "../identity/persona.ts";
+import type { Persona } from "../../identity/persona.ts";
 import {
   buildIdentitySection,
   buildRuntimeSection,

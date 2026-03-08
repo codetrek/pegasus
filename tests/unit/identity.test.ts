@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { loadPersona, PersonaSchema } from "@pegasus/identity/persona.ts";
-import { buildSystemPrompt, formatSize, buildRuntimeSection } from "@pegasus/prompts/index.ts";
+import { buildSystemPrompt, formatSize, buildRuntimeSection } from "@pegasus/agents/prompts";
 import type { Persona } from "@pegasus/identity/persona.ts";
 import { writeFileSync, unlinkSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
