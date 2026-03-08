@@ -89,6 +89,7 @@ describe("MainAgent", () => {
   // ── _loadOAuthCredentials tests (moved to AuthManager) ──
 
   describe("_loadOAuthCredentials (via AuthManager)", () => {
+    const cacheDirs: string[] = [];
     function createTestAuthManager(settings?: any) {
       const model = createReplyModel("ok");
       const s = settings ?? testSettings();
@@ -97,6 +98,7 @@ describe("MainAgent", () => {
       const { mkdirSync } = require("node:fs");
       const cacheDir = `/tmp/pegasus-test-mlc-auth-${process.pid}-${Date.now()}`;
       mkdirSync(cacheDir, { recursive: true });
+      cacheDirs.push(cacheDir);
       return new AuthManager({
         settings: s,
         models: createMockModelRegistry(model),
@@ -104,6 +106,11 @@ describe("MainAgent", () => {
         credDir: s.authDir,
       });
     }
+
+    afterEach(async () => {
+      await Promise.all(cacheDirs.map(d => rm(d, { recursive: true, force: true }).catch(() => {})));
+      cacheDirs.length = 0;
+    });
 
     it("should return null for non-existent file", async () => {
       const mgr = createTestAuthManager();
@@ -202,6 +209,7 @@ describe("MainAgent", () => {
   // ── _initModelLimits tests (moved to AuthManager) ──
 
   describe("_initModelLimits (via AuthManager)", () => {
+    const limitsCacheDirs: string[] = [];
     function createTestAuthManager(settings?: any) {
       const model = createReplyModel("ok");
       const s = settings ?? testSettings();
@@ -210,6 +218,7 @@ describe("MainAgent", () => {
       const { mkdirSync } = require("node:fs");
       const cacheDir = `/tmp/pegasus-test-mlc-auth-limits-${process.pid}-${Date.now()}`;
       mkdirSync(cacheDir, { recursive: true });
+      limitsCacheDirs.push(cacheDir);
       const cache = new ModelLimitsCache(cacheDir);
       return { mgr: new AuthManager({
         settings: s,
@@ -218,6 +227,11 @@ describe("MainAgent", () => {
         credDir: s.authDir,
       }), cache, cacheDir };
     }
+
+    afterEach(async () => {
+      await Promise.all(limitsCacheDirs.map(d => rm(d, { recursive: true, force: true }).catch(() => {})));
+      limitsCacheDirs.length = 0;
+    });
 
     it("should do nothing when no providers are configured", async () => {
       const { mgr } = createTestAuthManager();

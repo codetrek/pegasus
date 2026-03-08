@@ -5,13 +5,13 @@
  * Also tests _loadIndex() internals via the public resume() surface.
  */
 
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
 import { TaskRunner, type TaskRunnerDeps } from "../../../src/agents/task-runner.ts";
 import type { TaskNotification } from "../../../src/agents/task-runner.ts";
 import type { LanguageModel } from "../../../src/infra/llm-types.ts";
 import { AITaskTypeRegistry } from "../../../src/aitask-types/registry.ts";
 import { Agent } from "../../../src/agents/agent.ts";
-import { mkdtemp, mkdir, writeFile, readFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 
@@ -105,6 +105,9 @@ async function waitForNotifications(ms = 200): Promise<void> {
 describe("TaskRunner.resume", () => {
   beforeEach(async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), "pegasus-resume-test-"));
+  });
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true }).catch(() => {});
   });
 
   describe("resume with valid taskId", () => {
