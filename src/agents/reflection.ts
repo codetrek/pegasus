@@ -65,13 +65,13 @@ export class Reflection {
    * Run PostTaskReflector on the archived session messages to extract
    * facts/episodes for long-term memory. Fire-and-forget.
    */
-  async runReflection(sessionMessages: Message[]): Promise<void> {
-    logger.info({ messageCount: sessionMessages.length }, "main_reflection_start");
+  async runReflection(agentId: string, sessionMessages: Message[]): Promise<void> {
+    logger.info({ agentId, messageCount: sessionMessages.length }, "reflection_start");
 
     // 1. Build a ReflectionContext from session messages
     const context = createReflectionContext({
-      id: `main-reflection-${Date.now()}`,
-      inputText: "MainAgent conversation session (compact triggered)",
+      id: `${agentId}-reflection-${Date.now()}`,
+      inputText: `Agent ${agentId} conversation session (compact triggered)`,
     });
     context.messages = sessionMessages;
     context.iteration = sessionMessages.length; // rough proxy
@@ -147,8 +147,8 @@ export class Reflection {
     const reflection = await reflector.run(context, existingFacts, episodeIndex);
 
     logger.info(
-      { toolCalls: reflection.toolCallsCount, assessment: reflection.assessment },
-      "main_reflection_complete",
+      { agentId, toolCalls: reflection.toolCallsCount, assessment: reflection.assessment },
+      "reflection_complete",
     );
   }
 }

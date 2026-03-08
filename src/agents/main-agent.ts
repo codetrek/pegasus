@@ -77,7 +77,7 @@ export interface InjectedSubsystems {
   tokenRefreshMonitor: TokenRefreshMonitor | null;
   skillRegistry: SkillRegistry;
   skillDirs: Array<{ dir: string; source: "builtin" | "user" }>;
-  aiTaskTypeRegistry: SubAgentTypeRegistry;
+  subagentTypeRegistry: SubAgentTypeRegistry;
   projectManager: ProjectManager;
   projectAdapter: ProjectAdapter;
   imageManager: ImageManager | null;
@@ -137,7 +137,7 @@ export class MainAgent extends Agent {
       toolContext: { memoryDir: mainStorePaths.memory! },
       reflectionOrchestrator: deps.injected.reflectionOrchestrator,
       subagentConfig: {
-        subagentTypeRegistry: deps.injected.aiTaskTypeRegistry,
+        subagentTypeRegistry: deps.injected.subagentTypeRegistry,
         tasksDir: mainStorePaths.tasks,
         onNotification: (n) => this.pushTaskNotification(n),
         // Subagents inherit MainAgent's tools MINUS privileged ones.
@@ -157,7 +157,7 @@ export class MainAgent extends Agent {
     this.ownerStore = inj.ownerStore;
     this.skillRegistry = inj.skillRegistry;
     this.skillDirs = inj.skillDirs;
-    this.subAgentTypeRegistry = inj.aiTaskTypeRegistry;
+    this.subAgentTypeRegistry = inj.subagentTypeRegistry;
     this.projectManager = inj.projectManager;
     this.projectAdapter = inj.projectAdapter;
     this.tickManager = inj.tickManager;

@@ -127,7 +127,7 @@ export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubs
     tokenRefreshMonitor: null,
     skillRegistry,
     skillDirs,
-    aiTaskTypeRegistry: subAgentTypeRegistry,
+    subagentTypeRegistry: subAgentTypeRegistry,
     projectManager,
     projectAdapter,
     imageManager,

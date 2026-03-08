@@ -146,7 +146,7 @@ describe("Reflection", () => {
       const messages = makeMessages(8);
 
       // Should not throw
-      await orch.runReflection(messages);
+      await orch.runReflection("test-agent", messages);
 
       // Should have called memory_list to load existing facts
       expect(mockExec.calls.some((c) => c.name === "memory_list")).toBe(true);
@@ -162,7 +162,7 @@ describe("Reflection", () => {
       deps.toolExecutor = mockExec.executor;
 
       const orch = new Reflection(deps);
-      await orch.runReflection(makeMessages(8));
+      await orch.runReflection("test-agent", makeMessages(8));
 
       // Should have called memory_list then memory_read for the fact
       const listCalls = mockExec.calls.filter((c) => c.name === "memory_list");
@@ -179,7 +179,7 @@ describe("Reflection", () => {
       const orch = new Reflection(deps);
 
       // Should not throw — gracefully continues without memory
-      await orch.runReflection(makeMessages(8));
+      await orch.runReflection("test-agent", makeMessages(8));
     }, 10_000);
 
     it("handles memory_list returning unsuccessful result", async () => {
@@ -189,7 +189,7 @@ describe("Reflection", () => {
       const orch = new Reflection(deps);
 
       // Should not throw — listResult.success is false, skips loading
-      await orch.runReflection(makeMessages(8));
+      await orch.runReflection("test-agent", makeMessages(8));
 
       // No memory_read calls since list failed
       const readCalls = mockExec.calls.filter((c) => c.name === "memory_read");
@@ -209,7 +209,7 @@ describe("Reflection", () => {
       const orch = new Reflection(deps);
 
       // Should not throw — episodes are trimmed internally
-      await orch.runReflection(makeMessages(8));
+      await orch.runReflection("test-agent", makeMessages(8));
     }, 10_000);
 
     it("skips memory_read for non-fact entries", async () => {
@@ -222,7 +222,7 @@ describe("Reflection", () => {
       deps.toolExecutor = mockExec.executor;
 
       const orch = new Reflection(deps);
-      await orch.runReflection(makeMessages(8));
+      await orch.runReflection("test-agent", makeMessages(8));
 
       // No memory_read calls — episodes don't need full content
       const readCalls = mockExec.calls.filter((c) => c.name === "memory_read");

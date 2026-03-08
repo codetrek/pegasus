@@ -378,7 +378,7 @@ export class Pegasus {
       tokenRefreshMonitor: this.tokenRefreshMonitor,
       skillRegistry: this.skillRegistry,
       skillDirs: this.skillDirs,
-      aiTaskTypeRegistry: this.subAgentTypeRegistry,
+      subagentTypeRegistry: this.subAgentTypeRegistry,
       projectManager: this.projectManager,
       projectAdapter: this.projectAdapter,
       imageManager: this.imageManager,

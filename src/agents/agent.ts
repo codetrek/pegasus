@@ -270,7 +270,7 @@ export class Agent {
   /** Memory directory path — enables auto memory injection on start/compact. */
   private _memoryDir?: string;
   /** Reflection — enables auto reflection after compaction. */
-  private _reflectionOrchestrator?: Reflection;
+  private _reflection?: Reflection;
 
   /** Holds the last execution result for run() to resolve. */
   private _lastResult: AgentResult | null = null;
@@ -311,7 +311,7 @@ export class Agent {
     this._systemPromptSource = deps.systemPrompt;
     this._injectedToolContext = deps.toolContext;
     this._memoryDir = deps.toolContext?.memoryDir;
-    this._reflectionOrchestrator = deps.reflectionOrchestrator;
+    this._reflection = deps.reflectionOrchestrator;
     this._subagentConfig = deps.subagentConfig;
   }
 
@@ -986,8 +986,8 @@ export class Agent {
     }
 
     // Fire-and-forget reflection on the archived session
-    if (this._reflectionOrchestrator?.shouldReflect(preCompactMessages)) {
-      this._reflectionOrchestrator.runReflection(preCompactMessages).catch((err) => {
+    if (this._reflection?.shouldReflect(preCompactMessages)) {
+      this._reflection.runReflection(this.agentId, preCompactMessages).catch((err) => {
         logger.warn({ error: err instanceof Error ? err.message : String(err) }, "reflection_failed");
       });
     }
