@@ -627,11 +627,9 @@ export class Agent {
 
       // No tool calls → task complete
       if (!result.toolCalls?.length) {
-        if (result.text) {
-          const assistantMsg: Message = { role: "assistant", content: result.text };
-          state.messages.push(assistantMsg);
-          await this.onMessagesAppended(taskId, [assistantMsg]);
-        }
+        const assistantMsg: Message = { role: "assistant", content: result.text ?? "" };
+        state.messages.push(assistantMsg);
+        await this.onMessagesAppended(taskId, [assistantMsg]);
         await this.eventBus.emit(createEvent(EventType.STEP_COMPLETED, {
           source: this.agentId, taskId,
           payload: { iteration: state.iteration, hasToolCalls: false },
