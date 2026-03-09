@@ -282,4 +282,49 @@ describe("shell_exec tool", () => {
     // Verify truncated flag is not present when no truncation occurs
     expect(r.truncated).toBeUndefined();
   });
+
+  describe("shell_exec abort", () => {
+    it("kills process when abortSignal fires", async () => {
+      const ac = new AbortController();
+
+      // Start a long-running process
+      const resultPromise = shell_exec.execute(
+        { command: "sleep 60", timeout: 30_000 },
+        { agentId: "test", abortSignal: ac.signal },
+      );
+
+      // Abort after 200ms
+      await new Promise((r) => setTimeout(r, 200));
+      ac.abort();
+
+      const result = await resultPromise;
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("aborted");
+      expect(result.durationMs).toBeLessThan(5000);
+    }, 10_000);
+
+    it("handles abort when signal is already aborted", async () => {
+      const ac = new AbortController();
+      ac.abort(); // Already aborted
+
+      const result = await shell_exec.execute(
+        { command: "sleep 60", timeout: 30_000 },
+        { agentId: "test", abortSignal: ac.signal },
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("aborted");
+    }, 10_000);
+
+    it("works normally without abortSignal", async () => {
+      const result = await shell_exec.execute(
+        { command: "echo hello" },
+        { agentId: "test" },
+      );
+
+      expect(result.success).toBe(true);
+      expect((result.result as any).stdout).toContain("hello");
+    }, 10_000);
+  });
 });
