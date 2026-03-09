@@ -105,6 +105,8 @@ export interface ToolContext {
   projectAdapter?: ProjectAdapterLike;
   /** Notify callback — used by notify tool for self-executing behavior. */
   onNotify?: (message: string) => void;
+  /** AbortSignal for cancellation — set by BackgroundTaskManager when running tools in background. */
+  abortSignal?: AbortSignal;
 }
 
 // ── ToolStats ─────────────────────────────────

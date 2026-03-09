@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { normalizePath, isPathAllowed } from "../../../src/agents/tools/types.ts";
+import { normalizePath, isPathAllowed, type ToolContext } from "../../../src/agents/tools/types.ts";
 
 describe("normalizePath", () => {
   it("should normalize relative path with baseDir", () => {
@@ -69,5 +69,19 @@ describe("isPathAllowed", () => {
     isPathAllowed(normalized, ["/workspace/pegasus/data"]);
     // After normalization, the path should still be relative to current dir
     expect(normalized).toContain("data/test.txt");
+  });
+});
+
+describe("ToolContext", () => {
+  it("accepts abortSignal", () => {
+    const ac = new AbortController();
+    const ctx: ToolContext = { agentId: "test", abortSignal: ac.signal };
+    expect(ctx.abortSignal).toBe(ac.signal);
+    expect(ctx.abortSignal!.aborted).toBe(false);
+  });
+
+  it("allows abortSignal to be omitted", () => {
+    const ctx: ToolContext = { agentId: "test" };
+    expect(ctx.abortSignal).toBeUndefined();
   });
 });
