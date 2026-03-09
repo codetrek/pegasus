@@ -600,7 +600,7 @@ describe("MainAgent", () => {
       agent.send({ text: "hi", channel: { type: "cli", channelId: "test" } });
       await Bun.sleep(50);
 
-      expect(capturedSystem).toContain("trust(action");
+      expect(capturedSystem).toContain("trust()");
       expect(capturedSystem).toContain("Security");
 
       await agent.stop();

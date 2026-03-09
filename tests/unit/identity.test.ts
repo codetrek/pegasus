@@ -198,39 +198,20 @@ describe("buildSystemPrompt", () => {
   test("includes Tools section in main mode", () => {
     const prompt = buildSystemPrompt({ mode: "main", persona });
     expect(prompt).toContain("## Tools");
-    expect(prompt).toContain("memory_list");
-    expect(prompt).toContain("memory_read");
-    expect(prompt).toContain("memory_write");
-    expect(prompt).toContain("memory_patch");
-    expect(prompt).toContain("memory_append");
-    expect(prompt).toContain("spawn_subagent");
-    expect(prompt).toContain("spawn_subagent");
-    expect(prompt).toContain("resume_subagent");
-    expect(prompt).toContain("current_time");
-    expect(prompt).toContain("session_archive_read");
+    // Tools section provides usage guidance, not parameter lists
+    expect(prompt).toContain("reply()");
+    expect(prompt).toContain("bg_run()");
+    expect(prompt).toContain("spawn_subagent()");
+    expect(prompt).toContain("trust()");
   });
 
-  test("Tools section organizes tools by category", () => {
+  test("Tools section has usage guidance for key tools", () => {
     const prompt = buildSystemPrompt({ mode: "main", persona });
-    // Verify sub-headers exist
-    expect(prompt).toContain("### Communication");
-    expect(prompt).toContain("### Delegation");
-    expect(prompt).toContain("### Projects");
-    expect(prompt).toContain("### Skills");
-    expect(prompt).toContain("### Memory");
-    expect(prompt).toContain("### Context");
-
-    // Verify delegation tools are under Delegation, not Communication
-    const delegationIdx = prompt.indexOf("### Delegation");
-    const projectsIdx = prompt.indexOf("### Projects");
-    const spawnSubagentIdx = prompt.indexOf("spawn_subagent");
-    const resumeSubagentIdx = prompt.indexOf("resume_subagent");
-
-    // spawn_subagent and resume_subagent should be between Delegation and Projects headers
-    expect(spawnSubagentIdx).toBeGreaterThan(delegationIdx);
-    expect(spawnSubagentIdx).toBeLessThan(projectsIdx);
-    expect(resumeSubagentIdx).toBeGreaterThan(delegationIdx);
-    expect(resumeSubagentIdx).toBeLessThan(projectsIdx);
+    // Key guidance that can't be inferred from tool schemas
+    expect(prompt).toContain("ONLY way to communicate");
+    expect(prompt).toContain("Background Execution");
+    expect(prompt).toContain("Multi-Step Reasoning");
+    expect(prompt).toContain("Channel Security");
   });
 
   test("does NOT include Tools section in task mode", () => {
