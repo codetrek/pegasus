@@ -565,3 +565,47 @@ describe("web_fetch tool", () => {
     expect(result.error).toBeDefined();
   }, { timeout: 15000 });
 });
+
+// ── abort signal ─────────────────────────────────
+
+describe("network tools abort signal", () => {
+  it("http_get fails immediately when abortSignal is already aborted", async () => {
+    const ac = new AbortController();
+    ac.abort();
+
+    const result = await http_get.execute(
+      { url: `${baseUrl}/json` },
+      { agentId: "test", abortSignal: ac.signal },
+    );
+
+    expect(result.success).toBe(false);
+    // Should fail quickly, not wait for timeout
+    expect(result.durationMs).toBeLessThan(5000);
+  }, { timeout: 10000 });
+
+  it("http_post fails immediately when abortSignal is already aborted", async () => {
+    const ac = new AbortController();
+    ac.abort();
+
+    const result = await http_post.execute(
+      { url: `${baseUrl}/post`, body: "{}" },
+      { agentId: "test", abortSignal: ac.signal },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.durationMs).toBeLessThan(5000);
+  }, { timeout: 10000 });
+
+  it("http_request fails immediately when abortSignal is already aborted", async () => {
+    const ac = new AbortController();
+    ac.abort();
+
+    const result = await http_request.execute(
+      { method: "GET", url: `${baseUrl}/json` },
+      { agentId: "test", abortSignal: ac.signal },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.durationMs).toBeLessThan(5000);
+  }, { timeout: 10000 });
+});
