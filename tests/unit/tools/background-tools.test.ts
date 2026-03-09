@@ -462,3 +462,43 @@ describe("bg_stop", () => {
     expect(result.error).toContain("not available");
   }, 5000);
 });
+
+// ── bg_stop integration ─────────────────────────────
+
+describe("bg_stop integration", () => {
+  it("bg_stop actually kills a shell_exec subprocess", async () => {
+    // Register shell_exec in the executor
+    const { shell_exec } = await import("../../../src/agents/tools/builtins/shell-tools.ts");
+    const toolMap = new Map([["shell_exec", shell_exec]]);
+    const registry = {
+      get: (name: string) => toolMap.get(name),
+      updateCallStats: () => {},
+    };
+    const bus = { emit: () => {} };
+    const executor = new ToolExecutor(registry, bus, 30_000);
+    const mgr = new BackgroundTaskManager(executor);
+
+    // Start a long-running shell command via bg_run
+    const bgTaskId = mgr.run("shell_exec", { command: "sleep 60" }, ctx());
+
+    // Let it start
+    await new Promise((r) => setTimeout(r, 300));
+
+    // Verify it's running
+    expect(mgr.getStatus(bgTaskId).status).toBe("running");
+
+    // Stop it
+    const stopped = mgr.stop(bgTaskId);
+    expect(stopped).toBe(true);
+
+    // Wait for the tool execution to settle
+    await new Promise((r) => setTimeout(r, 1000));
+
+    // Verify it's failed (not completed)
+    const status = mgr.getStatus(bgTaskId);
+    expect(status.status).toBe("failed");
+    if (status.status === "failed") {
+      expect(status.error).toBe("Stopped by user");
+    }
+  }, 15_000);
+});
