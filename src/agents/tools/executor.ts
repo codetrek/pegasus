@@ -42,7 +42,7 @@ export class ToolExecutor {
     toolName: string,
     params: unknown,
     context: ToolContext,
-    options?: { timeout?: number },
+    options?: { timeout?: number; signal?: AbortSignal },
   ): Promise<ToolResult> {
     const startedAt = Date.now();
 
@@ -75,10 +75,15 @@ export class ToolExecutor {
         ? Math.min(options.timeout, MAX_TOOL_TIMEOUT)
         : this.timeout;
 
+      // Merge AbortSignal into context if provided
+      const effectiveContext = options?.signal
+        ? { ...context, abortSignal: options.signal }
+        : context;
+
       const result = await this.executeWithTimeout(
         tool as { execute: (params: unknown, context: ToolContext) => Promise<ToolResult>; name: string },
         validatedParams,
-        context,
+        effectiveContext,
         effectiveTimeout,
       );
 

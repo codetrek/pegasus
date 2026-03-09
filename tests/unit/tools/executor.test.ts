@@ -4,7 +4,7 @@
 
 import { describe, it, expect, mock } from "bun:test";
 import { ToolExecutor } from "../../../src/agents/tools/executor.ts";
-import type { Tool, ToolContext, ToolCategory } from "../../../src/agents/tools/types.ts";
+import type { Tool, ToolContext, ToolCategory, ToolResult } from "../../../src/agents/tools/types.ts";
 import { z } from "zod";
 
 describe("ToolExecutor", () => {
@@ -195,6 +195,35 @@ describe("ToolExecutor", () => {
     const event = events[0] as { type: number; payload: Record<string, unknown> };
     expect(event.type).toBe(410); // TOOL_CALL_COMPLETED
     expect(event.payload).toMatchObject({ toolName: "test_tool", result: { data: 1 } });
+  });
+
+  it("merges signal into ToolContext when provided in options", async () => {
+    const ac = new AbortController();
+    let receivedSignal: AbortSignal | undefined;
+
+    // Create a mock tool that captures the context
+    const spyTool: Tool = {
+      name: "spy",
+      description: "captures context",
+      category: "system" as ToolCategory,
+      parameters: z.object({}),
+      async execute(_params: unknown, context: ToolContext): Promise<ToolResult> {
+        receivedSignal = context.abortSignal;
+        return { success: true, startedAt: Date.now(), completedAt: Date.now(), durationMs: 0 };
+      },
+    };
+
+    const toolMap = new Map([["spy", spyTool]]);
+    const registry = {
+      get: (name: string) => toolMap.get(name),
+      updateCallStats: () => {},
+    };
+    const bus = { emit: () => {} };
+    const executor = new ToolExecutor(registry, bus, 5000);
+
+    await executor.execute("spy", {}, { agentId: "test" }, { signal: ac.signal });
+
+    expect(receivedSignal).toBe(ac.signal);
   });
 
   it("emitCompletion emits TOOL_CALL_FAILED for failure", () => {
