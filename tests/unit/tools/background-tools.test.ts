@@ -240,7 +240,28 @@ describe("BackgroundTaskManager", () => {
     expect(status.status).toBe("completed");
   }, 5000);
 
-  // 13b. run() background timeout sets status to failed via catch path
+  // 13b. run() passes AbortSignal to executor via options
+  it("passes AbortSignal to executor via options", async () => {
+    let receivedSignal: AbortSignal | undefined;
+
+    const mockExecutor = {
+      execute: async (_tool: string, _params: unknown, _ctx: any, options?: { timeout?: number; signal?: AbortSignal }) => {
+        receivedSignal = options?.signal;
+        return { success: true, startedAt: Date.now(), completedAt: Date.now(), durationMs: 0 };
+      },
+    } as any;
+
+    const mgr = new BackgroundTaskManager(mockExecutor);
+    const id = mgr.run("test_tool", {}, ctx());
+
+    // Wait for execution
+    await mgr.waitFor(id, 2000);
+
+    expect(receivedSignal).toBeDefined();
+    expect(receivedSignal).toBeInstanceOf(AbortSignal);
+  }, 5000);
+
+  // 13c. run() background timeout sets status to failed via catch path
   it("run() executor rejection triggers catch path", async () => {
     // Create a tool that is NOT registered, so executor.execute() throws ToolNotFoundError.
     // However, ToolExecutor catches that and returns { success: false }.
