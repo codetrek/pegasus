@@ -255,18 +255,18 @@ describe("buildSystemPrompt", () => {
 
   test("delegation section has sub-sections with examples and flowchart", () => {
     const prompt = buildSystemPrompt({ mode: "main", persona });
-    // Sub-section headers
+    // Sub-section headers (preserved from original, with bg_run added)
     expect(prompt).toContain("### reply() — Handle It Yourself");
-    expect(prompt).toContain("### spawn_subagent() — Delegated Work");
+    expect(prompt).toContain("### bg_run() — Long-Running");
+    expect(prompt).toContain("### spawn_subagent() — Multi-Step Reasoning");
     expect(prompt).toContain("### create_project() — Long-Lived Effort");
     // Decision Flowchart
     expect(prompt).toContain("### Decision Flowchart");
     // After Delegation
     expect(prompt).toContain("### After Delegation");
     // Concrete examples
-    expect(prompt).toContain("Search the web for X");
     expect(prompt).toContain("Research top 5 frameworks");
-    // spawn_subagent is the unified delegation tool
+    // spawn_subagent is the delegation tool
     expect(prompt).toContain("spawn_subagent(type=");
   });
 

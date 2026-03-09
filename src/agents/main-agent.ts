@@ -141,10 +141,10 @@ export class MainAgent extends Agent {
         subagentTypeRegistry: deps.injected.subagentTypeRegistry,
         subagentsDir: mainStorePaths.subagents,
         onNotification: (n) => this.pushSubagentNotification(n),
-        // Subagents get the full subagent tool set (file, shell, network, etc.)
+        // Subagents get the full subagent tool set (file, shell, network, browser, etc.)
         // MINUS MainAgent-only privileged tools (reply, trust, project mgmt, skill reload).
-        // Note: MainAgent's own toolRegistry is a curated subset (no shell/file tools),
-        // so we use allSubagentTools as the base for subagent tool inheritance.
+        // We use allSubagentTools (not MainAgent's toolRegistry) because subagents need
+        // additional tools like browser automation, notify, sleep that MainAgent doesn't have.
         parentTools: allSubagentTools.filter(t => !PRIVILEGED_TOOL_NAMES.has(t.name)),
         // Image storage for subagent tools (e.g. browser screenshots)
         storeImage: deps.injected.imageManager
