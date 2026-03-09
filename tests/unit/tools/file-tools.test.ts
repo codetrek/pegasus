@@ -928,4 +928,84 @@ describe("file tools", () => {
       expect(result.error).toContain("not in allowed paths");
     }, 10000);
   });
+
+  // ── AbortSignal support ────────────────────────
+
+  describe("file tools abort signal", () => {
+    it("list_files returns error when abortSignal is already aborted", async () => {
+      const ac = new AbortController();
+      ac.abort();
+
+      const result = await list_files.execute(
+        { path: testDir, recursive: true },
+        { agentId: "test", abortSignal: ac.signal },
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("aborted");
+    }, 10_000);
+
+    it("glob_files returns error when abortSignal is already aborted", async () => {
+      const ac = new AbortController();
+      ac.abort();
+
+      const result = await glob_files.execute(
+        { pattern: "**/*.ts", cwd: testDir },
+        { agentId: "test", abortSignal: ac.signal },
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("aborted");
+    }, 10_000);
+
+    it("grep_files returns error when abortSignal is already aborted", async () => {
+      // Create a file so the path exists and grep would normally succeed
+      await Bun.write(`${testDir}/sample.txt`, "hello world\n");
+
+      const ac = new AbortController();
+      ac.abort();
+
+      const result = await grep_files.execute(
+        { pattern: "hello", path: testDir },
+        { agentId: "test", abortSignal: ac.signal },
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("aborted");
+    }, 10_000);
+
+    it("list_files works normally without abortSignal", async () => {
+      await Bun.write(`${testDir}/normal.txt`, "content");
+
+      const result = await list_files.execute(
+        { path: testDir },
+        { agentId: "test" },
+      );
+
+      expect(result.success).toBe(true);
+    }, 10_000);
+
+    it("glob_files works normally without abortSignal", async () => {
+      await Bun.write(`${testDir}/normal.ts`, "content");
+
+      const result = await glob_files.execute(
+        { pattern: "*.ts", cwd: testDir },
+        { agentId: "test" },
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.result).toContain("normal.ts");
+    }, 10_000);
+
+    it("grep_files works normally without abortSignal", async () => {
+      await Bun.write(`${testDir}/normal.txt`, "hello world\n");
+
+      const result = await grep_files.execute(
+        { pattern: "hello", path: testDir },
+        { agentId: "test" },
+      );
+
+      expect(result.success).toBe(true);
+    }, 10_000);
+  });
 });
