@@ -72,7 +72,7 @@ describe("OAuth credential loading", () => {
         default: "test/test-model",
       },
       dataDir,
-      authDir,
+      homeDir: testDir,
     });
     const cacheDir = path.join(dataDir, "model-limits");
     const { mkdirSync } = require("node:fs");

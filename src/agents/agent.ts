@@ -301,6 +301,9 @@ export class Agent {
   // ── Background task manager (bg_run/bg_output/bg_stop) ──
   private _backgroundManager: BackgroundTaskManager;
 
+  /** Optional callback for LLM usage tracking (set by PegasusApp). */
+  private _llmUsageCallback: ((result: GenerateTextResult) => void) | null = null;
+
   constructor(deps: AgentDeps) {
     this.agentId = deps.agentId;
     this.model = deps.model;
@@ -366,6 +369,11 @@ export class Agent {
   /** Register callback for outbound replies. */
   onReply(callback: ReplyCallback): void {
     this._onReply = callback;
+  }
+
+  /** Register callback for LLM usage tracking (called after each LLM call). */
+  setLLMUsageCallback(cb: (result: GenerateTextResult) => void): void {
+    this._llmUsageCallback = cb;
   }
 
   /** Send an inbound message to this conversation agent. */
@@ -641,6 +649,7 @@ export class Agent {
       state.lastPromptTokens =
         (result.usage.promptTokens ?? 0) + (result.usage.cacheReadTokens ?? 0);
       await this.onLLMUsage(result);
+      this._llmUsageCallback?.(result);
       this._overflowRetryCount = 0; // Reset on successful LLM call
 
       // No tool calls → agent complete
@@ -765,6 +774,7 @@ export class Agent {
         tc.arguments,
         ctx,
       );
+      this.toolExecutor.emitCompletion(tc.name, result, ctx);
       let toolResult = formatToolResult(tc.id, tc.name, result);
 
       // Apply result formatting: timestamp prefix + truncation

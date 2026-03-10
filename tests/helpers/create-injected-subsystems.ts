@@ -58,7 +58,7 @@ export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubs
     settings,
     models,
     modelLimitsCache,
-    credDir: settings.authDir,
+    credDir: path.join(settings.homeDir, "auth"),
   });
 
   // Skill system
@@ -118,6 +118,6 @@ export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubs
     imageManager,
     reflectionOrchestrator,
     mcpTools: [],
-    ownerStore: new OwnerStore(settings.authDir),
+    ownerStore: new OwnerStore(path.join(settings.homeDir, "auth")),
   };
 }

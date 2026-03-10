@@ -10,7 +10,7 @@
  *   2. Static registry via getModelLimits()
  *   3. DEFAULT_MODEL_LIMITS
  *
- * Disk cache at ~/.pegasus/model-limits/ ensures limits survive restarts
+ * Disk cache at {homeDir}/model-limits/ ensures limits survive restarts
  * without re-fetching from APIs. No TTL — cached data never expires.
  */
 

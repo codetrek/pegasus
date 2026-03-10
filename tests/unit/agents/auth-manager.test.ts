@@ -43,7 +43,7 @@ describe("AuthManager", () => {
         copilot: { enabled: false },
         openrouter: { enabled: false },
       },
-      authDir: tmpDir,
+      homeDir: tmpDir,
     } as unknown as AuthManagerDeps["settings"];
 
     // Minimal ModelRegistry stub

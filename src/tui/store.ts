@@ -12,9 +12,10 @@
  * switchAgent() clears messages and reloads from session.
  * Future: UI can call switchAgent("project:EmailProcessor") to change view.
  */
-import { createStore } from "solid-js/store"
+import { createStore, reconcile } from "solid-js/store"
 import { createSignal } from "solid-js"
 import type { Message } from "../infra/llm-types.ts"
+import type { AppStats } from "../stats/app-stats.ts"
 
 /** Chat message displayed in the TUI ChatPanel. */
 export interface ChatMessage {
@@ -228,4 +229,27 @@ export function clearOnShutdown(): void {
 /** Request process shutdown. Called by App on double Ctrl+C. */
 export function requestShutdown(): void {
   if (_onShutdown) _onShutdown()
+}
+
+// ── Stats store ──
+// Reactive store for AppStats snapshots delivered by the TUI Bridge.
+
+interface StatsStoreShape {
+  stats: AppStats | null
+}
+
+const [_statsStore, _setStatsStore] = createStore<StatsStoreShape>({ stats: null })
+
+export const statsStore = _statsStore
+
+export function setStats(snapshot: AppStats | null): void {
+  if (snapshot === null) {
+    _setStatsStore("stats", null)
+  } else {
+    _setStatsStore("stats", reconcile(snapshot))
+  }
+}
+
+export function resetStatsStore(): void {
+  _setStatsStore("stats", null)
 }

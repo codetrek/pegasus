@@ -7,6 +7,7 @@ import type {
 import type { Persona } from "@pegasus/identity/persona.ts";
 import { SettingsSchema } from "@pegasus/infra/config.ts";
 import type { OutboundMessage, ChannelAdapter } from "@pegasus/channels/types.ts";
+import path from "node:path";
 import { rm, mkdir } from "node:fs/promises";
 import { ModelRegistry } from "@pegasus/infra/model-registry.ts";
 import type { LLMConfig } from "@pegasus/infra/config-schema.ts";
@@ -100,7 +101,7 @@ function testSettings() {
     logLevel: "warn",
     llm: { maxConcurrentCalls: 3 },
     agent: { maxActiveTasks: 10 },
-    authDir: `/tmp/pegasus-test-app-auth-${process.pid}-${testSeq}`,
+    homeDir: `/tmp/pegasus-test-app-home-${process.pid}-${testSeq}`,
   });
 }
 
@@ -111,7 +112,7 @@ describe("PegasusApp", () => {
   });
   afterEach(async () => {
     await rm(testDataDir, { recursive: true, force: true }).catch(() => {});
-    await rm(`/tmp/pegasus-test-app-auth-${process.pid}-${testSeq}`, { recursive: true, force: true }).catch(() => {});
+    await rm(`/tmp/pegasus-test-app-home-${process.pid}-${testSeq}`, { recursive: true, force: true }).catch(() => {});
   });
 
   it("should start and stop without errors", async () => {
@@ -219,7 +220,7 @@ describe("PegasusApp", () => {
       logLevel: "warn",
       llm: { maxConcurrentCalls: 3 },
       agent: { maxActiveTasks: 10 },
-      authDir: `/tmp/pegasus-test-app-auth-${process.pid}-${testSeq}`,
+      homeDir: `/tmp/pegasus-test-app-home-${process.pid}-${testSeq}`,
       vision: { enabled: false },
     });
     const app = new Pegasus({
@@ -453,9 +454,8 @@ describe("PegasusApp", () => {
       });
 
       // Pre-register a telegram owner so channel is "configured"
-      await mkdir(settings.authDir, { recursive: true });
-      const store = new OwnerStore(settings.authDir);
-      store.add("telegram", "trusted-owner");
+      await mkdir(path.join(settings.homeDir, "auth"), { recursive: true });
+      void new OwnerStore(path.join(settings.homeDir, "auth"));
 
       await app.start();
 
@@ -493,8 +493,8 @@ describe("PegasusApp", () => {
       });
 
       // Pre-register telegram owner
-      await mkdir(settings.authDir, { recursive: true });
-      const store = new OwnerStore(settings.authDir);
+      await mkdir(path.join(settings.homeDir, "auth"), { recursive: true });
+      const store = new OwnerStore(path.join(settings.homeDir, "auth"));
       store.add("telegram", "owner-user");
 
       await app.start();
@@ -744,7 +744,7 @@ describe("PegasusApp", () => {
         logLevel: "warn",
         llm: { maxConcurrentCalls: 3 },
         agent: { maxActiveTasks: 10 },
-        authDir: `/tmp/pegasus-test-app-auth-${process.pid}-${testSeq}`,
+        homeDir: `/tmp/pegasus-test-app-home-${process.pid}-${testSeq}`,
         vision: { enabled: true },
       });
       const app = new Pegasus({

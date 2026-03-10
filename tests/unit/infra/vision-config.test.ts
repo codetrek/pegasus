@@ -5,7 +5,7 @@ describe("Vision config", () => {
   it("should have sensible defaults when not specified", () => {
     const settings = SettingsSchema.parse({
       dataDir: "/tmp/test",
-      authDir: "/tmp/auth",
+      homeDir: "/tmp/test-home",
     });
     expect(settings.vision).toBeDefined();
     expect(settings.vision.enabled).toBe(true);
@@ -17,7 +17,7 @@ describe("Vision config", () => {
   it("should allow overriding all fields", () => {
     const settings = SettingsSchema.parse({
       dataDir: "/tmp/test",
-      authDir: "/tmp/auth",
+      homeDir: "/tmp/test-home",
       vision: {
         enabled: false,
         keepLastNTurns: 3,
@@ -34,7 +34,7 @@ describe("Vision config", () => {
   it("should handle string 'false' for enabled (from env vars)", () => {
     const settings = SettingsSchema.parse({
       dataDir: "/tmp/test",
-      authDir: "/tmp/auth",
+      homeDir: "/tmp/test-home",
       vision: { enabled: "false" },
     });
     expect(settings.vision.enabled).toBe(false);
@@ -43,7 +43,7 @@ describe("Vision config", () => {
   it("should handle string 'true' for enabled (from env vars)", () => {
     const settings = SettingsSchema.parse({
       dataDir: "/tmp/test",
-      authDir: "/tmp/auth",
+      homeDir: "/tmp/test-home",
       vision: { enabled: "true" },
     });
     expect(settings.vision.enabled).toBe(true);
@@ -52,7 +52,7 @@ describe("Vision config", () => {
   it("should coerce string numbers", () => {
     const settings = SettingsSchema.parse({
       dataDir: "/tmp/test",
-      authDir: "/tmp/auth",
+      homeDir: "/tmp/test-home",
       vision: {
         keepLastNTurns: "10",
         maxDimensionPx: "800",
@@ -65,7 +65,7 @@ describe("Vision config", () => {
   it("should allow partial override (other fields keep defaults)", () => {
     const settings = SettingsSchema.parse({
       dataDir: "/tmp/test",
-      authDir: "/tmp/auth",
+      homeDir: "/tmp/test-home",
       vision: { keepLastNTurns: 2 },
     });
     expect(settings.vision.keepLastNTurns).toBe(2);

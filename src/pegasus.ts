@@ -15,7 +15,6 @@
  */
 
 import path from "node:path";
-import os from "node:os";
 import type { Persona } from "./identity/persona.ts";
 import type { Settings } from "./infra/config.ts";
 import { getSettings } from "./infra/config.ts";
@@ -48,6 +47,9 @@ import { buildTelegramCommands } from "./channels/telegram-commands.ts";
 import { OwnerStore } from "./security/owner-store.ts";
 import { classifyMessage } from "./security/message-classifier.ts";
 import { formatChannelMeta } from "./agents/agent.ts";
+import { createAppStats, recordLLMUsage, recordToolCall, loadPersistedStats, savePersistedStats } from "./stats/index.ts";
+import type { AppStats } from "./stats/index.ts";
+import { EventType } from "./agents/events/types.ts";
 
 const logger = getLogger("pegasus_app");
 
@@ -81,6 +83,9 @@ export class Pegasus {
   private _replyCallback: ((msg: OutboundMessage) => void) | null = null;
   private _started = false;
 
+  // ── Stats ──
+  private _appStats: AppStats | null = null;
+
   // ── Security ──
   private ownerStore!: OwnerStore;
   private _channelNotifyTimes = new Map<string, number>();
@@ -106,6 +111,11 @@ export class Pegasus {
       throw new Error("PegasusApp not started — call start() first");
     }
     return this._mainAgent;
+  }
+
+  /** Get AppStats snapshot (available after start()). */
+  get appStats(): AppStats | null {
+    return this._appStats;
   }
 
   /**
@@ -251,11 +261,11 @@ export class Pegasus {
     const mainStorePaths = buildMainAgentPaths(this.settings.dataDir);
 
     // 1. ModelLimitsCache
-    const modelLimitsCacheDir = path.join(os.homedir(), ".pegasus", "model-limits");
+    const modelLimitsCacheDir = path.join(this.settings.homeDir, "model-limits");
     this.modelLimitsCache = new ModelLimitsCache(modelLimitsCacheDir);
 
     // Security: create OwnerStore for message classification
-    this.ownerStore = new OwnerStore(this.settings.authDir);
+    this.ownerStore = new OwnerStore(path.join(this.settings.homeDir, "auth"));
 
     // Intentional separate ToolRegistry — Reflection runs independently
     // (fire-and-forget after compaction) and needs its own tool execution pipeline.
@@ -283,14 +293,14 @@ export class Pegasus {
       settings: this.settings,
       models: this.models,
       modelLimitsCache: this.modelLimitsCache,
-      credDir: this.settings.authDir,
+      credDir: path.join(this.settings.homeDir, "auth"),
     });
     await this.authManager.initialize();
 
     // 4. MCP
     const mcpConfigs = (this.settings.tools?.mcpServers ?? []) as MCPServerConfig[];
     if (mcpConfigs.length > 0) {
-      const mcpAuthDir = path.join(this.settings.authDir, "mcp");
+      const mcpAuthDir = path.join(this.settings.homeDir, "auth", "mcp");
       this.mcpManager = new MCPManager(mcpAuthDir);
       await this.mcpManager.connectAll(mcpConfigs);
 
@@ -402,6 +412,55 @@ export class Pegasus {
     // 11. Start MainAgent (loads session + injects memory + builds prompt)
     await this._mainAgent.start();
 
+    // 11b. Wire AppStats — tracks LLM usage, tool calls, channels
+    const contextWindow = this.settings.llm.contextWindow ?? 128000;
+    this._appStats = createAppStats({
+      persona: this.persona.name,
+      provider: this.models.getDefaultProvider(),
+      modelId: this.models.getDefaultModelId(),
+      contextWindow,
+    });
+
+    // Restore cumulative stats from previous sessions
+    loadPersistedStats(this._appStats, this.settings.homeDir);
+
+    // Wire tool counts (builtin + mcp)
+    const builtinCount = mainAgentTools.length;
+    const mcpCount = wrappedMcpTools.length;
+    this._appStats.tools.builtin = builtinCount;
+    this._appStats.tools.mcp = mcpCount;
+    this._appStats.tools.total = builtinCount + mcpCount;
+
+    // Wire LLM usage callback on mainAgent
+    const appStats = this._appStats;
+    this._mainAgent.setLLMUsageCallback((result) => {
+      recordLLMUsage(appStats, {
+        model: this.models.getDefaultModelId(),
+        promptTokens: result.usage.promptTokens,
+        cacheReadTokens: result.usage.cacheReadTokens ?? 0,
+        cacheWriteTokens: result.usage.cacheWriteTokens ?? 0,
+        outputTokens: result.usage.completionTokens,
+        latencyMs: 0, // latency not available from GenerateTextResult
+      });
+    });
+
+    // Subscribe to tool call events for success/fail tracking
+    this._mainAgent.eventBus.subscribe(EventType.TOOL_CALL_COMPLETED, async () => {
+      recordToolCall(appStats, true);
+    });
+    this._mainAgent.eventBus.subscribe(EventType.TOOL_CALL_FAILED, async () => {
+      recordToolCall(appStats, false);
+    });
+
+    // Wire channel info from adapters
+    for (const adapter of this._adapters) {
+      appStats.channels.push({
+        type: adapter.type,
+        name: adapter.type,
+        connected: true,
+      });
+    }
+
     // 12. Set up ProjectAdapter (needs MainAgent.send for forwarding)
     this.projectAdapter.setModelRegistry(this.models);
     // Add projectAdapter to our adapters list for routing (don't use MainAgent.registerAdapter
@@ -448,6 +507,11 @@ export class Pegasus {
    */
   async stop(): Promise<void> {
     if (!this._started) return;
+
+    // 0. Persist cumulative stats before shutdown
+    if (this._appStats) {
+      savePersistedStats(this._appStats, this.settings.homeDir);
+    }
 
     // 1. Stop MainAgent (stops tick + drains queue, but NOT infrastructure in injected mode)
     if (this._mainAgent) {

@@ -18,8 +18,12 @@ import {
   getCurrentAgent,
   setCurrentAgent,
   loadMessages,
+  statsStore,
+  setStats,
+  resetStatsStore,
 } from "@pegasus/tui/store.ts";
 import type { Message } from "@pegasus/infra/llm-types.ts";
+import { createAppStats } from "@pegasus/stats/app-stats.ts";
 
 describe("TUI Store", () => {
   beforeEach(() => {
@@ -314,5 +318,29 @@ describe("TUI Store", () => {
       requestShutdown();
       expect(called).toBe(false);
     });
+  });
+});
+
+describe("Stats Store", () => {
+  beforeEach(() => {
+    resetStatsStore();
+  });
+
+  it("has default null stats", () => {
+    expect(statsStore.stats).toBeNull();
+  });
+
+  it("can set stats via setStats", () => {
+    const stats = createAppStats({ persona: "Test", modelId: "m", provider: "p", contextWindow: 100 });
+    setStats(stats);
+    expect(statsStore.stats).not.toBeNull();
+    expect(statsStore.stats!.persona).toBe("Test");
+  });
+
+  it("can reset stats", () => {
+    const stats = createAppStats({ persona: "Test", modelId: "m", provider: "p", contextWindow: 100 });
+    setStats(stats);
+    resetStatsStore();
+    expect(statsStore.stats).toBeNull();
   });
 });

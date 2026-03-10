@@ -60,7 +60,7 @@ const DEFAULT_CONFIG = {
     logLevel: "info",
     logFormat: "json",
     nodeEnv: "development",
-    // authDir intentionally omitted — must be set in config.yml or env var
+    // homeDir intentionally omitted — must be set in config.yml or env var
     // dataDir intentionally omitted — must be set in config.yml or env var
   },
 };
@@ -254,7 +254,7 @@ function configToSettings(config: any): Settings {
     channels: config.channels,
     logLevel: config.system?.logLevel,
     dataDir: config.system?.dataDir,
-    authDir: config.system?.authDir,
+    homeDir: config.system?.homeDir,
     logFormat: config.system?.logFormat,
     nodeEnv: config.system?.nodeEnv,
   });

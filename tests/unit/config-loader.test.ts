@@ -23,8 +23,8 @@ describe("config-loader", () => {
     testDir = mkdtempSync(join(tmpdir(), "pegasus-test-"));
     process.chdir(testDir);
 
-    // authDir is required by SettingsSchema — set via env var for all loadSettings() calls
-    process.env.PEGASUS_AUTH_DIR = "/tmp/pegasus-test-auth";
+    // homeDir is required by SettingsSchema — set via env var for all loadSettings() calls
+    process.env.PEGASUS_HOME_DIR = "/tmp/pegasus-test-home";
 
     resetSettings();
   });
@@ -47,7 +47,7 @@ describe("config-loader", () => {
   describe("DEFAULT_CONFIG (no config file)", () => {
     test("uses hardcoded defaults when no config file exists", () => {
       // dataDir is required — provide a minimal config so loadSettings() succeeds
-      writeFileSync("config.yml", "system:\n  dataDir: data\n  authDir: /tmp/pegasus-test-auth\n");
+      writeFileSync("config.yml", "system:\n  dataDir: data\n  homeDir: /tmp/pegasus-test-home\n");
 
       const settings = loadSettings();
 
@@ -73,7 +73,7 @@ llm:
   maxConcurrentCalls: 10
 system:
   dataDir: data
-  authDir: /tmp/pegasus-test-auth
+  homeDir: /tmp/pegasus-test-home
 `;
       writeFileSync("config.yml", yamlContent);
 
@@ -102,7 +102,7 @@ llm:
   default: openai/gpt-4o
 system:
   dataDir: /tmp/test
-  authDir: /tmp/pegasus-test-auth
+  homeDir: /tmp/pegasus-test-home
 `;
 
       writeFileSync("config.yaml", yamlContent);
@@ -122,7 +122,7 @@ llm:
   default: openai/gpt-4o-mini
 system:
   dataDir: /tmp/test
-  authDir: /tmp/pegasus-test-auth
+  homeDir: /tmp/pegasus-test-home
 `;
       const localConfig = `
 llm:
@@ -151,7 +151,7 @@ llm:
   default: anthropic/claude-sonnet-4
 system:
   dataDir: /tmp/test
-  authDir: /tmp/pegasus-test-auth
+  homeDir: /tmp/pegasus-test-home
 `;
 
       process.env.ANTHROPIC_API_KEY = "test-yaml-key";
@@ -179,7 +179,7 @@ agent:
   maxActiveTasks: 5
 system:
   dataDir: /tmp/test
-  authDir: /tmp/pegasus-test-auth
+  homeDir: /tmp/pegasus-test-home
 `;
 
       // Local config overrides some fields
@@ -221,7 +221,7 @@ llm:
   default: openai/gpt-4o-mini
 system:
   dataDir: /tmp/test
-  authDir: /tmp/pegasus-test-auth
+  homeDir: /tmp/pegasus-test-home
 `;
 
       const localConfig = `
@@ -259,7 +259,7 @@ llm:
   default: openai/gpt-4o-mini
 system:
   dataDir: /tmp/test
-  authDir: /tmp/pegasus-test-auth
+  homeDir: /tmp/pegasus-test-home
 `;
 
       writeFileSync("config.yaml", config);
@@ -282,7 +282,7 @@ llm:
   default: \${LLM_DEFAULT_MODEL:-openai/gpt-4o-mini}
 system:
   dataDir: /tmp/test
-  authDir: /tmp/pegasus-test-auth
+  homeDir: /tmp/pegasus-test-home
 `;
 
       writeFileSync("config.yaml", config);
@@ -305,7 +305,7 @@ llm:
   default: \${LLM_DEFAULT_MODEL:-openai/gpt-4o-mini}
 system:
   dataDir: /tmp/test
-  authDir: /tmp/pegasus-test-auth
+  homeDir: /tmp/pegasus-test-home
 `;
 
       writeFileSync("config.yaml", config);
@@ -328,7 +328,7 @@ llm:
   default: openai/gpt-4o-mini
 system:
   dataDir: /tmp/test
-  authDir: /tmp/pegasus-test-auth
+  homeDir: /tmp/pegasus-test-home
 `;
 
       writeFileSync("config.yaml", config);
@@ -353,7 +353,7 @@ llm:
   default: openai/gpt-4o-mini
 system:
   dataDir: /tmp/test
-  authDir: /tmp/pegasus-test-auth
+  homeDir: /tmp/pegasus-test-home
 `;
 
       writeFileSync("config.yaml", config);
@@ -373,7 +373,7 @@ llm:
   default: openai/gpt-4o-mini
 system:
   dataDir: /tmp/test
-  authDir: /tmp/pegasus-test-auth
+  homeDir: /tmp/pegasus-test-home
 `;
 
       writeFileSync("config.yaml", config);
@@ -395,7 +395,7 @@ llm:
   default: openai/gpt-4o-mini
 system:
   dataDir: /tmp/test
-  authDir: /tmp/pegasus-test-auth
+  homeDir: /tmp/pegasus-test-home
 `;
 
       writeFileSync("config.yaml", config);
@@ -417,7 +417,7 @@ llm:
   default: openai/gpt-4o-mini
 system:
   dataDir: /tmp/test
-  authDir: /tmp/pegasus-test-auth
+  homeDir: /tmp/pegasus-test-home
 `;
 
       writeFileSync("config.yaml", config);
@@ -450,7 +450,7 @@ system:
   logLevel: warn
   dataDir: custom-data
   logFormat: line
-  authDir: /tmp/pegasus-test-auth
+  homeDir: /tmp/pegasus-test-home
 `;
 
       writeFileSync("config.yaml", config);
@@ -495,7 +495,7 @@ llm:
   default: openai/gpt-4o
 system:
   dataDir: /tmp/test
-  authDir: /tmp/pegasus-test-auth
+  homeDir: /tmp/pegasus-test-home
 `;
 
       writeFileSync("config.yml", yamlContent);
@@ -509,7 +509,7 @@ system:
     test("loads config.local.yml when config.local.yaml does not exist", () => {
       resetSettings();
 
-      writeFileSync("config.yaml", "llm:\n  default: openai/gpt-4o\nsystem:\n  dataDir: /tmp/test\n  authDir: /tmp/pegasus-test-auth\n");
+      writeFileSync("config.yaml", "llm:\n  default: openai/gpt-4o\nsystem:\n  dataDir: /tmp/test\n  homeDir: /tmp/pegasus-test-home\n");
 
       const localContent = `
 llm:
@@ -537,7 +537,7 @@ llm:
 system:
   dataDir: /tmp/test
   logFormat: \${PEGASUS_LOG_FORMAT:-json}
-  authDir: /tmp/pegasus-test-auth
+  homeDir: /tmp/pegasus-test-home
 `;
 
       writeFileSync("config.yaml", config);
@@ -557,7 +557,7 @@ llm:
 system:
   dataDir: /tmp/test
   logFormat: \${PEGASUS_LOG_FORMAT:-json}
-  authDir: /tmp/pegasus-test-auth
+  homeDir: /tmp/pegasus-test-home
 `;
 
       writeFileSync("config.yaml", config);
@@ -581,7 +581,7 @@ llm:
   default: openai/gpt-4o-mini
 system:
   dataDir: /tmp/test
-  authDir: /tmp/pegasus-test-auth
+  homeDir: /tmp/pegasus-test-home
 `;
 
       writeFileSync("config.yaml", config);
@@ -606,7 +606,7 @@ tools:
     - /static/path
 system:
   dataDir: /tmp/test
-  authDir: /tmp/pegasus-test-auth
+  homeDir: /tmp/pegasus-test-home
 `;
 
       writeFileSync("config.yaml", config);
@@ -631,7 +631,7 @@ llm:
   default: openai/gpt-4o
 system:
   dataDir: /tmp/test
-  authDir: /tmp/pegasus-test-auth
+  homeDir: /tmp/pegasus-test-home
 `;
 
       writeFileSync(customConfigPath, config);
@@ -649,7 +649,7 @@ system:
       process.env.PEGASUS_CONFIG = join(testDir, "nonexistent-config.yml");
 
       // Provide a standard config file to fall back to
-      writeFileSync("config.yml", "system:\n  dataDir: /tmp/fallback\n  authDir: /tmp/pegasus-test-auth\n");
+      writeFileSync("config.yml", "system:\n  dataDir: /tmp/fallback\n  homeDir: /tmp/pegasus-test-home\n");
 
       const settings = loadSettings();
 
@@ -673,7 +673,7 @@ llm:
     fast: \${LLM_FAST_MODEL:-}
 system:
   dataDir: /tmp/test
-  authDir: /tmp/pegasus-test-auth
+  homeDir: /tmp/pegasus-test-home
 `;
 
       writeFileSync("config.yaml", config);
@@ -692,7 +692,7 @@ system:
     test("should parse session config with defaults", () => {
       const settings = SettingsSchema.parse({
         dataDir: "/tmp/test",
-        authDir: "/tmp/pegasus-test-auth",
+        homeDir: "/tmp/pegasus-test-home",
       });
       expect(settings.session.compactThreshold).toBe(0.8);
     }, 5_000);
@@ -700,7 +700,7 @@ system:
     test("should allow overriding compactThreshold", () => {
       const settings = SettingsSchema.parse({
         dataDir: "/tmp/test",
-        authDir: "/tmp/pegasus-test-auth",
+        homeDir: "/tmp/pegasus-test-home",
         session: { compactThreshold: 0.6 },
       });
       expect(settings.session.compactThreshold).toBe(0.6);
@@ -711,7 +711,7 @@ system:
     test("contextWindow is undefined by default", () => {
       const settings = SettingsSchema.parse({
         dataDir: "/tmp/test",
-        authDir: "/tmp/pegasus-test-auth",
+        homeDir: "/tmp/pegasus-test-home",
       });
       expect(settings.llm.contextWindow).toBeUndefined();
     }, 5_000);
@@ -719,7 +719,7 @@ system:
     test("contextWindow can be set to a positive integer", () => {
       const settings = SettingsSchema.parse({
         dataDir: "/tmp/test",
-        authDir: "/tmp/pegasus-test-auth",
+        homeDir: "/tmp/pegasus-test-home",
         llm: { contextWindow: 256000 },
       });
       expect(settings.llm.contextWindow).toBe(256000);
@@ -728,7 +728,7 @@ system:
     test("contextWindow coerces string to number", () => {
       const settings = SettingsSchema.parse({
         dataDir: "/tmp/test",
-        authDir: "/tmp/pegasus-test-auth",
+        homeDir: "/tmp/pegasus-test-home",
         llm: { contextWindow: "131072" },
       });
       expect(settings.llm.contextWindow).toBe(131072);
@@ -743,7 +743,7 @@ llm:
   contextWindow: 500000
 system:
   dataDir: /tmp/test
-  authDir: /tmp/pegasus-test-auth
+  homeDir: /tmp/pegasus-test-home
 `;
       writeFileSync("config.yml", config);
 
@@ -761,7 +761,7 @@ llm:
   contextWindow: \${LLM_CONTEXT_WINDOW}
 system:
   dataDir: /tmp/test
-  authDir: /tmp/pegasus-test-auth
+  homeDir: /tmp/pegasus-test-home
 `;
       writeFileSync("config.yml", config);
 
@@ -781,7 +781,7 @@ llm:
   contextWindow: \${LLM_CONTEXT_WINDOW:-}
 system:
   dataDir: /tmp/test
-  authDir: /tmp/pegasus-test-auth
+  homeDir: /tmp/pegasus-test-home
 `;
       writeFileSync("config.yml", config);
 
@@ -794,7 +794,7 @@ system:
     test("defaults to telegram disabled", () => {
       const settings = SettingsSchema.parse({
         dataDir: "/tmp/test",
-        authDir: "/tmp/pegasus-test-auth",
+        homeDir: "/tmp/pegasus-test-home",
       });
       expect(settings.channels.telegram.enabled).toBe(false);
       expect(settings.channels.telegram.token).toBeUndefined();
@@ -847,7 +847,7 @@ channels:
     token: test-bot-token
 system:
   dataDir: /tmp/test
-  authDir: /tmp/pegasus-test-auth
+  homeDir: /tmp/pegasus-test-home
 `;
       writeFileSync("config.yml", config);
 
@@ -870,7 +870,7 @@ channels:
     token: \${TELEGRAM_BOT_TOKEN:-}
 system:
   dataDir: /tmp/test
-  authDir: /tmp/pegasus-test-auth
+  homeDir: /tmp/pegasus-test-home
 `;
       writeFileSync("config.yml", config);
 
@@ -883,57 +883,57 @@ system:
     }, 5_000);
   });
 
-  describe("authDir", () => {
-    test("authDir is required — SettingsSchema.parse without authDir throws", () => {
+  describe("homeDir", () => {
+    test("homeDir is required — SettingsSchema.parse without homeDir throws", () => {
       expect(() =>
         SettingsSchema.parse({ dataDir: "/tmp/test" }),
-      ).toThrow("authDir is required");
+      ).toThrow("homeDir is required");
     }, 5_000);
 
-    test("authDir ~ is resolved to home directory via config.yml", () => {
+    test("homeDir ~ is resolved to home directory via config.yml", () => {
       resetSettings();
       const config = `
 llm:
   default: openai/gpt-4o-mini
 system:
   dataDir: /tmp/test
-  authDir: ~/.pegasus/auth
+  homeDir: ~/.pegasus
 `;
       writeFileSync("config.yml", config);
       const settings = loadSettings();
-      expect(settings.authDir).toBe(`${require("os").homedir()}/.pegasus/auth`);
-      expect(settings.authDir).not.toContain("~");
+      expect(settings.homeDir).toBe(`${require("os").homedir()}/.pegasus`);
+      expect(settings.homeDir).not.toContain("~");
     }, 5_000);
 
-    test("authDir env var override takes precedence over ~", () => {
+    test("homeDir env var override takes precedence over ~", () => {
       resetSettings();
-      process.env.PEGASUS_AUTH_DIR = "/tmp/custom-auth";
+      process.env.PEGASUS_HOME_DIR = "/tmp/custom-home";
       const config = `
 llm:
   default: openai/gpt-4o-mini
 system:
   dataDir: /tmp/test
-  authDir: \${PEGASUS_AUTH_DIR:-~/.pegasus/auth}
+  homeDir: \${PEGASUS_HOME_DIR:-~/.pegasus}
 `;
       writeFileSync("config.yml", config);
       const settings = loadSettings();
-      expect(settings.authDir).toBe("/tmp/custom-auth");
-      delete process.env.PEGASUS_AUTH_DIR;
+      expect(settings.homeDir).toBe("/tmp/custom-home");
+      delete process.env.PEGASUS_HOME_DIR;
     }, 5_000);
 
-    test("authDir defaults to ~ expansion when env var is empty", () => {
+    test("homeDir defaults to ~ expansion when env var is empty", () => {
       resetSettings();
-      delete process.env.PEGASUS_AUTH_DIR;
+      delete process.env.PEGASUS_HOME_DIR;
       const config = `
 llm:
   default: openai/gpt-4o-mini
 system:
   dataDir: /tmp/test
-  authDir: \${PEGASUS_AUTH_DIR:-~/.pegasus/auth}
+  homeDir: \${PEGASUS_HOME_DIR:-~/.pegasus}
 `;
       writeFileSync("config.yml", config);
       const settings = loadSettings();
-      expect(settings.authDir).toBe(`${require("os").homedir()}/.pegasus/auth`);
+      expect(settings.homeDir).toBe(`${require("os").homedir()}/.pegasus`);
     }, 5_000);
   });
 });

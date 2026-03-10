@@ -64,7 +64,7 @@ describe("Config schemas", () => {
   });
 
   test("SettingsSchema applies nested defaults", () => {
-    const settings = SettingsSchema.parse({ dataDir: "/tmp/pegasus-test", authDir: "/tmp/pegasus-test-auth" });
+    const settings = SettingsSchema.parse({ dataDir: "/tmp/pegasus-test", homeDir: "/tmp/pegasus-test-home" });
     expect(settings.llm.default).toBe("openai/gpt-4o-mini");
     expect(settings.agent.maxActiveTasks).toBe(5);
     expect(settings.logLevel).toBe("info");
@@ -74,18 +74,18 @@ describe("Config schemas", () => {
   });
 
   test("SettingsSchema accepts custom logFormat", () => {
-    const settings = SettingsSchema.parse({ dataDir: "/tmp/pegasus-test", authDir: "/tmp/pegasus-test-auth", logFormat: "line" });
+    const settings = SettingsSchema.parse({ dataDir: "/tmp/pegasus-test", homeDir: "/tmp/pegasus-test-home", logFormat: "line" });
     expect(settings.logFormat).toBe("line");
   });
 
   test("SettingsSchema rejects invalid logFormat", () => {
-    expect(() => SettingsSchema.parse({ dataDir: "/tmp/pegasus-test", authDir: "/tmp/pegasus-test-auth", logFormat: "xml" })).toThrow();
+    expect(() => SettingsSchema.parse({ dataDir: "/tmp/pegasus-test", homeDir: "/tmp/pegasus-test-home", logFormat: "xml" })).toThrow();
   });
 
   test("SettingsSchema coerces JSON string array for allowedPaths", () => {
     const settings = SettingsSchema.parse({
       dataDir: "/tmp/pegasus-test",
-      authDir: "/tmp/pegasus-test-auth",
+      homeDir: "/tmp/pegasus-test-home",
       tools: { allowedPaths: '["./data", "/tmp"]' },
     });
     expect(settings.tools.allowedPaths).toEqual(["./data", "/tmp"]);
@@ -94,7 +94,7 @@ describe("Config schemas", () => {
   test("SettingsSchema passes through invalid JSON string for allowedPaths to Zod", () => {
     // Non-JSON string that's not "[]" — Zod will validate/reject it
     expect(() =>
-      SettingsSchema.parse({ dataDir: "/tmp/pegasus-test", authDir: "/tmp/pegasus-test-auth", tools: { allowedPaths: "not-json" } }),
+      SettingsSchema.parse({ dataDir: "/tmp/pegasus-test", homeDir: "/tmp/pegasus-test-home", tools: { allowedPaths: "not-json" } }),
     ).toThrow();
   });
 });
@@ -177,7 +177,7 @@ describe("getSettings / setSettings", () => {
   test("getSettings returns settings after setSettings", () => {
     const custom = SettingsSchema.parse({
       dataDir: "/tmp/test",
-      authDir: "/tmp/pegasus-test-auth",
+      homeDir: "/tmp/pegasus-test-home",
     });
     setSettings(custom);
     const settings = getSettings();
@@ -191,7 +191,7 @@ describe("getSettings / setSettings", () => {
   test("getSettings returns same reference on repeated calls (singleton)", () => {
     const custom = SettingsSchema.parse({
       dataDir: "/tmp/test",
-      authDir: "/tmp/pegasus-test-auth",
+      homeDir: "/tmp/pegasus-test-home",
     });
     setSettings(custom);
     const a = getSettings();
@@ -203,7 +203,7 @@ describe("getSettings / setSettings", () => {
     const custom: Settings = SettingsSchema.parse({
       logLevel: "debug",
       dataDir: "/tmp/test",
-      authDir: "/tmp/pegasus-test-auth",
+      homeDir: "/tmp/pegasus-test-home",
     });
     setSettings(custom);
     const result = getSettings();
@@ -212,7 +212,7 @@ describe("getSettings / setSettings", () => {
   });
 
   test("resetSettings clears singleton — next getSettings throws", () => {
-    const custom = SettingsSchema.parse({ dataDir: "/tmp/pegasus-test", authDir: "/tmp/pegasus-test-auth", logLevel: "error" });
+    const custom = SettingsSchema.parse({ dataDir: "/tmp/pegasus-test", homeDir: "/tmp/pegasus-test-home", logLevel: "error" });
     setSettings(custom);
     expect(getSettings().logLevel).toBe("error");
 
@@ -224,7 +224,7 @@ describe("getSettings / setSettings", () => {
   test("SettingsSchema.parse produces valid defaults", () => {
     const s = SettingsSchema.parse({
       dataDir: "/tmp/test",
-      authDir: "/tmp/pegasus-test-auth",
+      homeDir: "/tmp/pegasus-test-home",
     });
     expect(s.llm.default).toBeDefined();
     expect(s.llm.maxConcurrentCalls).toBeGreaterThan(0);
