@@ -164,6 +164,20 @@ describe("web_search with mock Tavily", () => {
     });
     setSettings(restored);
   }, { timeout: 10000 });
+
+  it("web_search returns error when abortSignal is already aborted", async () => {
+    // Covers the catch block (lines 132-141) — fetch throws AbortError before completing
+    const ac = new AbortController();
+    ac.abort();
+
+    const result = await web_search.execute(
+      { query: "test abort" },
+      { agentId: "test", abortSignal: ac.signal },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBeDefined();
+  }, { timeout: 10_000 });
 });
 
 // ── web_fetch ──────────────────────────────────
@@ -362,4 +376,45 @@ describe("web_fetch tool", () => {
     // Error should indicate a network failure (DNS or connection), not a "no upgrade" scenario
     expect(result.error).toBeDefined();
   }, { timeout: 15000 });
+
+  it("web_fetch fails immediately when abortSignal is already aborted", async () => {
+    // Covers composeFetchSignal abort branch (line 14): AbortSignal.any([timeoutSignal, context.abortSignal])
+    const ac = new AbortController();
+    ac.abort();
+
+    const result = await web_fetch.execute(
+      { url: `${fetchBaseUrl}/html`, prompt: "test" },
+      { agentId: "test", abortSignal: ac.signal },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBeDefined();
+  }, { timeout: 10_000 });
+
+  it("should evict oldest cache entry when cache is full", async () => {
+    // Covers cache eviction lines 299-300 (MAX_CACHE_ENTRIES = 100)
+    // Fill the cache with 100 entries using unique prompts
+    for (let i = 0; i < 100; i++) {
+      await web_fetch.execute(
+        { url: `${fetchBaseUrl}/text`, prompt: `fill-cache-${i}` },
+        { agentId: "test" },
+      );
+    }
+
+    // Add one more entry — should evict the oldest (fill-cache-0)
+    const result = await web_fetch.execute(
+      { url: `${fetchBaseUrl}/text`, prompt: "eviction-trigger" },
+      { agentId: "test" },
+    );
+    expect(result.success).toBe(true);
+
+    // Verify the oldest entry was evicted (fill-cache-0 is no longer cached)
+    const oldResult = await web_fetch.execute(
+      { url: `${fetchBaseUrl}/text`, prompt: "fill-cache-0" },
+      { agentId: "test" },
+    );
+    expect(oldResult.success).toBe(true);
+    const res = oldResult.result as { cached: boolean };
+    expect(res.cached).toBe(false); // evicted, so re-fetched
+  }, { timeout: 60_000 });
 });
