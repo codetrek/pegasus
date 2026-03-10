@@ -264,7 +264,7 @@ export class BackgroundTaskManager {
     timeout: number,
     signal: AbortSignal,
   ): Promise<ToolResult> {
-    const executePromise = this.executor.execute(toolName, params, context, { timeout });
+    const executePromise = this.executor.execute(toolName, params, context, { timeout, signal });
 
     let timerId: ReturnType<typeof setTimeout>;
     const timeoutPromise = new Promise<never>((_, reject) => {

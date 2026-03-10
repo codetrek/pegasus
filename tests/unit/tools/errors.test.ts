@@ -42,8 +42,8 @@ describe("ToolNotFoundError", () => {
 describe("ToolValidationError", () => {
   it("should set message and store validation errors as cause", () => {
     const validationErrors = [{ field: "url", message: "required" }];
-    const err = new ToolValidationError("http_get", validationErrors);
-    expect(err.toolName).toBe("http_get");
+    const err = new ToolValidationError("web_search", validationErrors);
+    expect(err.toolName).toBe("web_search");
     expect(err.message).toBe("Parameter validation failed");
     expect(err.name).toBe("ToolValidationError");
     expect(err.cause).toEqual(validationErrors);

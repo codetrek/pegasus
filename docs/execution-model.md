@@ -345,7 +345,7 @@ SubAgent is an orchestrator that can also execute directly:
 
 **Execution tools** (same as `general` AITask):
 - File I/O: read_file, write_file, list_files, edit_file, grep_files, glob_files
-- Network: http_get, http_post, http_request, web_search
+- Network: web_search
 - Data: base64_encode, base64_decode
 - System: current_time, sleep
 

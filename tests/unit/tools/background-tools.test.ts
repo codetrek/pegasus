@@ -240,7 +240,28 @@ describe("BackgroundTaskManager", () => {
     expect(status.status).toBe("completed");
   }, 5000);
 
-  // 13b. run() background timeout sets status to failed via catch path
+  // 13b. run() passes AbortSignal to executor via options
+  it("passes AbortSignal to executor via options", async () => {
+    let receivedSignal: AbortSignal | undefined;
+
+    const mockExecutor = {
+      execute: async (_tool: string, _params: unknown, _ctx: any, options?: { timeout?: number; signal?: AbortSignal }) => {
+        receivedSignal = options?.signal;
+        return { success: true, startedAt: Date.now(), completedAt: Date.now(), durationMs: 0 };
+      },
+    } as any;
+
+    const mgr = new BackgroundTaskManager(mockExecutor);
+    const id = mgr.run("test_tool", {}, ctx());
+
+    // Wait for execution
+    await mgr.waitFor(id, 2000);
+
+    expect(receivedSignal).toBeDefined();
+    expect(receivedSignal).toBeInstanceOf(AbortSignal);
+  }, 5000);
+
+  // 13c. run() background timeout sets status to failed via catch path
   it("run() executor rejection triggers catch path", async () => {
     // Create a tool that is NOT registered, so executor.execute() throws ToolNotFoundError.
     // However, ToolExecutor catches that and returns { success: false }.
@@ -440,4 +461,44 @@ describe("bg_stop", () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain("not available");
   }, 5000);
+});
+
+// ── bg_stop integration ─────────────────────────────
+
+describe("bg_stop integration", () => {
+  it("bg_stop actually kills a shell_exec subprocess", async () => {
+    // Register shell_exec in the executor
+    const { shell_exec } = await import("../../../src/agents/tools/builtins/shell-tools.ts");
+    const toolMap = new Map([["shell_exec", shell_exec]]);
+    const registry = {
+      get: (name: string) => toolMap.get(name),
+      updateCallStats: () => {},
+    };
+    const bus = { emit: () => {} };
+    const executor = new ToolExecutor(registry, bus, 30_000);
+    const mgr = new BackgroundTaskManager(executor);
+
+    // Start a long-running shell command via bg_run
+    const bgTaskId = mgr.run("shell_exec", { command: "sleep 60" }, ctx());
+
+    // Let it start
+    await new Promise((r) => setTimeout(r, 300));
+
+    // Verify it's running
+    expect(mgr.getStatus(bgTaskId).status).toBe("running");
+
+    // Stop it
+    const stopped = mgr.stop(bgTaskId);
+    expect(stopped).toBe(true);
+
+    // Wait for the tool execution to settle
+    await new Promise((r) => setTimeout(r, 1000));
+
+    // Verify it's failed (not completed)
+    const status = mgr.getStatus(bgTaskId);
+    expect(status.status).toBe("failed");
+    if (status.status === "failed") {
+      expect(status.error).toBe("Stopped by user");
+    }
+  }, 15_000);
 });

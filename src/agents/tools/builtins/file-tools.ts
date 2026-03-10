@@ -12,6 +12,15 @@ import ignore from "ignore";
 import { getSettings } from "../../../infra/config.ts";
 import { isImageFile, readImageFile } from "../../../media/image-helpers.ts";
 
+// ── abort helper ──
+
+/** Check if the abort signal has been triggered, throw if so. */
+function checkAborted(context: ToolContext): void {
+  if (context.abortSignal?.aborted) {
+    throw new Error("Operation aborted");
+  }
+}
+
 // ── rg availability check (cached at module load) ──
 
 let _rgAvailable: boolean | null = null;
@@ -260,9 +269,11 @@ export const list_files: Tool = {
 
       const scanDir = async (currentPath: string, prefix: string = ""): Promise<void> => {
         if (truncated) return;
+        checkAborted(context);
         const entries = await readdir(currentPath, { withFileTypes: true });
         for (const entry of entries) {
           if (truncated) return;
+          checkAborted(context);
           const entryPath = path.join(currentPath, entry.name);
           const displayName = prefix ? path.join(prefix, entry.name) : entry.name;
 
@@ -765,6 +776,7 @@ export const grep_files: Tool = {
 
       // ── Tier 1: Try ripgrep ──
       if (isRgAvailable()) {
+        checkAborted(context);
         try {
           const rgResult = executeWithRg(grepParams);
           if (rgResult !== null) {
@@ -835,6 +847,7 @@ export const grep_files: Tool = {
 
       // Search a single file (line-by-line mode) using streaming
       const searchFileLineByLine = async (filePath: string): Promise<boolean> => {
+        checkAborted(context);
         try {
           // Skip files exceeding configured max size
           const st = await fsStat(filePath);
@@ -971,6 +984,7 @@ export const grep_files: Tool = {
 
       // Search a single file (multiline mode)
       const searchFileMultiline = async (filePath: string): Promise<boolean> => {
+        checkAborted(context);
         try {
           // Skip files exceeding configured max size
           const st = await fsStat(filePath);
@@ -1037,6 +1051,7 @@ export const grep_files: Tool = {
       } else {
         // Recursive directory walk with .gitignore and blacklist support
         const walkDir = async (dirPath: string): Promise<boolean> => {
+          checkAborted(context);
           let entries;
           try {
             entries = await readdir(dirPath, { withFileTypes: true });
@@ -1183,7 +1198,9 @@ export const glob_files: Tool = {
       // Use Bun.Glob for pattern matching
       const glob = new Bun.Glob(globPattern);
       const entries: string[] = [];
+      checkAborted(context);
       for await (const entry of glob.scan({ cwd: basePath, onlyFiles: true })) {
+        checkAborted(context);
         entries.push(entry);
         // Best-effort mtime sorting: collect up to 2x max_results, sort, then truncate.
         // With very large result sets, the final order may not be globally optimal.
@@ -1193,6 +1210,7 @@ export const glob_files: Tool = {
       // Stat each file to get mtime, sort by mtime descending
       const filesWithMtime: Array<{ path: string; mtime: number }> = [];
       for (const entry of entries) {
+        checkAborted(context);
         try {
           const fullPath = path.join(basePath, entry);
           const stats = await fsStat(fullPath);
