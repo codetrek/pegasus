@@ -15,6 +15,7 @@ dist/
 # Testing / Coverage / Plan
 coverage/
 docs/plans
+docs/superpowers
 
 # Project data
 data/
