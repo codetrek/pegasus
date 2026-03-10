@@ -48,7 +48,7 @@ import { buildTelegramCommands } from "./channels/telegram-commands.ts";
 import { OwnerStore } from "./security/owner-store.ts";
 import { classifyMessage } from "./security/message-classifier.ts";
 import { formatChannelMeta } from "./agents/agent.ts";
-import { createAppStats, recordLLMUsage, recordToolCall } from "./stats/index.ts";
+import { createAppStats, recordLLMUsage, recordToolCall, loadPersistedStats, savePersistedStats } from "./stats/index.ts";
 import type { AppStats } from "./stats/index.ts";
 import { EventType } from "./agents/events/types.ts";
 
@@ -422,6 +422,9 @@ export class Pegasus {
       contextWindow,
     });
 
+    // Restore cumulative stats from previous sessions
+    loadPersistedStats(this._appStats);
+
     // Wire tool counts (builtin + mcp)
     const builtinCount = mainAgentTools.length;
     const mcpCount = wrappedMcpTools.length;
@@ -505,6 +508,11 @@ export class Pegasus {
    */
   async stop(): Promise<void> {
     if (!this._started) return;
+
+    // 0. Persist cumulative stats before shutdown
+    if (this._appStats) {
+      savePersistedStats(this._appStats);
+    }
 
     // 1. Stop MainAgent (stops tick + drains queue, but NOT infrastructure in injected mode)
     if (this._mainAgent) {

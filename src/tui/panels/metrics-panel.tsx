@@ -20,14 +20,16 @@ function ModelSection() {
       {(stats) => {
         const lc = () => stats().llm.lastCall
         const sessionTotals = () => {
-          let calls = 0, prompt = 0, output = 0, latency = 0
+          let calls = 0, prompt = 0, output = 0, cacheRead = 0, cacheWrite = 0, latency = 0
           for (const m of Object.values(stats().llm.byModel)) {
             calls += m.calls
             prompt += m.totalPromptTokens
             output += m.totalOutputTokens
+            cacheRead += m.totalCacheReadTokens
+            cacheWrite += m.totalCacheWriteTokens
             latency += m.totalLatencyMs
           }
-          return { calls, prompt, output, avgLatencyMs: calls > 0 ? latency / calls : 0 }
+          return { calls, prompt, output, cacheRead, cacheWrite, avgLatencyMs: calls > 0 ? latency / calls : 0 }
         }
         return (
           <box flexDirection="column" paddingLeft={1} paddingRight={1} paddingBottom={1}>
@@ -54,6 +56,8 @@ function ModelSection() {
               <text fg={THEME.text} paddingTop={1}><b>Session totals:</b></text>
               <text fg={THEME.text}> prompt  {fmtTok(sessionTotals().prompt)} tok</text>
               <text fg={THEME.text}> output  {fmtTok(sessionTotals().output)} tok</text>
+              <text fg={THEME.text}> cache rd {fmtTok(sessionTotals().cacheRead)} tok</text>
+              <text fg={THEME.text}> cache wr {fmtTok(sessionTotals().cacheWrite)} tok</text>
               <text fg={THEME.text}> LLM calls: {sessionTotals().calls}</text>
               <text fg={THEME.textMuted}> avg latency: {(sessionTotals().avgLatencyMs / 1000).toFixed(1)}s</text>
             </box>
