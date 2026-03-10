@@ -210,7 +210,7 @@ describe("buildSystemPrompt", () => {
     // Key guidance that can't be inferred from tool schemas
     expect(prompt).toContain("ONLY way to communicate");
     expect(prompt).toContain("Background Execution");
-    expect(prompt).toContain("Multi-Step Reasoning");
+    expect(prompt).toContain("Multi-Step Work");
     expect(prompt).toContain("Channel Security");
   });
 
@@ -219,14 +219,14 @@ describe("buildSystemPrompt", () => {
     expect(prompt).not.toContain("## Tools");
   });
 
-  test("includes Thinking Style merged into How You Think in main mode", () => {
+  test("includes thinking guidance in How You Think in main mode", () => {
     const prompt = buildSystemPrompt({ mode: "main", persona });
-    expect(prompt).toContain("token-efficient");
+    expect(prompt).toContain("Think out loud when it helps");
   });
 
-  test("does NOT include separate Thinking Style section in task mode", () => {
+  test("does NOT include thinking guidance in task mode", () => {
     const prompt = buildSystemPrompt({ mode: "task", persona });
-    expect(prompt).not.toContain("token-efficient");
+    expect(prompt).not.toContain("Think out loud when it helps");
   });
 
   test("includes Delegation in main mode", () => {
@@ -239,14 +239,14 @@ describe("buildSystemPrompt", () => {
     // Sub-section headers (preserved from original, with bg_run added)
     expect(prompt).toContain("### reply() — Handle It Yourself");
     expect(prompt).toContain("### bg_run() — Long-Running");
-    expect(prompt).toContain("### spawn_subagent() — Multi-Step Reasoning");
+    expect(prompt).toContain("### spawn_subagent() — Multi-Step Work");
     expect(prompt).toContain("### create_project() — Long-Lived Effort");
     // Decision Flowchart
     expect(prompt).toContain("### Decision Flowchart");
     // After Delegation
     expect(prompt).toContain("### After Delegation");
     // Concrete examples
-    expect(prompt).toContain("Research top 5 frameworks");
+    expect(prompt).toContain("Research competitors");
     // spawn_subagent is the delegation tool
     expect(prompt).toContain("spawn_subagent(type=");
   });
