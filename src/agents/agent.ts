@@ -774,6 +774,7 @@ export class Agent {
         tc.arguments,
         ctx,
       );
+      this.toolExecutor.emitCompletion(tc.name, result, ctx);
       let toolResult = formatToolResult(tc.id, tc.name, result);
 
       // Apply result formatting: timestamp prefix + truncation
