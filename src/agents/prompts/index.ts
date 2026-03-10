@@ -5,6 +5,7 @@
  * Directory layout:
  * - shared.ts      — sections used by all agent types (identity, runtime, safety)
  * - main-agent.ts  — MainAgent prompt builder + MainAgent-only sections
+ * - skills.ts      — skill behavioral guidance (MainAgent + Task Agent variants)
  * - subagent.ts    — SubAgent system prompt (injected via persona.background)
  * - internal.ts    — prompts for internal operations (reflection, compact, extract)
  */
@@ -16,6 +17,9 @@ export type { MemoryIndexEntry } from "./shared.ts";
 // MainAgent
 export { buildSystemPrompt, buildHowYouThinkSection, buildToolsSection, buildDelegationSection, buildChannelsSection, buildSessionHistorySection } from "./main-agent.ts";
 export type { PromptMode, PromptOptions } from "./main-agent.ts";
+
+// Skills
+export { buildSkillsSection } from "./skills.ts";
 
 // SubAgent
 export { SUBAGENT_SYSTEM_PROMPT } from "./subagent.ts";
