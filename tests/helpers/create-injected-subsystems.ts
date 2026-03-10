@@ -28,7 +28,7 @@ import path from "node:path";
 export interface CreateInjectedOpts {
   /** ModelRegistry with pre-populated mock model. */
   models: ModelRegistry;
-  /** Settings — must include dataDir. */
+  /** Settings — must include homeDir. */
   settings: Settings;
   /** Persona for Reflection. */
   persona: Persona;
@@ -46,11 +46,11 @@ export interface CreateInjectedOpts {
  */
 export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubsystems {
   const { models, settings, persona } = opts;
-  const mainStorePaths = buildMainAgentPaths(settings.dataDir);
+  const mainStorePaths = buildMainAgentPaths(settings.homeDir);
 
   // ModelLimitsCache — uses /tmp so no real cache pollution
   const modelLimitsCache = new ModelLimitsCache(
-    path.join(settings.dataDir, ".model-limits-cache"),
+    path.join(settings.homeDir, ".model-limits-cache"),
   );
 
   // AuthManager — won't actually authenticate in tests (no credDir files)
@@ -64,7 +64,7 @@ export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubs
   // Skill system
   const skillRegistry = new SkillRegistry();
   const skillDirs = opts.skillDirs ?? [
-    { dir: path.join(settings.dataDir, "skills"), source: "user" as const },
+    { dir: path.join(settings.homeDir, "skills"), source: "user" as const },
   ];
   skillRegistry.reloadFromDirs(skillDirs);
 
@@ -72,7 +72,7 @@ export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubs
   const subAgentTypeRegistry = new SubAgentTypeRegistry();
 
   // Projects
-  const projectsDir = path.join(settings.dataDir, "agents", "projects");
+  const projectsDir = path.join(settings.homeDir, "agents", "projects");
   const projectManager = new ProjectManager(projectsDir);
   const projectAdapter = opts.projectAdapter ?? new ProjectAdapter();
 
@@ -81,7 +81,7 @@ export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubs
   let imageManager: ImageManager | null = null;
   const visionConfig = settings.vision;
   if (visionConfig?.enabled === true) {
-    const mediaDir = path.join(settings.dataDir, "media");
+    const mediaDir = path.join(settings.homeDir, "media");
     imageManager = new ImageManager(mediaDir, {
       maxDimensionPx: visionConfig?.maxDimensionPx,
       maxBytes: visionConfig?.maxImageBytes,

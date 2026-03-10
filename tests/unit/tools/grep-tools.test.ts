@@ -72,7 +72,7 @@ describe("grep_files JS fallback", () => {
   it("should skip files larger than configured maxFileSize", async () => {
     const context = { agentId: "test-task-id" };
     // Set a small maxFileSize for testing (500KB)
-    const settings = SettingsSchema.parse({ dataDir: "/tmp/test", homeDir: "/tmp/test-home", tools: { maxFileSize: 500_000 } });
+    const settings = SettingsSchema.parse({ homeDir: "/tmp/test-home", tools: { maxFileSize: 500_000 } });
     setSettings(settings);
 
     const largeFile = `${testDir}/large.txt`;
@@ -480,7 +480,7 @@ describe("grep_files JS fallback — multiline mode", () => {
   it("should skip large files in multiline mode", async () => {
     const context = { agentId: "test-task-id" };
     // Set a small maxFileSize for testing (500KB)
-    const settings = SettingsSchema.parse({ dataDir: "/tmp/test", homeDir: "/tmp/test-home", tools: { maxFileSize: 500_000 } });
+    const settings = SettingsSchema.parse({ homeDir: "/tmp/test-home", tools: { maxFileSize: 500_000 } });
     setSettings(settings);
 
     const bigContent = "ml_target\n" + "x".repeat(600_000);
@@ -958,7 +958,7 @@ describe("grep_files JS fallback — streaming and maxFileSize", () => {
   });
 
   it("getMaxFileSize returns configured value from settings", () => {
-    const settings = SettingsSchema.parse({ dataDir: "/tmp/test", homeDir: "/tmp/test-home", tools: { maxFileSize: 10_000_000 } });
+    const settings = SettingsSchema.parse({ homeDir: "/tmp/test-home", tools: { maxFileSize: 10_000_000 } });
     setSettings(settings);
     expect(getMaxFileSize()).toBe(10_000_000);
   });
@@ -1018,7 +1018,7 @@ describe("grep_files JS fallback — streaming and maxFileSize", () => {
   it("should respect configured maxFileSize and skip files exceeding it", async () => {
     const context = { agentId: "test-task-id" };
     // Set maxFileSize to 100KB
-    const settings = SettingsSchema.parse({ dataDir: "/tmp/test", homeDir: "/tmp/test-home", tools: { maxFileSize: 100_000 } });
+    const settings = SettingsSchema.parse({ homeDir: "/tmp/test-home", tools: { maxFileSize: 100_000 } });
     setSettings(settings);
 
     // Create a file > 100KB

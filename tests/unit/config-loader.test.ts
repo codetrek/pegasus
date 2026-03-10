@@ -46,8 +46,8 @@ describe("config-loader", () => {
 
   describe("DEFAULT_CONFIG (no config file)", () => {
     test("uses hardcoded defaults when no config file exists", () => {
-      // dataDir is required — provide a minimal config so loadSettings() succeeds
-      writeFileSync("config.yml", "system:\n  dataDir: data\n  homeDir: /tmp/pegasus-test-home\n");
+      // homeDir is required — provide a minimal config so loadSettings() succeeds
+      writeFileSync("config.yml", "system:\n  homeDir: /tmp/pegasus-test-home\n");
 
       const settings = loadSettings();
 
@@ -61,7 +61,6 @@ describe("config-loader", () => {
       expect(settings.agent.taskTimeout).toBe(120);
       expect(settings.identity.personaPath).toBe("data/personas/default.json");
       expect(settings.logLevel).toBe("info");
-      expect(settings.dataDir).toBe("data");
       expect(settings.logFormat).toBe("json");
       expect(settings.nodeEnv).toBe("development");
     });
@@ -72,7 +71,6 @@ llm:
   default: anthropic/claude-sonnet-4
   maxConcurrentCalls: 10
 system:
-  dataDir: data
   homeDir: /tmp/pegasus-test-home
 `;
       writeFileSync("config.yml", yamlContent);
@@ -101,7 +99,6 @@ llm:
       apiKey: yaml-key
   default: openai/gpt-4o
 system:
-  dataDir: /tmp/test
   homeDir: /tmp/pegasus-test-home
 `;
 
@@ -121,7 +118,6 @@ llm:
       apiKey: config-key
   default: openai/gpt-4o-mini
 system:
-  dataDir: /tmp/test
   homeDir: /tmp/pegasus-test-home
 `;
       const localConfig = `
@@ -150,7 +146,6 @@ llm:
       apiKey: \${ANTHROPIC_API_KEY}
   default: anthropic/claude-sonnet-4
 system:
-  dataDir: /tmp/test
   homeDir: /tmp/pegasus-test-home
 `;
 
@@ -178,7 +173,6 @@ llm:
 agent:
   maxActiveTasks: 5
 system:
-  dataDir: /tmp/test
   homeDir: /tmp/pegasus-test-home
 `;
 
@@ -220,7 +214,6 @@ llm:
       apiKey: base-anthropic-key
   default: openai/gpt-4o-mini
 system:
-  dataDir: /tmp/test
   homeDir: /tmp/pegasus-test-home
 `;
 
@@ -258,7 +251,6 @@ llm:
       apiKey: \${MISSING_KEY}
   default: openai/gpt-4o-mini
 system:
-  dataDir: /tmp/test
   homeDir: /tmp/pegasus-test-home
 `;
 
@@ -281,7 +273,6 @@ llm:
       apiKey: \${OPENAI_API_KEY:-sk-default-key}
   default: \${LLM_DEFAULT_MODEL:-openai/gpt-4o-mini}
 system:
-  dataDir: /tmp/test
   homeDir: /tmp/pegasus-test-home
 `;
 
@@ -304,7 +295,6 @@ llm:
       apiKey: \${OPENAI_API_KEY:-sk-default-key}
   default: \${LLM_DEFAULT_MODEL:-openai/gpt-4o-mini}
 system:
-  dataDir: /tmp/test
   homeDir: /tmp/pegasus-test-home
 `;
 
@@ -327,7 +317,6 @@ llm:
       apiKey: \${TEST_VAR:=assigned-default}
   default: openai/gpt-4o-mini
 system:
-  dataDir: /tmp/test
   homeDir: /tmp/pegasus-test-home
 `;
 
@@ -352,7 +341,6 @@ llm:
       apiKey: \${REQUIRED_KEY:?API key is required}
   default: openai/gpt-4o-mini
 system:
-  dataDir: /tmp/test
   homeDir: /tmp/pegasus-test-home
 `;
 
@@ -372,7 +360,6 @@ llm:
       apiKey: \${REQUIRED_KEY:?API key is required}
   default: openai/gpt-4o-mini
 system:
-  dataDir: /tmp/test
   homeDir: /tmp/pegasus-test-home
 `;
 
@@ -394,7 +381,6 @@ llm:
       baseURL: \${USE_PROXY:+https://proxy.example.com/v1}
   default: openai/gpt-4o-mini
 system:
-  dataDir: /tmp/test
   homeDir: /tmp/pegasus-test-home
 `;
 
@@ -416,7 +402,6 @@ llm:
       baseURL: \${USE_PROXY:+https://proxy.example.com/v1}
   default: openai/gpt-4o-mini
 system:
-  dataDir: /tmp/test
   homeDir: /tmp/pegasus-test-home
 `;
 
@@ -448,7 +433,6 @@ identity:
   personaPath: custom/persona.json
 system:
   logLevel: warn
-  dataDir: custom-data
   logFormat: line
   homeDir: /tmp/pegasus-test-home
 `;
@@ -465,7 +449,6 @@ system:
       expect(settings.agent.heartbeatInterval).toBe(30);
       expect(settings.identity.personaPath).toBe("custom/persona.json");
       expect(settings.logLevel).toBe("warn");
-      expect(settings.dataDir).toBe("custom-data");
       expect(settings.logFormat).toBe("line");
     });
 
@@ -494,7 +477,6 @@ llm:
       apiKey: yml-key
   default: openai/gpt-4o
 system:
-  dataDir: /tmp/test
   homeDir: /tmp/pegasus-test-home
 `;
 
@@ -509,7 +491,7 @@ system:
     test("loads config.local.yml when config.local.yaml does not exist", () => {
       resetSettings();
 
-      writeFileSync("config.yaml", "llm:\n  default: openai/gpt-4o\nsystem:\n  dataDir: /tmp/test\n  homeDir: /tmp/pegasus-test-home\n");
+      writeFileSync("config.yaml", "llm:\n  default: openai/gpt-4o\nsystem:\n  homeDir: /tmp/pegasus-test-home\n");
 
       const localContent = `
 llm:
@@ -535,7 +517,6 @@ llm:
 llm:
   default: openai/gpt-4o-mini
 system:
-  dataDir: /tmp/test
   logFormat: \${PEGASUS_LOG_FORMAT:-json}
   homeDir: /tmp/pegasus-test-home
 `;
@@ -555,7 +536,6 @@ system:
 llm:
   default: openai/gpt-4o-mini
 system:
-  dataDir: /tmp/test
   logFormat: \${PEGASUS_LOG_FORMAT:-json}
   homeDir: /tmp/pegasus-test-home
 `;
@@ -580,7 +560,6 @@ llm:
       apiKey: \${TEST_ASSIGN_VAR:=fallback-value}
   default: openai/gpt-4o-mini
 system:
-  dataDir: /tmp/test
   homeDir: /tmp/pegasus-test-home
 `;
 
@@ -605,7 +584,6 @@ tools:
     - \${ALLOWED_PATH}
     - /static/path
 system:
-  dataDir: /tmp/test
   homeDir: /tmp/pegasus-test-home
 `;
 
@@ -630,7 +608,6 @@ llm:
       apiKey: custom-key
   default: openai/gpt-4o
 system:
-  dataDir: /tmp/test
   homeDir: /tmp/pegasus-test-home
 `;
 
@@ -649,11 +626,11 @@ system:
       process.env.PEGASUS_CONFIG = join(testDir, "nonexistent-config.yml");
 
       // Provide a standard config file to fall back to
-      writeFileSync("config.yml", "system:\n  dataDir: /tmp/fallback\n  homeDir: /tmp/pegasus-test-home\n");
+      writeFileSync("config.yml", "system:\n  homeDir: /tmp/pegasus-test-home\n");
 
       const settings = loadSettings();
 
-      expect(settings.dataDir).toBe("/tmp/fallback");
+      expect(settings.homeDir).toBe("/tmp/pegasus-test-home");
     });
 
     test("tiers env var interpolation", () => {
@@ -672,7 +649,6 @@ llm:
   tiers:
     fast: \${LLM_FAST_MODEL:-}
 system:
-  dataDir: /tmp/test
   homeDir: /tmp/pegasus-test-home
 `;
 
@@ -691,7 +667,6 @@ system:
   describe("SessionConfig", () => {
     test("should parse session config with defaults", () => {
       const settings = SettingsSchema.parse({
-        dataDir: "/tmp/test",
         homeDir: "/tmp/pegasus-test-home",
       });
       expect(settings.session.compactThreshold).toBe(0.8);
@@ -699,7 +674,6 @@ system:
 
     test("should allow overriding compactThreshold", () => {
       const settings = SettingsSchema.parse({
-        dataDir: "/tmp/test",
         homeDir: "/tmp/pegasus-test-home",
         session: { compactThreshold: 0.6 },
       });
@@ -710,7 +684,6 @@ system:
   describe("LLMConfig contextWindow", () => {
     test("contextWindow is undefined by default", () => {
       const settings = SettingsSchema.parse({
-        dataDir: "/tmp/test",
         homeDir: "/tmp/pegasus-test-home",
       });
       expect(settings.llm.contextWindow).toBeUndefined();
@@ -718,7 +691,6 @@ system:
 
     test("contextWindow can be set to a positive integer", () => {
       const settings = SettingsSchema.parse({
-        dataDir: "/tmp/test",
         homeDir: "/tmp/pegasus-test-home",
         llm: { contextWindow: 256000 },
       });
@@ -727,7 +699,6 @@ system:
 
     test("contextWindow coerces string to number", () => {
       const settings = SettingsSchema.parse({
-        dataDir: "/tmp/test",
         homeDir: "/tmp/pegasus-test-home",
         llm: { contextWindow: "131072" },
       });
@@ -742,7 +713,6 @@ llm:
   default: openai/gpt-4o-mini
   contextWindow: 500000
 system:
-  dataDir: /tmp/test
   homeDir: /tmp/pegasus-test-home
 `;
       writeFileSync("config.yml", config);
@@ -760,7 +730,6 @@ llm:
   default: openai/gpt-4o-mini
   contextWindow: \${LLM_CONTEXT_WINDOW}
 system:
-  dataDir: /tmp/test
   homeDir: /tmp/pegasus-test-home
 `;
       writeFileSync("config.yml", config);
@@ -780,7 +749,6 @@ llm:
   default: openai/gpt-4o-mini
   contextWindow: \${LLM_CONTEXT_WINDOW:-}
 system:
-  dataDir: /tmp/test
   homeDir: /tmp/pegasus-test-home
 `;
       writeFileSync("config.yml", config);
@@ -793,7 +761,6 @@ system:
   describe("ChannelsConfig", () => {
     test("defaults to telegram disabled", () => {
       const settings = SettingsSchema.parse({
-        dataDir: "/tmp/test",
         homeDir: "/tmp/pegasus-test-home",
       });
       expect(settings.channels.telegram.enabled).toBe(false);
@@ -846,7 +813,6 @@ channels:
     enabled: true
     token: test-bot-token
 system:
-  dataDir: /tmp/test
   homeDir: /tmp/pegasus-test-home
 `;
       writeFileSync("config.yml", config);
@@ -869,7 +835,6 @@ channels:
     enabled: \${TELEGRAM_ENABLED:-false}
     token: \${TELEGRAM_BOT_TOKEN:-}
 system:
-  dataDir: /tmp/test
   homeDir: /tmp/pegasus-test-home
 `;
       writeFileSync("config.yml", config);
@@ -886,7 +851,7 @@ system:
   describe("homeDir", () => {
     test("homeDir is required — SettingsSchema.parse without homeDir throws", () => {
       expect(() =>
-        SettingsSchema.parse({ dataDir: "/tmp/test" }),
+        SettingsSchema.parse({}),
       ).toThrow("homeDir is required");
     }, 5_000);
 
@@ -896,7 +861,6 @@ system:
 llm:
   default: openai/gpt-4o-mini
 system:
-  dataDir: /tmp/test
   homeDir: ~/.pegasus
 `;
       writeFileSync("config.yml", config);
@@ -912,7 +876,6 @@ system:
 llm:
   default: openai/gpt-4o-mini
 system:
-  dataDir: /tmp/test
   homeDir: \${PEGASUS_HOME_DIR:-~/.pegasus}
 `;
       writeFileSync("config.yml", config);
@@ -928,7 +891,6 @@ system:
 llm:
   default: openai/gpt-4o-mini
 system:
-  dataDir: /tmp/test
   homeDir: \${PEGASUS_HOME_DIR:-~/.pegasus}
 `;
       writeFileSync("config.yml", config);

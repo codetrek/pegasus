@@ -48,11 +48,10 @@ function createMockModelRegistry(model: LanguageModel): ModelRegistry {
 
 function testSettings() {
   return SettingsSchema.parse({
-    dataDir: testDataDir,
     logLevel: "warn",
     llm: { maxConcurrentCalls: 3 },
     agent: { maxActiveTasks: 10 },
-    homeDir: "/tmp/pegasus-test-home",
+    homeDir: testDataDir,
   });
 }
 
@@ -161,10 +160,9 @@ describe("MainAgent", () => {
       };
 
       const settings = SettingsSchema.parse({
-        dataDir: testDataDir,
         logLevel: "warn",
         session: { compactThreshold: 0.8 },
-        homeDir: "/tmp/pegasus-test-home",
+        homeDir: testDataDir,
       });
 
       const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
@@ -247,10 +245,9 @@ describe("MainAgent", () => {
       };
 
       const settings = SettingsSchema.parse({
-        dataDir: testDataDir,
         logLevel: "warn",
         session: { compactThreshold: 0.8 },
-        homeDir: "/tmp/pegasus-test-home",
+        homeDir: testDataDir,
       });
 
       const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
@@ -321,10 +318,9 @@ describe("MainAgent", () => {
       };
 
       const settings = SettingsSchema.parse({
-        dataDir: testDataDir,
         logLevel: "warn",
         session: { compactThreshold: 0.8 },
-        homeDir: "/tmp/pegasus-test-home",
+        homeDir: testDataDir,
       });
 
       const agent = createMainAgent({ models: createMockModelRegistry(model), settings });

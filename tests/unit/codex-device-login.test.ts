@@ -71,7 +71,6 @@ describe("OAuth credential loading", () => {
         providers: { test: { type: "openai", apiKey: "dummy" } },
         default: "test/test-model",
       },
-      dataDir,
       homeDir: testDir,
     });
     const cacheDir = path.join(dataDir, "model-limits");

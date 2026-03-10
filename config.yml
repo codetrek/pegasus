@@ -184,7 +184,6 @@ channels:
 
 system:
   logLevel: ${PEGASUS_LOG_LEVEL:-info}  # debug | info | warn | error
-  dataDir: ${PEGASUS_DATA_DIR:-data}
   homeDir: ${PEGASUS_HOME_DIR:-~/.pegasus}
 
   # Log output format (file only, no console output)

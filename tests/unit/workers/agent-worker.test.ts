@@ -50,7 +50,7 @@ function captureMessages(): { messages: unknown[]; cleanup: () => void } {
 }
 
 /** Minimal valid Settings. */
-function makeTestSettings(dataDir: string): Settings {
+function makeTestSettings(homeDir: string): Settings {
   return {
     llm: {
       providers: {},
@@ -83,8 +83,7 @@ function makeTestSettings(dataDir: string): Settings {
     vision: { enabled: true, keepLastNTurns: 5, maxDimensionPx: 1200, maxImageBytes: 5242880 },
     channels: { telegram: { enabled: false } },
     logLevel: "silent",
-    dataDir,
-    homeDir: "/tmp/pegasus-test-home",
+    homeDir,
     logFormat: "json",
     nodeEnv: "test",
   };

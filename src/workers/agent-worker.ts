@@ -188,7 +188,7 @@ export async function initProject(config: ProjectConfig): Promise<void> {
   // 6. Build project SkillRegistry (project-specific > global > builtin)
   projectSkillRegistry = new SkillRegistry();
   const builtinSkillDir = path.join(process.cwd(), "skills");
-  const globalSkillDir = path.join(settings.dataDir, "skills");
+  const globalSkillDir = path.join(settings.homeDir, "skills");
   const projectSkillDir = path.join(projectPath, "skills");
   projectSkillDirs = [
     { dir: builtinSkillDir, source: "builtin" },
@@ -204,7 +204,7 @@ export async function initProject(config: ProjectConfig): Promise<void> {
   // 8. Build sub-agent type registry (same pattern as MainAgent)
   const subAgentTypeRegistry = new SubAgentTypeRegistry();
   const builtinSubAgentTypeDir = path.join(process.cwd(), "subagents");
-  const userSubAgentTypeDir = path.join(settings.dataDir, "subagents");
+  const userSubAgentTypeDir = path.join(settings.homeDir, "subagents");
   subAgentTypeRegistry.registerMany(loadSubAgentTypeDefinitions(builtinSubAgentTypeDir, userSubAgentTypeDir));
 
   const storePaths = buildProjectAgentPaths(projectPath);

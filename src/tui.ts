@@ -28,7 +28,7 @@ export async function startTUI(): Promise<void> {
   // Initialize logger
   const path = await import("node:path");
   initLogger(
-    path.join(settings.dataDir, "logs/pegasus.log"),
+    path.join(settings.homeDir, "logs/pegasus.log"),
     settings.logFormat,
     settings.logLevel,
   );

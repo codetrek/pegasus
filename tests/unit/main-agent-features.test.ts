@@ -101,11 +101,10 @@ function createMonologueModel(monologueText: string): LanguageModel {
 
 function testSettings() {
   return SettingsSchema.parse({
-    dataDir: testDataDir,
     logLevel: "warn",
     llm: { maxConcurrentCalls: 3 },
     agent: { maxActiveTasks: 10 },
-    homeDir: "/tmp/pegasus-test-home",
+    homeDir: testDataDir,
   });
 }
 
@@ -249,7 +248,7 @@ describe("MainAgent", () => {
         },
       };
 
-      const settings = SettingsSchema.parse({ dataDir: tmpDir, logLevel: "warn", homeDir: "/tmp/pegasus-test-home" });
+      const settings = SettingsSchema.parse({ logLevel: "warn", homeDir: tmpDir });
       const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
       await agent.start();
 
@@ -334,7 +333,7 @@ describe("MainAgent", () => {
 
       const projectAdapter = new ProjectAdapter(workerAdapter);
 
-      const settings = SettingsSchema.parse({ dataDir: tmpDir, logLevel: "warn", homeDir: "/tmp/pegasus-test-home" });
+      const settings = SettingsSchema.parse({ logLevel: "warn", homeDir: tmpDir });
       const agent = createMainAgent({ models: createMockModelRegistry(model), settings, projectAdapter: projectAdapter });
       await agent.start();
 
@@ -428,7 +427,6 @@ describe("MainAgent", () => {
 
     function trustSettings() {
       return SettingsSchema.parse({
-        dataDir: testDataDir,
         logLevel: "warn",
         llm: { maxConcurrentCalls: 3 },
         agent: { maxActiveTasks: 10 },
@@ -883,11 +881,10 @@ describe("MainAgent", () => {
       };
 
       const settings = SettingsSchema.parse({
-        dataDir: testDataDir,
         logLevel: "warn",
         llm: { maxConcurrentCalls: 3 },
         agent: { maxActiveTasks: 10 },
-        homeDir: `/tmp/pegasus-test-app-home-${process.pid}-${testSeq}`,
+        homeDir: testDataDir,
         vision: { enabled: true },
       });
 
