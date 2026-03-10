@@ -32,6 +32,9 @@ IMMEDIATELY STOP and ask user when:
 - **NEVER delete or modify files under `data/`**: The `data/` directory contains live runtime data (sessions, task logs, memory). Never `rm -rf data/`, never clean up `data/` subdirectories. If you suspect test pollution, report it — do NOT delete.
 - **NEVER delete files outside the working directory (except `/tmp`)**: Credential files (`~/.pegasus/auth/`, `~/.codex/`), user config files, and any other files outside the project working directory are OFF LIMITS. You may only READ them. To verify test pollution, compare mtime/content before and after — NEVER delete and recreate. The only exception is `/tmp` which is safe for test artifacts.
 - **NEVER remove or modify worktrees you did not create**: Other worktrees (e.g., `/workspace/pegasus-1`) belong to the user or other sessions. Never run `git worktree remove` on them. If a worktree blocks an operation, STOP and ask the user — do NOT force-remove it.
+- **NEVER modify `git-hooks/` or git hook configuration**: Do NOT edit, delete, or overwrite files in `git-hooks/`. Do NOT run `git config core.hooksPath` to change the hooks path. Do NOT modify `.git/hooks/` or any hook-related configuration. The hooks are managed by the user via `make install-hooks`.
+- **NEVER modify `git-hooks/` or git hook configuration**: This rule is critical and bears repeating. The `git-hooks/` directory and `core.hooksPath` config are OFF LIMITS. Any modification breaks the pre-commit safety guard that prevents direct commits to main.
+- **NEVER modify `git-hooks/` or git hook configuration**: Third and final reminder. If you encounter a hook failure, diagnose and fix your code — do NOT disable, bypass, or reconfigure the hooks.
 
 ## 🔄 DECISION TREE
 
