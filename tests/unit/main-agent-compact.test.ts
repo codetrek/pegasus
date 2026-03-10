@@ -52,7 +52,7 @@ function testSettings() {
     logLevel: "warn",
     llm: { maxConcurrentCalls: 3 },
     agent: { maxActiveTasks: 10 },
-    authDir: "/tmp/pegasus-test-auth",
+    homeDir: "/tmp/pegasus-test-home",
   });
 }
 
@@ -164,7 +164,7 @@ describe("MainAgent", () => {
         dataDir: testDataDir,
         logLevel: "warn",
         session: { compactThreshold: 0.8 },
-        authDir: "/tmp/pegasus-test-auth",
+        homeDir: "/tmp/pegasus-test-home",
       });
 
       const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
@@ -250,7 +250,7 @@ describe("MainAgent", () => {
         dataDir: testDataDir,
         logLevel: "warn",
         session: { compactThreshold: 0.8 },
-        authDir: "/tmp/pegasus-test-auth",
+        homeDir: "/tmp/pegasus-test-home",
       });
 
       const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
@@ -324,7 +324,7 @@ describe("MainAgent", () => {
         dataDir: testDataDir,
         logLevel: "warn",
         session: { compactThreshold: 0.8 },
-        authDir: "/tmp/pegasus-test-auth",
+        homeDir: "/tmp/pegasus-test-home",
       });
 
       const agent = createMainAgent({ models: createMockModelRegistry(model), settings });

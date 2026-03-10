@@ -16,6 +16,7 @@ import { ProjectAdapter } from "@pegasus/projects/project-adapter.ts";
 import { WorkerAdapter } from "@pegasus/workers/worker-adapter.ts";
 import { mock } from "bun:test";
 import { OwnerStore } from "@pegasus/security/owner-store.ts";
+import path from "node:path";
 import { createInjectedSubsystems } from "../helpers/create-injected-subsystems.ts";
 
 let testSeq = 0;
@@ -104,7 +105,7 @@ function testSettings() {
     logLevel: "warn",
     llm: { maxConcurrentCalls: 3 },
     agent: { maxActiveTasks: 10 },
-    authDir: "/tmp/pegasus-test-auth",
+    homeDir: "/tmp/pegasus-test-home",
   });
 }
 
@@ -248,7 +249,7 @@ describe("MainAgent", () => {
         },
       };
 
-      const settings = SettingsSchema.parse({ dataDir: tmpDir, logLevel: "warn", authDir: "/tmp/pegasus-test-auth" });
+      const settings = SettingsSchema.parse({ dataDir: tmpDir, logLevel: "warn", homeDir: "/tmp/pegasus-test-home" });
       const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
       await agent.start();
 
@@ -333,7 +334,7 @@ describe("MainAgent", () => {
 
       const projectAdapter = new ProjectAdapter(workerAdapter);
 
-      const settings = SettingsSchema.parse({ dataDir: tmpDir, logLevel: "warn", authDir: "/tmp/pegasus-test-auth" });
+      const settings = SettingsSchema.parse({ dataDir: tmpDir, logLevel: "warn", homeDir: "/tmp/pegasus-test-home" });
       const agent = createMainAgent({ models: createMockModelRegistry(model), settings, projectAdapter: projectAdapter });
       await agent.start();
 
@@ -415,14 +416,14 @@ describe("MainAgent", () => {
   // ── Trust-based routing tests ──
 
   describe("trust-based message routing", () => {
-    let authDir: string;
+    let homeDir: string;
 
     beforeEach(async () => {
-      authDir = `/tmp/pegasus-test-auth-trust-${process.pid}-${testSeq}`;
-      await mkdir(authDir, { recursive: true });
+      homeDir = `/tmp/pegasus-test-home-trust-${process.pid}-${testSeq}`;
+      await mkdir(path.join(homeDir, "auth"), { recursive: true });
     });
     afterEach(async () => {
-      await rm(authDir, { recursive: true, force: true }).catch(() => {});
+      await rm(homeDir, { recursive: true, force: true }).catch(() => {});
     });
 
     function trustSettings() {
@@ -431,7 +432,7 @@ describe("MainAgent", () => {
         logLevel: "warn",
         llm: { maxConcurrentCalls: 3 },
         agent: { maxActiveTasks: 10 },
-        authDir,
+        homeDir,
       });
     }
 
@@ -476,7 +477,7 @@ describe("MainAgent", () => {
 
     it("should allow owner messages to reach the queue", async () => {
       // Pre-register an owner for telegram
-      const store = new OwnerStore(authDir);
+      const store = new OwnerStore(path.join(homeDir, "auth"));
       store.add("telegram", "user123");
 
       const model = createReplyModel("Hello, owner!");
@@ -509,7 +510,7 @@ describe("MainAgent", () => {
 
     it("should wire channel project direct replies to replyCallback via onReply", async () => {
       // Register an owner for telegram, but the untrusted message comes from a different userId
-      const store = new OwnerStore(authDir);
+      const store = new OwnerStore(path.join(homeDir, "auth"));
       store.add("telegram", "owner123");
 
       const model = createMonologueModel("thinking...");
@@ -886,7 +887,7 @@ describe("MainAgent", () => {
         logLevel: "warn",
         llm: { maxConcurrentCalls: 3 },
         agent: { maxActiveTasks: 10 },
-        authDir: `/tmp/pegasus-test-app-auth-${process.pid}-${testSeq}`,
+        homeDir: `/tmp/pegasus-test-app-home-${process.pid}-${testSeq}`,
         vision: { enabled: true },
       });
 

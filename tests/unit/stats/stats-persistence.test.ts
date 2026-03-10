@@ -2,32 +2,22 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test"
 import { existsSync, mkdirSync, writeFileSync, unlinkSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { createAppStats, recordLLMUsage } from "@pegasus/stats/app-stats.ts"
-import { loadPersistedStats, savePersistedStats, getStatsFilePath } from "@pegasus/stats/stats-persistence.ts"
+import { loadPersistedStats, savePersistedStats } from "@pegasus/stats/stats-persistence.ts"
 
 // Use a temporary directory to avoid touching real ~/.pegasus/
-// We test the actual functions but verify behavior through the real file path.
-// Since tests run in isolation, we backup and restore.
+const testHomeDir = "/tmp/pegasus-test-stats-home"
 
 describe("StatsPersistence", () => {
-  const statsFile = getStatsFilePath()
-  let backupContent: string | null = null
+  const statsFile = join(testHomeDir, "stats.json")
 
   beforeEach(() => {
-    // Backup existing file if present
-    if (existsSync(statsFile)) {
-      const fs = require("node:fs")
-      backupContent = fs.readFileSync(statsFile, "utf-8")
-    }
+    // Ensure the test directory exists
+    mkdirSync(testHomeDir, { recursive: true })
   })
 
   afterEach(() => {
-    // Restore backup or clean up
-    if (backupContent !== null) {
-      writeFileSync(statsFile, backupContent, "utf-8")
-      backupContent = null
-    } else if (existsSync(statsFile)) {
-      unlinkSync(statsFile)
-    }
+    // Clean up test directory
+    rmSync(testHomeDir, { recursive: true, force: true })
   })
 
   it("saves and loads cumulative LLM stats", () => {
@@ -41,12 +31,12 @@ describe("StatsPersistence", () => {
     stats.tools.fail = 1
     stats.llm.compacts = 2
 
-    savePersistedStats(stats)
+    savePersistedStats(stats, testHomeDir)
     expect(existsSync(statsFile)).toBe(true)
 
     // Load into fresh stats
     const fresh = createAppStats({ persona: "Atlas", modelId: "gpt-4o", provider: "openai", contextWindow: 128000 })
-    loadPersistedStats(fresh)
+    loadPersistedStats(fresh, testHomeDir)
 
     expect(fresh.llm.byModel["gpt-4o"]!.calls).toBe(1)
     expect(fresh.llm.byModel["gpt-4o"]!.totalPromptTokens).toBe(1000)
@@ -63,7 +53,7 @@ describe("StatsPersistence", () => {
     if (existsSync(statsFile)) unlinkSync(statsFile)
     const stats = createAppStats({ persona: "Atlas", modelId: "gpt-4o", provider: "openai", contextWindow: 128000 })
     // Should not throw
-    loadPersistedStats(stats)
+    loadPersistedStats(stats, testHomeDir)
     expect(stats.llm.byModel).toEqual({})
     expect(stats.tools.calls).toBe(0)
   })
@@ -72,7 +62,7 @@ describe("StatsPersistence", () => {
     writeFileSync(statsFile, "not valid json", "utf-8")
     const stats = createAppStats({ persona: "Atlas", modelId: "gpt-4o", provider: "openai", contextWindow: 128000 })
     // Should not throw
-    loadPersistedStats(stats)
+    loadPersistedStats(stats, testHomeDir)
     expect(stats.llm.byModel).toEqual({})
   })
 
@@ -84,10 +74,10 @@ describe("StatsPersistence", () => {
       cacheWriteTokens: 0, outputTokens: 50, latencyMs: 300,
     })
 
-    savePersistedStats(stats)
+    savePersistedStats(stats, testHomeDir)
 
     const fresh = createAppStats({ persona: "Fresh", modelId: "gpt-4o", provider: "openai", contextWindow: 128000 })
-    loadPersistedStats(fresh)
+    loadPersistedStats(fresh, testHomeDir)
 
     // Session fields should NOT be overwritten
     expect(fresh.persona).toBe("Fresh") // not "Atlas"

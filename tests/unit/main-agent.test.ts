@@ -144,7 +144,7 @@ function testSettings() {
     logLevel: "warn",
     llm: { maxConcurrentCalls: 3 },
     agent: { maxActiveTasks: 10 },
-    authDir: "/tmp/pegasus-test-auth",
+    homeDir: "/tmp/pegasus-test-home",
   });
 }
 
@@ -901,7 +901,7 @@ describe("MainAgent", () => {
       logLevel: "warn",
       llm: { contextWindow: 50_000 }, // Override: 50k instead of 128k
       session: { compactThreshold: 0.8 },
-      authDir: "/tmp/pegasus-test-auth",
+      homeDir: "/tmp/pegasus-test-home",
     });
 
     const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
@@ -965,7 +965,7 @@ describe("MainAgent", () => {
       dataDir: testDataDir,
       logLevel: "warn",
       session: { compactThreshold: 0.8 },
-      authDir: "/tmp/pegasus-test-auth",
+      homeDir: "/tmp/pegasus-test-home",
     });
 
     const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
@@ -1027,7 +1027,7 @@ describe("MainAgent", () => {
       dataDir: testDataDir,
       logLevel: "warn",
       session: { compactThreshold: 0.8 },
-      authDir: "/tmp/pegasus-test-auth",
+      homeDir: "/tmp/pegasus-test-home",
     });
 
     const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
@@ -1089,7 +1089,7 @@ describe("MainAgent", () => {
     const settings = SettingsSchema.parse({
       dataDir: tmpDir,
       logLevel: "warn",
-      authDir: "/tmp/pegasus-test-auth",
+      homeDir: "/tmp/pegasus-test-home",
     });
 
     const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
@@ -1115,7 +1115,7 @@ describe("MainAgent", () => {
     const model = createReplyModel("I don't know that command");
 
     const tmpDir = "/tmp/pegasus-test-main-agent-unknown-cmd";
-    const settings = SettingsSchema.parse({ dataDir: tmpDir, logLevel: "warn", authDir: "/tmp/pegasus-test-auth" });
+    const settings = SettingsSchema.parse({ dataDir: tmpDir, logLevel: "warn", homeDir: "/tmp/pegasus-test-home" });
     const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
     await agent.start();
 
@@ -1179,7 +1179,7 @@ describe("MainAgent", () => {
       },
     };
 
-    const settings = SettingsSchema.parse({ dataDir: tmpDir, logLevel: "warn", authDir: "/tmp/pegasus-test-auth" });
+    const settings = SettingsSchema.parse({ dataDir: tmpDir, logLevel: "warn", homeDir: "/tmp/pegasus-test-home" });
     const agent = createMainAgent({ models: createMockModelRegistry(model), settings });
     await agent.start();
 
@@ -1368,7 +1368,7 @@ describe("MainAgent", () => {
 
     // 2. Start agent
     const model = createReplyModel("Hello!");
-    const agent = createMainAgent({ models: createMockModelRegistry(model), settings: SettingsSchema.parse({ dataDir: testDataDir, authDir: "/tmp/pegasus-test-auth", logLevel: "warn", llm: { maxConcurrentCalls: 3 }, agent: { maxActiveTasks: 10 }, }) });
+    const agent = createMainAgent({ models: createMockModelRegistry(model), settings: SettingsSchema.parse({ dataDir: testDataDir, homeDir: "/tmp/pegasus-test-home", logLevel: "warn", llm: { maxConcurrentCalls: 3 }, agent: { maxActiveTasks: 10 }, }) });
 
     await agent.start();
 
@@ -1391,7 +1391,7 @@ describe("MainAgent", () => {
 
   it("should not inject memory index when no memory files exist", async () => {
     const model = createReplyModel("Hello!");
-    const agent = createMainAgent({ models: createMockModelRegistry(model), settings: SettingsSchema.parse({ dataDir: testDataDir, authDir: "/tmp/pegasus-test-auth", logLevel: "warn", llm: { maxConcurrentCalls: 3 }, agent: { maxActiveTasks: 10 }, }) });
+    const agent = createMainAgent({ models: createMockModelRegistry(model), settings: SettingsSchema.parse({ dataDir: testDataDir, homeDir: "/tmp/pegasus-test-home", logLevel: "warn", llm: { maxConcurrentCalls: 3 }, agent: { maxActiveTasks: 10 }, }) });
 
     await agent.start();
 
@@ -1419,7 +1419,7 @@ describe("MainAgent", () => {
     );
 
     const model = createReplyModel("Hello!");
-    const agent = createMainAgent({ models: createMockModelRegistry(model), settings: SettingsSchema.parse({ dataDir: testDataDir, authDir: "/tmp/pegasus-test-auth", logLevel: "warn", llm: { maxConcurrentCalls: 3 }, agent: { maxActiveTasks: 10 }, }) });
+    const agent = createMainAgent({ models: createMockModelRegistry(model), settings: SettingsSchema.parse({ dataDir: testDataDir, homeDir: "/tmp/pegasus-test-home", logLevel: "warn", llm: { maxConcurrentCalls: 3 }, agent: { maxActiveTasks: 10 }, }) });
 
     await agent.start();
 

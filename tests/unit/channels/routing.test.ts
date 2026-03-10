@@ -23,11 +23,12 @@ import { ModelRegistry } from "@pegasus/infra/model-registry.ts";
 import type { LLMConfig } from "@pegasus/infra/config-schema.ts";
 import { OwnerStore } from "@pegasus/security/owner-store.ts";
 import { mkdir } from "node:fs/promises";
+import path from "node:path";
 import { createInjectedSubsystems } from "../../helpers/create-injected-subsystems.ts";
 
 let testSeq = 0;
 let testDataDir = "/tmp/pegasus-test-routing";
-let testAuthDir = "/tmp/pegasus-test-routing-auth";
+let testHomeDir = "/tmp/pegasus-test-routing-home";
 
 const testPersona: Persona = {
   name: "TestBot",
@@ -62,7 +63,7 @@ function testSettings() {
     logLevel: "warn",
     llm: { maxConcurrentCalls: 3 },
     agent: { maxActiveTasks: 10 },
-    authDir: testAuthDir,
+    homeDir: testHomeDir,
   });
 }
 
@@ -92,18 +93,18 @@ describe("Multi-channel routing", () => {
   beforeEach(async () => {
     testSeq++;
     testDataDir = `/tmp/pegasus-test-routing-${testSeq}-${Date.now()}`;
-    testAuthDir = `/tmp/pegasus-test-routing-auth-${testSeq}-${Date.now()}`;
-    await mkdir(testAuthDir, { recursive: true });
+    testHomeDir = `/tmp/pegasus-test-routing-home-${testSeq}-${Date.now()}`;
+    await mkdir(path.join(testHomeDir, "auth"), { recursive: true });
     // Pre-register owners for channel types used in routing tests
     // so trust-based routing allows messages through
-    const store = new OwnerStore(testAuthDir);
+    const store = new OwnerStore(path.join(testHomeDir, "auth"));
     store.add("telegram", "any");
     store.add("sms", "any");
     store.add("broken", "any");
   });
   afterEach(async () => {
     await rm(testDataDir, { recursive: true, force: true }).catch(() => {});
-    await rm(testAuthDir, { recursive: true, force: true }).catch(() => {});
+    await rm(testHomeDir, { recursive: true, force: true }).catch(() => {});
   });
 
   it("should route replies to correct adapter by channel.type", async () => {

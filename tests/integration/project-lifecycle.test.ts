@@ -45,7 +45,7 @@ function makeTestSettings(): Settings {
     channels: { telegram: { enabled: false } },
     logLevel: "silent",
     dataDir: TEST_DIR,
-    authDir: "/tmp/pegasus-test-auth",
+    homeDir: "/tmp/pegasus-test-home",
     logFormat: "json",
     nodeEnv: "test",
   };

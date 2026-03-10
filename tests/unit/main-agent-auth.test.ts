@@ -5,6 +5,7 @@ import type {
 } from "@pegasus/infra/llm-types.ts";
 import { SettingsSchema } from "@pegasus/infra/config.ts";
 import { rm } from "node:fs/promises";
+import path from "node:path";
 import { writeFileSync } from "node:fs";
 import { ModelRegistry } from "@pegasus/infra/model-registry.ts";
 import type { LLMConfig } from "@pegasus/infra/config-schema.ts";
@@ -72,7 +73,7 @@ function testSettings() {
     logLevel: "warn",
     llm: { maxConcurrentCalls: 3 },
     agent: { maxActiveTasks: 10 },
-    authDir: "/tmp/pegasus-test-auth",
+    homeDir: "/tmp/pegasus-test-home",
   });
 }
 
@@ -103,7 +104,7 @@ describe("MainAgent", () => {
         settings: s,
         models: createMockModelRegistry(model),
         modelLimitsCache: new ModelLimitsCache(cacheDir),
-        credDir: s.authDir,
+        credDir: path.join(s.homeDir, "auth"),
       });
     }
 
@@ -228,7 +229,7 @@ describe("MainAgent", () => {
         settings: s,
         models: createMockModelRegistry(model),
         modelLimitsCache: cache,
-        credDir: s.authDir,
+        credDir: path.join(s.homeDir, "auth"),
       }), cache, cacheDir };
     }
 
@@ -256,7 +257,7 @@ describe("MainAgent", () => {
           maxConcurrentCalls: 3,
           openrouter: { enabled: true, apiKey: "test-key" },
         },
-        authDir: "/tmp/pegasus-test-auth",
+        homeDir: "/tmp/pegasus-test-home",
       });
       const { mgr, cacheDir } = createTestAuthManager(settings);
 
@@ -274,7 +275,7 @@ describe("MainAgent", () => {
           maxConcurrentCalls: 3,
           openrouter: { enabled: true, apiKey: "test-key" },
         },
-        authDir: "/tmp/pegasus-test-auth",
+        homeDir: "/tmp/pegasus-test-home",
       });
       const { mgr, cache, cacheDir } = createTestAuthManager(settings);
       // Pre-populate with provider cache so hasProviderCache("openrouter") returns true
@@ -303,7 +304,7 @@ describe("MainAgent", () => {
         settings: testSettings(),
         models: createMockModelRegistry(model),
         modelLimitsCache: new ModelLimitsCache(cacheDir),
-        credDir: testSettings().authDir,
+        credDir: path.join(testSettings().homeDir, "auth"),
       });
 
       await mgr.initialize();
