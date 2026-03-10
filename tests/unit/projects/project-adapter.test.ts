@@ -317,3 +317,68 @@ describe("ProjectAdapter — backward compatibility", () => {
     expect(adapter.getWorkerAdapter()).toBeInstanceOf(WorkerAdapter);
   });
 });
+
+describe("ProjectAdapter — sendToProject (coverage)", () => {
+  it("should silently ignore sendToProject for unknown projectId", () => {
+    const wa = createMockWorkerAdapter();
+    const adapter = new ProjectAdapter(wa);
+
+    // Should not throw — just logs warning and returns
+    adapter.sendToProject("nonexistent", {
+      text: "hello",
+      channel: { type: "telegram", channelId: "chat1", userId: "user1" },
+    });
+
+    // WorkerAdapter.deliver should NOT have been called
+    expect((wa.deliver as ReturnType<typeof mock>).mock.calls).toHaveLength(0);
+  });
+
+  it("should delegate to WorkerAdapter.deliver for known project", async () => {
+    const wa = createMockWorkerAdapter();
+    const adapter = new ProjectAdapter(wa);
+    await adapter.start({ send: () => {} });
+
+    // Start a project first so it's tracked
+    adapter.startProject("proj-send", "/tmp/proj-send");
+
+    const inboundMsg: InboundMessage = {
+      text: "hello from untrusted",
+      channel: { type: "telegram", channelId: "chat1", userId: "stranger" },
+      metadata: { username: "strangerName" },
+    };
+
+    adapter.sendToProject("proj-send", inboundMsg);
+
+    // Should have delegated to WorkerAdapter.deliver with correct args
+    const deliverCalls = (wa.deliver as ReturnType<typeof mock>).mock.calls;
+    expect(deliverCalls).toHaveLength(1);
+    const [channelType, channelId, message] = deliverCalls[0] as any[];
+    expect(channelType).toBe("project");
+    expect(channelId).toBe("proj-send");
+    expect(message.text).toBe("hello from untrusted");
+    expect(message.channel.type).toBe("telegram");
+    expect(message.channel.userId).toBe("stranger");
+    expect(message.metadata.username).toBe("strangerName");
+  });
+
+  it("should pass message without metadata when metadata is null", async () => {
+    const wa = createMockWorkerAdapter();
+    const adapter = new ProjectAdapter(wa);
+    await adapter.start({ send: () => {} });
+
+    adapter.startProject("proj-no-meta", "/tmp/proj-no-meta");
+
+    const inboundMsg: InboundMessage = {
+      text: "hello no metadata",
+      channel: { type: "telegram", channelId: "chat2", userId: "user2" },
+    };
+
+    adapter.sendToProject("proj-no-meta", inboundMsg);
+
+    const deliverCalls = (wa.deliver as ReturnType<typeof mock>).mock.calls;
+    expect(deliverCalls).toHaveLength(1);
+    const [, , message] = deliverCalls[0] as any[];
+    expect(message.text).toBe("hello no metadata");
+    expect(message.metadata).toBeUndefined();
+  });
+});

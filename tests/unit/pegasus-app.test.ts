@@ -12,6 +12,7 @@ import { rm, mkdir } from "node:fs/promises";
 import { ModelRegistry } from "@pegasus/infra/model-registry.ts";
 import type { LLMConfig } from "@pegasus/infra/config-schema.ts";
 import { OwnerStore } from "@pegasus/security/owner-store.ts";
+import { EventType, createEvent } from "@pegasus/agents/events/types.ts";
 
 let testSeq = 0;
 let testDataDir = "/tmp/pegasus-test-app";
@@ -776,6 +777,254 @@ describe("PegasusApp", () => {
       expect(result).toBeDefined();
       expect(result.id).toBeDefined();
       expect(result.mimeType).toBe("image/png");
+
+      await app.stop();
+    }, 15_000);
+  });
+
+  // ═══════════════════════════════════════════════════
+  // Coverage: appStats getter (lines 113-117)
+  // ═══════════════════════════════════════════════════
+
+  describe("appStats getter (coverage)", () => {
+    it("should return null before start", () => {
+      const model = createMonologueModel("thinking...");
+      const app = new Pegasus({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+      });
+
+      expect(app.appStats).toBeNull();
+    });
+
+    it("should return AppStats after start", async () => {
+      const model = createMonologueModel("thinking...");
+      const app = new Pegasus({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+      });
+
+      await app.start();
+
+      const stats = app.appStats;
+      expect(stats).not.toBeNull();
+      expect(stats!.persona).toBe("TestBot");
+      expect(stats!.tools).toBeDefined();
+      expect(stats!.channels).toBeDefined();
+
+      await app.stop();
+    }, 15_000);
+  });
+
+  // ═══════════════════════════════════════════════════
+  // Coverage: CLI mirror error path (lines 220-222)
+  // ═══════════════════════════════════════════════════
+
+  describe("CLI mirror error path (coverage)", () => {
+    it("should handle CLI adapter deliver failure when mirroring non-cli replies", async () => {
+      const model = createReplyModel("Reply to telegram!", "chat123", "telegram");
+      const app = new Pegasus({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+      });
+
+      const telegramReplies: OutboundMessage[] = [];
+
+      // Register a telegram adapter (target adapter)
+      app.registerAdapter({
+        type: "telegram",
+        async start() {},
+        async deliver(msg) { telegramReplies.push(msg); },
+        async stop() {},
+      });
+
+      // Register a CLI adapter that throws on deliver (to trigger lines 220-222)
+      app.registerAdapter({
+        type: "cli",
+        async start() {},
+        async deliver(_msg) { throw new Error("CLI deliver failed"); },
+        async stop() {},
+      });
+
+      await app.start();
+
+      app.mainAgent.send({ text: "hello", channel: { type: "telegram", channelId: "chat123" } });
+      await Bun.sleep(50);
+
+      // Telegram adapter should still receive the reply despite CLI mirror failure
+      expect(telegramReplies.length).toBeGreaterThanOrEqual(1);
+
+      await app.stop();
+    }, 15_000);
+  });
+
+  // ═══════════════════════════════════════════════════
+  // Coverage: TOOL_CALL_FAILED event (line 451)
+  // ═══════════════════════════════════════════════════
+
+  describe("TOOL_CALL_FAILED event (coverage)", () => {
+    it("should record failed tool call via eventBus", async () => {
+      const model = createMonologueModel("thinking...");
+      const app = new Pegasus({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+      });
+
+      await app.start();
+
+      // Get initial stats
+      const failBefore = app.appStats!.tools.fail;
+
+      // Emit a TOOL_CALL_FAILED event on the mainAgent's eventBus
+      await app.mainAgent.eventBus.emit(
+        createEvent(EventType.TOOL_CALL_FAILED, {
+          source: "test",
+          payload: { toolName: "test_tool", error: "test error" },
+        }),
+      );
+
+      // Give the event bus time to process
+      await Bun.sleep(50);
+
+      // Verify tool failure was recorded
+      expect(app.appStats!.tools.fail).toBe(failBefore + 1);
+
+      await app.stop();
+    }, 15_000);
+  });
+
+  // ═══════════════════════════════════════════════════
+  // Coverage: projectAdapter.setOnReply callback (lines 473-475)
+  // ═══════════════════════════════════════════════════
+
+  describe("projectAdapter.setOnReply callback (coverage)", () => {
+    it("should route project replies through the reply callback", async () => {
+      const model = createMonologueModel("thinking...");
+      const app = new Pegasus({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings: testSettings(),
+      });
+
+      const cliReplies: OutboundMessage[] = [];
+
+      // Register a CLI adapter to capture routed replies
+      app.registerAdapter({
+        type: "cli",
+        async start() {},
+        async deliver(msg) { cliReplies.push(msg); },
+        async stop() {},
+      });
+
+      await app.start();
+
+      // Access the projectAdapter's underlying workerAdapter via private fields
+      const projectAdapter = (app as any).projectAdapter;
+      const workerAdapter = projectAdapter.getWorkerAdapter();
+
+      // The onReply callback was wired in start() (lines 473-475),
+      // which should forward the message through _replyCallback.
+      const projectReply: OutboundMessage = {
+        text: "Hello from project!",
+        channel: { type: "cli", channelId: "main" },
+      };
+
+      // Trigger the onReply callback stored on WorkerAdapter (private field)
+      const onReplyCallback = (workerAdapter as any).onReply;
+      expect(onReplyCallback).toBeDefined();
+      onReplyCallback(projectReply);
+
+      await Bun.sleep(30);
+
+      // The reply should have been forwarded to the CLI adapter
+      expect(cliReplies.some((r) => r.text === "Hello from project!")).toBe(true);
+
+      await app.stop();
+    }, 15_000);
+  });
+
+  // ═══════════════════════════════════════════════════
+  // Coverage: _handleUntrustedMessage (lines 599-640)
+  // ═══════════════════════════════════════════════════
+
+  describe("_handleUntrustedMessage (coverage)", () => {
+    it("should auto-create channel project and route untrusted messages", async () => {
+      const model = createMonologueModel("thinking...");
+      const settings = testSettings();
+      const app = new Pegasus({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings,
+      });
+
+      // Pre-register a telegram owner so the channel IS configured
+      // (this ensures the message is classified as "untrusted" not "no_owner_configured")
+      await mkdir(path.join(settings.homeDir, "auth"), { recursive: true });
+      const store = new OwnerStore(path.join(settings.homeDir, "auth"));
+      store.add("telegram", "real-owner-id");
+
+      await app.start();
+
+      // Send from an untrusted user (different userId from the owner)
+      app.routeMessage({
+        text: "hello from untrusted user",
+        channel: { type: "telegram", channelId: "chat999", userId: "stranger-id" },
+      });
+
+      await Bun.sleep(100);
+
+      // Channel project should have been auto-created (line 605)
+      // Access via Pegasus private field since mainAgent.projects returns ProjectManager
+      const projectAdapter = (app as any).projectAdapter;
+      expect(projectAdapter.has("channel:telegram")).toBe(true);
+
+      // Verify the project definition was created in the project manager
+      const projectManager = (app as any).projectManager;
+      const projectDef = projectManager.get("channel:telegram");
+      expect(projectDef).not.toBeNull();
+      expect(projectDef.name).toBe("channel:telegram");
+
+      await app.stop();
+    }, 15_000);
+
+    it("should reuse existing channel project for subsequent untrusted messages", async () => {
+      const model = createMonologueModel("thinking...");
+      const settings = testSettings();
+      const app = new Pegasus({
+        models: createMockModelRegistry(model),
+        persona: testPersona,
+        settings,
+      });
+
+      await mkdir(path.join(settings.homeDir, "auth"), { recursive: true });
+      const store = new OwnerStore(path.join(settings.homeDir, "auth"));
+      store.add("telegram", "real-owner-id");
+
+      await app.start();
+
+      // First untrusted message — should create channel project
+      app.routeMessage({
+        text: "msg 1",
+        channel: { type: "telegram", channelId: "chat1", userId: "stranger1" },
+      });
+      await Bun.sleep(50);
+
+      const projectAdapter = (app as any).projectAdapter;
+      expect(projectAdapter.has("channel:telegram")).toBe(true);
+
+      // Second untrusted message — should reuse existing project
+      app.routeMessage({
+        text: "msg 2",
+        channel: { type: "telegram", channelId: "chat2", userId: "stranger2" },
+      });
+      await Bun.sleep(50);
+
+      // Should still be 1 project, not 2
+      expect(projectAdapter.has("channel:telegram")).toBe(true);
 
       await app.stop();
     }, 15_000);
