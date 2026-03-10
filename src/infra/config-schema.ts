@@ -216,7 +216,7 @@ export const SettingsSchema = z.object({
   channels: ChannelsConfigSchema.default({}),
   logLevel: z.string().default("info"),
   dataDir: z.string({ required_error: "dataDir is required — set system.dataDir in config.yml or PEGASUS_DATA_DIR env var" }),
-  authDir: z.string({ required_error: "authDir is required — set system.authDir in config.yml or PEGASUS_AUTH_DIR env var" }),
+  homeDir: z.string({ required_error: "homeDir is required — set system.homeDir in config.yml or PEGASUS_HOME_DIR env var" }),
   // Log output destination
   // Log output format (file only, no console output)
   // json — structured JSON lines, machine-parseable (default)

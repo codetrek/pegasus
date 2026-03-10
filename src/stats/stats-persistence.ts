@@ -10,7 +10,6 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { homedir } from "node:os"
 import { getLogger } from "../infra/logger.ts"
 import type { AppStats, ModelStats } from "./app-stats.ts"
 
@@ -30,15 +29,13 @@ interface PersistedStats {
   }
 }
 
-const PEGASUS_DIR = join(homedir(), ".pegasus")
-const STATS_FILE = join(PEGASUS_DIR, "stats.json")
-
 /** Load persisted stats into an existing AppStats object. Merges cumulative fields. */
-export function loadPersistedStats(stats: AppStats): void {
+export function loadPersistedStats(stats: AppStats, homeDir: string): void {
+  const statsFile = join(homeDir, "stats.json")
   try {
-    if (!existsSync(STATS_FILE)) return
+    if (!existsSync(statsFile)) return
 
-    const raw = readFileSync(STATS_FILE, "utf-8")
+    const raw = readFileSync(statsFile, "utf-8")
     const data = JSON.parse(raw) as Partial<PersistedStats>
 
     if (!data.version || data.version !== 1) {
@@ -85,10 +82,11 @@ export function loadPersistedStats(stats: AppStats): void {
 }
 
 /** Save current AppStats cumulative fields to disk. */
-export function savePersistedStats(stats: AppStats): void {
+export function savePersistedStats(stats: AppStats, homeDir: string): void {
+  const statsFile = join(homeDir, "stats.json")
   try {
-    if (!existsSync(PEGASUS_DIR)) {
-      mkdirSync(PEGASUS_DIR, { recursive: true })
+    if (!existsSync(homeDir)) {
+      mkdirSync(homeDir, { recursive: true })
     }
 
     const data: PersistedStats = {
@@ -105,13 +103,8 @@ export function savePersistedStats(stats: AppStats): void {
       },
     }
 
-    writeFileSync(STATS_FILE, JSON.stringify(data, null, 2), "utf-8")
+    writeFileSync(statsFile, JSON.stringify(data, null, 2), "utf-8")
   } catch (err) {
     log.warn({ err }, "Failed to save persisted stats to disk")
   }
-}
-
-/** Get the stats file path (for testing). */
-export function getStatsFilePath(): string {
-  return STATS_FILE
 }

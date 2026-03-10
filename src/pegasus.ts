@@ -15,7 +15,6 @@
  */
 
 import path from "node:path";
-import os from "node:os";
 import type { Persona } from "./identity/persona.ts";
 import type { Settings } from "./infra/config.ts";
 import { getSettings } from "./infra/config.ts";
@@ -262,11 +261,11 @@ export class Pegasus {
     const mainStorePaths = buildMainAgentPaths(this.settings.dataDir);
 
     // 1. ModelLimitsCache
-    const modelLimitsCacheDir = path.join(os.homedir(), ".pegasus", "model-limits");
+    const modelLimitsCacheDir = path.join(this.settings.homeDir, "model-limits");
     this.modelLimitsCache = new ModelLimitsCache(modelLimitsCacheDir);
 
     // Security: create OwnerStore for message classification
-    this.ownerStore = new OwnerStore(this.settings.authDir);
+    this.ownerStore = new OwnerStore(path.join(this.settings.homeDir, "auth"));
 
     // Intentional separate ToolRegistry — Reflection runs independently
     // (fire-and-forget after compaction) and needs its own tool execution pipeline.
@@ -294,14 +293,14 @@ export class Pegasus {
       settings: this.settings,
       models: this.models,
       modelLimitsCache: this.modelLimitsCache,
-      credDir: this.settings.authDir,
+      credDir: path.join(this.settings.homeDir, "auth"),
     });
     await this.authManager.initialize();
 
     // 4. MCP
     const mcpConfigs = (this.settings.tools?.mcpServers ?? []) as MCPServerConfig[];
     if (mcpConfigs.length > 0) {
-      const mcpAuthDir = path.join(this.settings.authDir, "mcp");
+      const mcpAuthDir = path.join(this.settings.homeDir, "auth", "mcp");
       this.mcpManager = new MCPManager(mcpAuthDir);
       await this.mcpManager.connectAll(mcpConfigs);
 
@@ -423,7 +422,7 @@ export class Pegasus {
     });
 
     // Restore cumulative stats from previous sessions
-    loadPersistedStats(this._appStats);
+    loadPersistedStats(this._appStats, this.settings.homeDir);
 
     // Wire tool counts (builtin + mcp)
     const builtinCount = mainAgentTools.length;
@@ -511,7 +510,7 @@ export class Pegasus {
 
     // 0. Persist cumulative stats before shutdown
     if (this._appStats) {
-      savePersistedStats(this._appStats);
+      savePersistedStats(this._appStats, this.settings.homeDir);
     }
 
     // 1. Stop MainAgent (stops tick + drains queue, but NOT infrastructure in injected mode)
