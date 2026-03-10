@@ -104,3 +104,25 @@ export function createAppStats(opts: CreateAppStatsOpts): AppStats {
     channels: [],
   }
 }
+
+export function recordLLMUsage(stats: AppStats, call: LLMCallSnapshot): void {
+  stats.llm.lastCall = call;
+  let m = stats.llm.byModel[call.model];
+  if (!m) {
+    m = { calls: 0, totalPromptTokens: 0, totalOutputTokens: 0, totalCacheReadTokens: 0, totalCacheWriteTokens: 0, totalLatencyMs: 0 };
+    stats.llm.byModel[call.model] = m;
+  }
+  m.calls++;
+  m.totalPromptTokens += call.promptTokens;
+  m.totalOutputTokens += call.outputTokens;
+  m.totalCacheReadTokens += call.cacheReadTokens;
+  m.totalCacheWriteTokens += call.cacheWriteTokens;
+  m.totalLatencyMs += call.latencyMs;
+  stats.budget.used = call.promptTokens + call.cacheReadTokens;
+}
+
+export function recordToolCall(stats: AppStats, success: boolean): void {
+  stats.tools.calls++;
+  if (success) stats.tools.success++;
+  else stats.tools.fail++;
+}

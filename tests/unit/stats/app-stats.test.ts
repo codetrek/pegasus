@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { createAppStats } from "@pegasus/stats/app-stats.ts";
+import { createAppStats, recordLLMUsage, recordToolCall } from "@pegasus/stats/app-stats.ts";
 import type { AppStats } from "@pegasus/stats/app-stats.ts";
 
 describe("AppStats", () => {
@@ -24,5 +24,47 @@ describe("AppStats", () => {
     expect(stats.memory.factCount).toBe(0);
     expect(stats.memory.episodeCount).toBe(0);
     expect(stats.channels).toEqual([]);
+  });
+});
+
+describe("recordLLMUsage", () => {
+  it("updates lastCall, byModel, and budget.used", () => {
+    const stats = createAppStats({ persona: "Atlas", modelId: "gpt-4o", provider: "openai", contextWindow: 128000 });
+    recordLLMUsage(stats, {
+      model: "gpt-4o", promptTokens: 1000, cacheReadTokens: 500, cacheWriteTokens: 200, outputTokens: 100, latencyMs: 1500,
+    });
+    expect(stats.llm.lastCall).toEqual({ model: "gpt-4o", promptTokens: 1000, cacheReadTokens: 500, cacheWriteTokens: 200, outputTokens: 100, latencyMs: 1500 });
+    expect(stats.llm.byModel["gpt-4o"]!.calls).toBe(1);
+    expect(stats.llm.byModel["gpt-4o"]!.totalPromptTokens).toBe(1000);
+    expect(stats.llm.byModel["gpt-4o"]!.totalOutputTokens).toBe(100);
+    expect(stats.budget.used).toBe(1500);
+  });
+
+  it("accumulates across multiple calls", () => {
+    const stats = createAppStats({ persona: "Atlas", modelId: "gpt-4o", provider: "openai", contextWindow: 128000 });
+    recordLLMUsage(stats, { model: "gpt-4o", promptTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 50, latencyMs: 500 });
+    recordLLMUsage(stats, { model: "gpt-4o", promptTokens: 200, cacheReadTokens: 100, cacheWriteTokens: 0, outputTokens: 80, latencyMs: 600 });
+    expect(stats.llm.byModel["gpt-4o"]!.calls).toBe(2);
+    expect(stats.llm.byModel["gpt-4o"]!.totalPromptTokens).toBe(300);
+    expect(stats.llm.byModel["gpt-4o"]!.totalOutputTokens).toBe(130);
+    expect(stats.budget.used).toBe(300);
+  });
+});
+
+describe("recordToolCall", () => {
+  it("increments success counter", () => {
+    const stats = createAppStats({ persona: "Atlas", modelId: "gpt-4o", provider: "openai", contextWindow: 128000 });
+    recordToolCall(stats, true);
+    expect(stats.tools.calls).toBe(1);
+    expect(stats.tools.success).toBe(1);
+    expect(stats.tools.fail).toBe(0);
+  });
+
+  it("increments fail counter", () => {
+    const stats = createAppStats({ persona: "Atlas", modelId: "gpt-4o", provider: "openai", contextWindow: 128000 });
+    recordToolCall(stats, false);
+    expect(stats.tools.calls).toBe(1);
+    expect(stats.tools.success).toBe(0);
+    expect(stats.tools.fail).toBe(1);
   });
 });
