@@ -1,6 +1,5 @@
 import { describe, it, expect } from "bun:test";
 import { createAppStats, recordLLMUsage, recordToolCall } from "@pegasus/stats/app-stats.ts";
-import type { AppStats } from "@pegasus/stats/app-stats.ts";
 
 describe("AppStats", () => {
   it("creates stats with default values", () => {

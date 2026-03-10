@@ -2,9 +2,10 @@
  * TopBar — persona, uptime, LLM stats, status indicator.
  * Reads live data from statsStore.
  */
-import { Show } from "solid-js"
+import { Show, type Accessor } from "solid-js"
 import { THEME } from "../theme.tsx"
 import { statsStore } from "../store.ts"
+import type { AppStats, ModelStats } from "../../stats/app-stats.ts"
 
 function formatUptime(startedAt: number): string {
   const diff = Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
@@ -37,10 +38,10 @@ export function TopBar() {
         </text>
       </box>
     }>
-      {(stats) => {
+      {(stats: Accessor<AppStats>) => {
         const llmCalls = () => {
           let total = 0
-          for (const m of Object.values(stats().llm.byModel)) total += m.calls
+          for (const m of Object.values(stats().llm.byModel) as ModelStats[]) total += m.calls
           return total
         }
         const statusDot = () => stats().status === "busy" ? "◉" : "◎"

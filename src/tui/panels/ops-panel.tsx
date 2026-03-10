@@ -2,17 +2,18 @@
  * OpsPanel — Subagents, Memory, Tools (stacked vertically in middle column).
  * Reads live data from statsStore.
  */
-import { Show } from "solid-js"
+import { Show, type Accessor } from "solid-js"
 import { THEME } from "../theme.tsx"
 import { statsStore } from "../store.ts"
 import { SectionHeader } from "../components/section-header.tsx"
+import type { AppStats } from "../../stats/app-stats.ts"
 
 function SubagentsSection() {
   const s = () => statsStore.stats
 
   return (
     <Show when={s()} fallback={<box paddingLeft={1}><text fg={THEME.textMuted}>waiting for stats…</text></box>}>
-      {(stats) => {
+      {(stats: Accessor<AppStats>) => {
         const sa = () => stats().subagents
         const total = () => sa().active + sa().completed + sa().failed
         return (
@@ -41,7 +42,7 @@ function MemorySection() {
 
   return (
     <Show when={s()} fallback={null}>
-      {(stats) => (
+      {(stats: Accessor<AppStats>) => (
         <box flexDirection="column" paddingLeft={1} paddingRight={1} paddingBottom={1} border={["top"]} borderColor={THEME.border}>
           <SectionHeader icon="🧠" title="Memory" />
           <box flexDirection="column" paddingTop={1}>
@@ -59,7 +60,7 @@ function ToolsSection() {
 
   return (
     <Show when={s()} fallback={null}>
-      {(stats) => {
+      {(stats: Accessor<AppStats>) => {
         const t = () => stats().tools
         return (
           <box flexDirection="column" paddingLeft={1} paddingRight={1} border={["top"]} borderColor={THEME.border}>

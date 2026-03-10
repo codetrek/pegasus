@@ -28,13 +28,11 @@ export function TabBar(props: { active: TabId; onSelect: (id: TabId) => void }) 
       {TABS.map((tab) => {
         const isActive = () => props.active === tab.id
         return (
-          <text
-            fg={isActive() ? THEME.accent : THEME.textMuted}
-            bold={isActive()}
-            onClick={() => props.onSelect(tab.id)}
-          >
-            {isActive() ? `[${tab.icon} ${tab.label}]` : ` ${tab.label} `}
-          </text>
+          <box onMouseUp={() => props.onSelect(tab.id)}>
+            <text fg={isActive() ? THEME.accent : THEME.textMuted}>
+              {isActive() ? <b>{`[${tab.icon} ${tab.label}]`}</b> : ` ${tab.label} `}
+            </text>
+          </box>
         )
       })}
       <text fg={THEME.textMuted} paddingLeft={1}>Ctrl+1/2/3</text>

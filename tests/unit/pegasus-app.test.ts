@@ -455,7 +455,7 @@ describe("PegasusApp", () => {
 
       // Pre-register a telegram owner so channel is "configured"
       await mkdir(path.join(settings.homeDir, "auth"), { recursive: true });
-      const store = new OwnerStore(path.join(settings.homeDir, "auth"));
+      void new OwnerStore(path.join(settings.homeDir, "auth"));
 
       await app.start();
 

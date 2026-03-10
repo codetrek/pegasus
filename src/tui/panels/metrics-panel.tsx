@@ -2,10 +2,11 @@
  * MetricsPanel — Model/Tokens, Budget, Channels (stacked vertically in right column).
  * Reads live data from statsStore.
  */
-import { For, Show } from "solid-js"
+import { For, Show, type Accessor } from "solid-js"
 import { THEME } from "../theme.tsx"
 import { statsStore } from "../store.ts"
 import { SectionHeader } from "../components/section-header.tsx"
+import type { AppStats, LLMCallSnapshot, ModelStats } from "../../stats/app-stats.ts"
 
 function fmtTok(n: number): string {
   if (n >= 1000) return (n / 1000).toFixed(1) + "k"
@@ -17,11 +18,11 @@ function ModelSection() {
 
   return (
     <Show when={s()} fallback={<box paddingLeft={1}><text fg={THEME.textMuted}>waiting for stats…</text></box>}>
-      {(stats) => {
+      {(stats: Accessor<AppStats>) => {
         const lc = () => stats().llm.lastCall
         const sessionTotals = () => {
           let calls = 0, prompt = 0, output = 0, cacheRead = 0, cacheWrite = 0, latency = 0
-          for (const m of Object.values(stats().llm.byModel)) {
+          for (const m of Object.values(stats().llm.byModel) as ModelStats[]) {
             calls += m.calls
             prompt += m.totalPromptTokens
             output += m.totalOutputTokens
@@ -41,7 +42,7 @@ function ModelSection() {
               <text fg={THEME.textMuted}>context: {fmtTok(stats().model.contextWindow)}</text>
 
               <Show when={lc()} fallback={<text fg={THEME.textMuted} paddingTop={1}>no LLM calls yet</text>}>
-                {(call) => (
+                {(call: Accessor<LLMCallSnapshot>) => (
                   <>
                     <text fg={THEME.text} paddingTop={1}><b>Last LLM call:</b></text>
                     <text fg={THEME.text}> prompt   {call().promptTokens.toLocaleString()} tok</text>
@@ -73,7 +74,7 @@ function BudgetSection() {
 
   return (
     <Show when={s()} fallback={null}>
-      {(stats) => {
+      {(stats: Accessor<AppStats>) => {
         const b = () => stats().budget
         const pct = () => b().total > 0 ? Math.round((b().used / b().total) * 100) : 0
         const barLen = 16
@@ -105,7 +106,7 @@ function ChannelsSection() {
 
   return (
     <Show when={s()} fallback={null}>
-      {(stats) => (
+      {(stats: Accessor<AppStats>) => (
         <box flexDirection="column" paddingLeft={1} paddingRight={1} border={["top"]} borderColor={THEME.border}>
           <SectionHeader icon="🔌" title="Channels" />
           <box flexDirection="column" paddingTop={1}>
