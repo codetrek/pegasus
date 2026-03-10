@@ -86,4 +86,21 @@ describe("StatsPersistence", () => {
     // But cumulative fields SHOULD be restored
     expect(fresh.llm.byModel["gpt-4o"]!.calls).toBe(1)
   })
+
+  it("skips file with unknown version", () => {
+    writeFileSync(statsFile, JSON.stringify({ version: 99, llm: {}, tools: {} }), "utf-8")
+    const stats = createAppStats({ persona: "Atlas", modelId: "gpt-4o", provider: "openai", contextWindow: 128000 })
+    loadPersistedStats(stats, testHomeDir)
+    expect(stats.llm.byModel).toEqual({})
+    expect(stats.tools.calls).toBe(0)
+  })
+
+  it("creates homeDir if it does not exist", () => {
+    const freshDir = join(testHomeDir, "nested", "deep")
+    const stats = createAppStats({ persona: "Atlas", modelId: "gpt-4o", provider: "openai", contextWindow: 128000 })
+    stats.tools.calls = 3
+    savePersistedStats(stats, freshDir)
+    expect(existsSync(join(freshDir, "stats.json"))).toBe(true)
+    rmSync(freshDir, { recursive: true, force: true })
+  })
 })
