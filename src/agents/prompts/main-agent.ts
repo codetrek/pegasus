@@ -23,6 +23,7 @@ import {
   buildRuntimeSection,
   buildSafetySection,
 } from "./shared.ts";
+import { buildSkillsSection } from "./skills.ts";
 
 export type PromptMode = "main" | "task";
 
@@ -241,7 +242,7 @@ export function buildSystemPrompt(options: PromptOptions): string {
     lines.push("", ...buildSessionHistorySection());
 
     if (options.skillMetadata) {
-      lines.push("", options.skillMetadata);
+      lines.push("", ...buildSkillsSection(options.skillMetadata));
     }
   } else {
     // Task Agent: append sub-agent type-specific prompt
@@ -249,9 +250,9 @@ export function buildSystemPrompt(options: PromptOptions): string {
       lines.push("", options.subAgentPrompt);
     }
 
-    // Task Agent: append skill metadata (if available, e.g. for Project agents)
+    // Task Agent: append skill guidance (if available, e.g. for Project agents)
     if (options.skillMetadata) {
-      lines.push("", options.skillMetadata);
+      lines.push("", ...buildSkillsSection(options.skillMetadata));
     }
   }
 
