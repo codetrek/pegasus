@@ -16,7 +16,8 @@ import { initLogger } from "./infra/logger.ts";
 import { ModelRegistry } from "./infra/model-registry.ts";
 import { TuiAdapter } from "./channels/tui-adapter.ts";
 import { renderApp } from "./tui/main.tsx";
-import { setOnShutdown, loadMessages } from "./tui/store.ts";
+import { setOnShutdown, loadMessages, setStats } from "./tui/store.ts"
+import { startStatsBridge } from "./tui/bridge.ts";
 
 /** Start the TUI with full PegasusApp backend. */
 export async function startTUI(): Promise<void> {
@@ -37,8 +38,12 @@ export async function startTUI(): Promise<void> {
 
   const app = new Pegasus({ models, persona, settings });
 
+  // Stats bridge — will be wired after app.start()
+  let stopBridge: (() => void) | null = null;
+
   // Graceful shutdown
   const shutdown = async () => {
+    stopBridge?.();
     await app.stop();
     process.exit(0);
   };
@@ -53,6 +58,12 @@ export async function startTUI(): Promise<void> {
 
   // Start PegasusApp — initializes all subsystems
   await app.start();
+
+  // Wire stats bridge — poll AppStats into Solid store
+  if (app.appStats) {
+    setStats(structuredClone(app.appStats)); // Initial snapshot
+    stopBridge = startStatsBridge(app.appStats, setStats);
+  }
 
   // Wire input routing
   await tuiAdapter.start({ send: (msg) => app.routeMessage(msg) });
