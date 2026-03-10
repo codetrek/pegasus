@@ -8,7 +8,7 @@ import type { AgentStorePaths } from "@pegasus/storage/paths.ts";
 
 describe("AgentStorePaths", () => {
   describe("buildMainAgentPaths", () => {
-    it("should construct paths under dataDir/agents/main", () => {
+    it("should construct paths under homeDir/agents/main", () => {
       const paths: AgentStorePaths = buildMainAgentPaths("/data");
       expect(paths.session).toBe("/data/agents/main/session");
       expect(paths.subagents).toBe("/data/agents/main/subagents");

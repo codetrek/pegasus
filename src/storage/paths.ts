@@ -1,7 +1,7 @@
 /**
  * AgentStorePaths — explicit storage path contract for all Agent types.
  *
- * Replaces implicit path derivation from settings.dataDir.
+ * Replaces implicit path derivation from settings.homeDir.
  * Each agent type's manager constructs paths via a builder function.
  */
 import path from "node:path";
@@ -16,8 +16,8 @@ export interface AgentStorePaths {
 }
 
 /** Build storage paths for MainAgent. */
-export function buildMainAgentPaths(dataDir: string): AgentStorePaths {
-  const root = path.join(dataDir, "agents", "main");
+export function buildMainAgentPaths(homeDir: string): AgentStorePaths {
+  const root = path.join(homeDir, "agents", "main");
   return {
     session: path.join(root, "session"),
     subagents: path.join(root, "subagents"),

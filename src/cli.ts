@@ -32,7 +32,7 @@ export async function startCLI(): Promise<void> {
   // Initialize logger — this is the application entry point, the only place that should create log files
   const path = await import("node:path");
   initLogger(
-    path.join(settings.dataDir, "logs/pegasus.log"),
+    path.join(settings.homeDir, "logs/pegasus.log"),
     settings.logFormat,
     settings.logLevel,
   );

@@ -4,7 +4,6 @@ import { SettingsSchema } from "../../../src/infra/config-schema.ts";
 describe("Vision config", () => {
   it("should have sensible defaults when not specified", () => {
     const settings = SettingsSchema.parse({
-      dataDir: "/tmp/test",
       homeDir: "/tmp/test-home",
     });
     expect(settings.vision).toBeDefined();
@@ -16,7 +15,6 @@ describe("Vision config", () => {
 
   it("should allow overriding all fields", () => {
     const settings = SettingsSchema.parse({
-      dataDir: "/tmp/test",
       homeDir: "/tmp/test-home",
       vision: {
         enabled: false,
@@ -33,7 +31,6 @@ describe("Vision config", () => {
 
   it("should handle string 'false' for enabled (from env vars)", () => {
     const settings = SettingsSchema.parse({
-      dataDir: "/tmp/test",
       homeDir: "/tmp/test-home",
       vision: { enabled: "false" },
     });
@@ -42,7 +39,6 @@ describe("Vision config", () => {
 
   it("should handle string 'true' for enabled (from env vars)", () => {
     const settings = SettingsSchema.parse({
-      dataDir: "/tmp/test",
       homeDir: "/tmp/test-home",
       vision: { enabled: "true" },
     });
@@ -51,7 +47,6 @@ describe("Vision config", () => {
 
   it("should coerce string numbers", () => {
     const settings = SettingsSchema.parse({
-      dataDir: "/tmp/test",
       homeDir: "/tmp/test-home",
       vision: {
         keepLastNTurns: "10",
@@ -64,7 +59,6 @@ describe("Vision config", () => {
 
   it("should allow partial override (other fields keep defaults)", () => {
     const settings = SettingsSchema.parse({
-      dataDir: "/tmp/test",
       homeDir: "/tmp/test-home",
       vision: { keepLastNTurns: 2 },
     });

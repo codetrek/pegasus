@@ -98,11 +98,10 @@ function createMonologueModel(text: string): LanguageModel {
 
 function testSettings() {
   return SettingsSchema.parse({
-    dataDir: testDataDir,
     logLevel: "warn",
     llm: { maxConcurrentCalls: 3 },
     agent: { maxActiveTasks: 10 },
-    homeDir: `/tmp/pegasus-test-app-home-${process.pid}-${testSeq}`,
+    homeDir: testDataDir,
   });
 }
 
@@ -217,11 +216,10 @@ describe("PegasusApp", () => {
   it("should return undefined from getStoreImageFn when vision is disabled", async () => {
     const model = createMonologueModel("thinking...");
     const settings = SettingsSchema.parse({
-      dataDir: testDataDir,
       logLevel: "warn",
       llm: { maxConcurrentCalls: 3 },
       agent: { maxActiveTasks: 10 },
-      homeDir: `/tmp/pegasus-test-app-home-${process.pid}-${testSeq}`,
+      homeDir: testDataDir,
       vision: { enabled: false },
     });
     const app = new Pegasus({
@@ -741,11 +739,10 @@ describe("PegasusApp", () => {
     it("should return a working storeImage callback when vision is enabled", async () => {
       const model = createMonologueModel("thinking...");
       const settings = SettingsSchema.parse({
-        dataDir: testDataDir,
         logLevel: "warn",
         llm: { maxConcurrentCalls: 3 },
         agent: { maxActiveTasks: 10 },
-        homeDir: `/tmp/pegasus-test-app-home-${process.pid}-${testSeq}`,
+        homeDir: testDataDir,
         vision: { enabled: true },
       });
       const app = new Pegasus({

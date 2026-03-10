@@ -258,7 +258,7 @@ export class Pegasus {
       throw new Error("PegasusApp already started");
     }
 
-    const mainStorePaths = buildMainAgentPaths(this.settings.dataDir);
+    const mainStorePaths = buildMainAgentPaths(this.settings.homeDir);
 
     // 1. ModelLimitsCache
     const modelLimitsCacheDir = path.join(this.settings.homeDir, "model-limits");
@@ -331,8 +331,8 @@ export class Pegasus {
 
     // 5. Skills
     const builtinSkillDir = path.join(process.cwd(), "skills");
-    const globalSkillDir = path.join(this.settings.dataDir, "skills");
-    const mainSkillDir = path.join(this.settings.dataDir, "agents", "main", "skills");
+    const globalSkillDir = path.join(this.settings.homeDir, "skills");
+    const mainSkillDir = path.join(this.settings.homeDir, "agents", "main", "skills");
     this.skillDirs = [
       { dir: builtinSkillDir, source: "builtin" },
       { dir: globalSkillDir, source: "user" },
@@ -344,7 +344,7 @@ export class Pegasus {
 
     // 6. Sub-Agent Types
     const builtinSubAgentTypeDir = path.join(process.cwd(), "subagents");
-    const userSubAgentTypeDir = path.join(this.settings.dataDir, "subagents");
+    const userSubAgentTypeDir = path.join(this.settings.homeDir, "subagents");
     this.subAgentTypeRegistry = new SubAgentTypeRegistry();
     this.subAgentTypeRegistry.registerMany(loadSubAgentTypeDefinitions(builtinSubAgentTypeDir, userSubAgentTypeDir));
     logger.info({ subAgentTypeCount: this.subAgentTypeRegistry.listAll().length }, "subagent_types_loaded");
@@ -352,7 +352,7 @@ export class Pegasus {
     // 7. Vision: create ImageManager if enabled
     const visionConfig = this.settings.vision;
     if (visionConfig?.enabled !== false) {
-      const mediaDir = path.join(this.settings.dataDir, "media");
+      const mediaDir = path.join(this.settings.homeDir, "media");
       this.imageManager = new ImageManager(mediaDir, {
         maxDimensionPx: visionConfig?.maxDimensionPx,
         maxBytes: visionConfig?.maxImageBytes,
@@ -371,7 +371,7 @@ export class Pegasus {
     }
 
     // 9. Projects
-    const projectsDir = path.join(this.settings.dataDir, "agents", "projects");
+    const projectsDir = path.join(this.settings.homeDir, "agents", "projects");
     this.projectManager = new ProjectManager(projectsDir);
     this.projectAdapter = new ProjectAdapter();
 

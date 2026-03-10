@@ -64,27 +64,26 @@ describe("Config schemas", () => {
   });
 
   test("SettingsSchema applies nested defaults", () => {
-    const settings = SettingsSchema.parse({ dataDir: "/tmp/pegasus-test", homeDir: "/tmp/pegasus-test-home" });
+    const settings = SettingsSchema.parse({ homeDir: "/tmp/pegasus-test-home" });
     expect(settings.llm.default).toBe("openai/gpt-4o-mini");
     expect(settings.agent.maxActiveTasks).toBe(5);
     expect(settings.logLevel).toBe("info");
-    expect(settings.dataDir).toBe("/tmp/pegasus-test");
+    expect(settings.homeDir).toBe("/tmp/pegasus-test-home");
     expect(settings.logFormat).toBe("json");
     expect(settings.logFormat).toBe("json");
   });
 
   test("SettingsSchema accepts custom logFormat", () => {
-    const settings = SettingsSchema.parse({ dataDir: "/tmp/pegasus-test", homeDir: "/tmp/pegasus-test-home", logFormat: "line" });
+    const settings = SettingsSchema.parse({ homeDir: "/tmp/pegasus-test-home", logFormat: "line" });
     expect(settings.logFormat).toBe("line");
   });
 
   test("SettingsSchema rejects invalid logFormat", () => {
-    expect(() => SettingsSchema.parse({ dataDir: "/tmp/pegasus-test", homeDir: "/tmp/pegasus-test-home", logFormat: "xml" })).toThrow();
+    expect(() => SettingsSchema.parse({ homeDir: "/tmp/pegasus-test-home", logFormat: "xml" })).toThrow();
   });
 
   test("SettingsSchema coerces JSON string array for allowedPaths", () => {
     const settings = SettingsSchema.parse({
-      dataDir: "/tmp/pegasus-test",
       homeDir: "/tmp/pegasus-test-home",
       tools: { allowedPaths: '["./data", "/tmp"]' },
     });
@@ -94,7 +93,7 @@ describe("Config schemas", () => {
   test("SettingsSchema passes through invalid JSON string for allowedPaths to Zod", () => {
     // Non-JSON string that's not "[]" — Zod will validate/reject it
     expect(() =>
-      SettingsSchema.parse({ dataDir: "/tmp/pegasus-test", homeDir: "/tmp/pegasus-test-home", tools: { allowedPaths: "not-json" } }),
+      SettingsSchema.parse({ homeDir: "/tmp/pegasus-test-home", tools: { allowedPaths: "not-json" } }),
     ).toThrow();
   });
 });
@@ -176,7 +175,6 @@ describe("getSettings / setSettings", () => {
 
   test("getSettings returns settings after setSettings", () => {
     const custom = SettingsSchema.parse({
-      dataDir: "/tmp/test",
       homeDir: "/tmp/pegasus-test-home",
     });
     setSettings(custom);
@@ -185,12 +183,11 @@ describe("getSettings / setSettings", () => {
     expect(settings.memory).toBeDefined();
     expect(settings.agent).toBeDefined();
     expect(settings.logLevel).toBeDefined();
-    expect(settings.dataDir).toBe("/tmp/test");
+    expect(settings.homeDir).toBe("/tmp/pegasus-test-home");
   });
 
   test("getSettings returns same reference on repeated calls (singleton)", () => {
     const custom = SettingsSchema.parse({
-      dataDir: "/tmp/test",
       homeDir: "/tmp/pegasus-test-home",
     });
     setSettings(custom);
@@ -202,17 +199,16 @@ describe("getSettings / setSettings", () => {
   test("setSettings overrides and getSettings returns overridden", () => {
     const custom: Settings = SettingsSchema.parse({
       logLevel: "debug",
-      dataDir: "/tmp/test",
       homeDir: "/tmp/pegasus-test-home",
     });
     setSettings(custom);
     const result = getSettings();
     expect(result.logLevel).toBe("debug");
-    expect(result.dataDir).toBe("/tmp/test");
+    expect(result.homeDir).toBe("/tmp/pegasus-test-home");
   });
 
   test("resetSettings clears singleton — next getSettings throws", () => {
-    const custom = SettingsSchema.parse({ dataDir: "/tmp/pegasus-test", homeDir: "/tmp/pegasus-test-home", logLevel: "error" });
+    const custom = SettingsSchema.parse({ homeDir: "/tmp/pegasus-test-home", logLevel: "error" });
     setSettings(custom);
     expect(getSettings().logLevel).toBe("error");
 
@@ -223,7 +219,6 @@ describe("getSettings / setSettings", () => {
 
   test("SettingsSchema.parse produces valid defaults", () => {
     const s = SettingsSchema.parse({
-      dataDir: "/tmp/test",
       homeDir: "/tmp/pegasus-test-home",
     });
     expect(s.llm.default).toBeDefined();

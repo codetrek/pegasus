@@ -116,7 +116,7 @@ export class MainAgent extends Agent {
 
   constructor(deps: MainAgentDeps) {
     const settings = deps.settings ?? getSettings();
-    const mainStorePaths = buildMainAgentPaths(settings.dataDir);
+    const mainStorePaths = buildMainAgentPaths(settings.homeDir);
     const toolRegistry = new ToolRegistry();
     toolRegistry.registerMany(mainAgentTools);
 
@@ -245,7 +245,7 @@ export class MainAgent extends Agent {
     ctx.subagentsDir = this.mainStorePaths.subagents;
     ctx.projectManager = this.projectManager;
     ctx.ownerStore = this.ownerStore;
-    ctx.mediaDir = imgMgr ? path.join(this.settings.dataDir, "media") : undefined;
+    ctx.mediaDir = imgMgr ? path.join(this.settings.homeDir, "media") : undefined;
     ctx.storeImage = imgMgr ? async (buffer: Buffer, mimeType: string, source: string) => {
       const ref = await imgMgr.store(buffer, mimeType, source);
       return { id: ref.id, mimeType: ref.mimeType };

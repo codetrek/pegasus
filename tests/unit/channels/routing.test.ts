@@ -59,7 +59,6 @@ function createMockModelRegistry(model: LanguageModel): ModelRegistry {
 
 function testSettings() {
   return SettingsSchema.parse({
-    dataDir: testDataDir,
     logLevel: "warn",
     llm: { maxConcurrentCalls: 3 },
     agent: { maxActiveTasks: 10 },

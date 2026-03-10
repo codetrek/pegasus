@@ -44,8 +44,7 @@ function makeTestSettings(): Settings {
     vision: { enabled: true, keepLastNTurns: 5, maxDimensionPx: 1200, maxImageBytes: 5242880 },
     channels: { telegram: { enabled: false } },
     logLevel: "silent",
-    dataDir: TEST_DIR,
-    homeDir: "/tmp/pegasus-test-home",
+    homeDir: TEST_DIR,
     logFormat: "json",
     nodeEnv: "test",
   };

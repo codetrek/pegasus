@@ -69,11 +69,10 @@ function createReplyModel(
 
 function testSettings() {
   return SettingsSchema.parse({
-    dataDir: testDataDir,
     logLevel: "warn",
     llm: { maxConcurrentCalls: 3 },
     agent: { maxActiveTasks: 10 },
-    homeDir: "/tmp/pegasus-test-home",
+    homeDir: testDataDir,
   });
 }
 
@@ -251,13 +250,12 @@ describe("MainAgent", () => {
 
     it("should await first-run fetch for openrouter when no cache exists", async () => {
       const settings = SettingsSchema.parse({
-        dataDir: testDataDir,
         logLevel: "warn",
         llm: {
           maxConcurrentCalls: 3,
           openrouter: { enabled: true, apiKey: "test-key" },
         },
-        homeDir: "/tmp/pegasus-test-home",
+        homeDir: testDataDir,
       });
       const { mgr, cacheDir } = createTestAuthManager(settings);
 
@@ -269,13 +267,12 @@ describe("MainAgent", () => {
 
     it("should background refresh for openrouter when cache exists", async () => {
       const settings = SettingsSchema.parse({
-        dataDir: testDataDir,
         logLevel: "warn",
         llm: {
           maxConcurrentCalls: 3,
           openrouter: { enabled: true, apiKey: "test-key" },
         },
-        homeDir: "/tmp/pegasus-test-home",
+        homeDir: testDataDir,
       });
       const { mgr, cache, cacheDir } = createTestAuthManager(settings);
       // Pre-populate with provider cache so hasProviderCache("openrouter") returns true

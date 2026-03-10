@@ -61,7 +61,6 @@ describe("web_search with mock Tavily", () => {
 
     // Configure settings to point at our mock server
     const settings = SettingsSchema.parse({
-      dataDir: "/tmp/pegasus-test-websearch",
       homeDir: "/tmp/pegasus-test-home",
       logLevel: "warn",
       tools: {
@@ -127,7 +126,6 @@ describe("web_search with mock Tavily", () => {
   it("should handle API errors gracefully", async () => {
     // Temporarily set wrong API key
     const settings = SettingsSchema.parse({
-      dataDir: "/tmp/pegasus-test-websearch",
       homeDir: "/tmp/pegasus-test-home",
       logLevel: "warn",
       tools: {
@@ -150,7 +148,6 @@ describe("web_search with mock Tavily", () => {
 
     // Restore correct key
     const restored = SettingsSchema.parse({
-      dataDir: "/tmp/pegasus-test-websearch",
       homeDir: "/tmp/pegasus-test-home",
       logLevel: "warn",
       tools: {
