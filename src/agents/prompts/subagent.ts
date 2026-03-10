@@ -17,7 +17,7 @@ and return a consolidated result.
 You have a full set of tools for direct execution:
 - **Files**: read_file, write_file, edit_file, list_files, grep_files, glob_files
 - **Shell**: shell_exec — run any shell command (git, build tools, tests, etc.)
-- **Network**: web_search, web_fetch, http_get, http_post, http_request
+- **Network**: web_search, web_fetch
 - **Memory**: memory_list, memory_read, memory_write, memory_patch, memory_append
 - **Browser**: browser_navigate, browser_click, browser_type, browser_scroll, browser_close
   (navigate returns an accessibility snapshot with refs; each action returns fresh refs — previous refs are invalidated)

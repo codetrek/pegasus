@@ -30,13 +30,10 @@ export { read_file, write_file, list_files, edit_file, grep_files, glob_files };
 
 // Network tools
 import * as networkToolsModule from "./network-tools.ts";
-const http_get = networkToolsModule.http_get;
-const http_post = networkToolsModule.http_post;
-const http_request = networkToolsModule.http_request;
 const web_search = networkToolsModule.web_search;
 const web_fetch = networkToolsModule.web_fetch;
 
-export { http_get, http_post, http_request, web_search, web_fetch };
+export { web_search, web_fetch };
 
 // Memory tools
 import * as memoryToolsModule from "./memory-tools.ts";

@@ -25,7 +25,7 @@ data/subagents/           # user-created, runtime (overrides builtin)
 ---
 name: explore
 description: "Fast, read-only research agent. Use when you need to search, read, or gather information."
-tools: "read_file, list_files, http_get, web_search, notify, ..."
+tools: "read_file, list_files, web_search, notify, ..."
 model: fast              # optional: tier name or "provider/model"
 ---
 
@@ -66,7 +66,7 @@ Today, every spawned task gets the full `allTaskTools` array (26+ tools) and a g
 **general** (default — all task tools, unchanged):
 - system: current_time, sleep
 - file: read_file, write_file, list_files, edit_file, grep_files, glob_files
-- network: http_get, http_post, http_request, web_search
+- network: web_search
 - data: base64_encode, base64_decode
 - memory: memory_list, memory_read, memory_write, memory_patch, memory_append
 - task: task_list, task_replay
@@ -75,7 +75,7 @@ Today, every spawned task gets the full `allTaskTools` array (26+ tools) and a g
 **explore** (read-only — no write, no mutation):
 - system: current_time
 - file: read_file, list_files, glob_files, grep_files
-- network: http_get, web_search
+- network: web_search
 - data: base64_decode
 - memory: memory_list, memory_read
 - task: task_list, task_replay
@@ -84,13 +84,13 @@ Today, every spawned task gets the full `allTaskTools` array (26+ tools) and a g
 **plan** (read-only + write to memory):
 - system: current_time
 - file: read_file, list_files, glob_files, grep_files
-- network: http_get, web_search
+- network: web_search
 - data: base64_decode
 - memory: memory_list, memory_read, memory_write, memory_append
 - task: task_list, task_replay
 - notify
 
-> **Note on http_request**: Excluded from explore and plan because it supports arbitrary HTTP methods (POST, PUT, DELETE), which violates the read-only contract. Only `http_get` and `web_search` are included.
+> **Note on http_request**: Excluded from explore and plan because it supports arbitrary HTTP methods (POST, PUT, DELETE), which violates the read-only contract. Only `web_search` is included.
 
 ### System Prompts
 

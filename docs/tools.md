@@ -158,9 +158,6 @@ interface ToolStats {
 
 | Tool | Description | Parameters | Return |
 |------|-------------|------------|--------|
-| `http_get` | HTTP GET | `{ url, headers? }` | `{ status, headers, body }` |
-| `http_post` | HTTP POST | `{ url, body?, headers? }` | `{ status, headers, body }` |
-| `http_request` | Generic HTTP request | `{ method, url, body?, headers? }` | `{ status, headers, body }` |
 | `web_search` | Web search | `{ query, limit? }` | `{ results: SearchResult[] }` |
 
 ### Data Tools (DATA)
@@ -224,7 +221,7 @@ Different subsystems receive different tool subsets via pre-built arrays:
 | Collection | Contents | Used By |
 |------------|----------|---------|
 | `allTaskTools` | systemTools + fileTools + networkTools + dataTools + memoryTools + taskTools + `notify` | Task System — `general` type (default) |
-| `exploreTools` | Read-only subset: `current_time`, `read_file`, `list_files`, `glob_files`, `grep_files`, `http_get`, `web_search`, `base64_decode`, `memory_list`, `memory_read`, `task_list`, `task_replay`, `notify` | Task System — `explore` type |
+| `exploreTools` | Read-only subset: `current_time`, `read_file`, `list_files`, `glob_files`, `grep_files`, `web_search`, `base64_decode`, `memory_list`, `memory_read`, `task_list`, `task_replay`, `notify` | Task System — `explore` type |
 | `planTools` | exploreTools + `memory_write`, `memory_append` | Task System — `plan` type |
 | `mainAgentTools` | `current_time`, `memory_list`, `memory_read`, `memory_write`, `memory_patch`, `memory_append`, `task_list`, `task_replay`, `session_archive_read`, `spawn_task`, `resume_task`, `reply`, `use_skill` | Main Agent |
 | `reflectionTools` | `memory_read`, `memory_write`, `memory_patch`, `memory_append` | PostTaskReflector |

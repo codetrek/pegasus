@@ -9,7 +9,7 @@ navigating pages, filling forms, clicking buttons, extracting information, and
 completing multi-step web workflows (login, checkout, data collection, etc.).
 
 Without browser tools, the Agent is limited to raw HTTP requests via
-`http_get`/`http_post`, which cannot handle JavaScript-rendered pages, cookie-based
+`web_fetch`, which cannot handle JavaScript-rendered pages, cookie-based
 sessions, or interactive UI flows. Browser Tools bridge that gap: they turn the
 Agent into a user that can see and interact with any web page.
 
