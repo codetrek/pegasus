@@ -133,7 +133,7 @@ describe("Agent internal tick", () => {
 
     // Should have injected a status message
     const tickMsgs = agent.messages.slice(msgsBefore).filter(
-      m => typeof m.content === "string" && m.content.includes("[System "),
+      m => typeof m.content === "string" && m.content.includes("| System:"),
     );
     expect(tickMsgs.length).toBeGreaterThanOrEqual(1);
     expect(tickMsgs[0]!.content).toContain("1 subagent(s) running");
@@ -166,7 +166,7 @@ describe("Agent internal tick", () => {
 
     // No status message should have been injected (queue was not empty)
     const tickMsgs = agent.messages.slice(msgsBefore).filter(
-      m => typeof m.content === "string" && m.content.includes("[System "),
+      m => typeof m.content === "string" && m.content.includes("| System:"),
     );
     expect(tickMsgs).toHaveLength(0);
 

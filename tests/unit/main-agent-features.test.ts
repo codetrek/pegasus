@@ -639,7 +639,7 @@ describe("MainAgent", () => {
 
       // Verify status message was injected
       const tickMsgs = tick.sessionMessages.slice(msgsBefore).filter(
-        (m: any) => typeof m.content === "string" && m.content.includes("[System "),
+        (m: any) => typeof m.content === "string" && m.content.includes("| System:"),
       );
       expect(tickMsgs.length).toBeGreaterThanOrEqual(1);
       expect(tickMsgs[0]!.content).toContain("1 subagent(s) running");
