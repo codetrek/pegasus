@@ -1404,7 +1404,8 @@ export class Agent {
    * Subclasses can override for custom tick behavior.
    */
   protected _onTickFired(activeSubagentCount: number): void {
-    const summary = `[System: ${activeSubagentCount} subagent(s) running. No results yet. Do NOT reply to the user unless you have new information to share. If you already told them you're working on it, stay silent.]`;
+    const now = new Date().toISOString().replace("T", " ").slice(0, 19);
+    const summary = `[System ${now}: ${activeSubagentCount} subagent(s) running. No results yet. Do NOT reply to the user unless you have new information to share. If you already told them you're working on it, stay silent.]`;
 
     const statusMsg: Message = { role: "user", content: summary };
     this.sessionMessages.push(statusMsg);
