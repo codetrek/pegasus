@@ -28,7 +28,7 @@ Pegasus is a continuously running autonomous agent that handles multiple tasks c
 
 ### Autonomy
 - **Skill system** — extensible SKILL.md files that the agent auto-discovers and invokes
-- **AITask specialization** — task types (explore, plan, general) with tailored tool sets and prompts
+- **Subagent specialization** — task types (explore, plan, general) with tailored tool sets and prompts
 - **Project system** — isolated long-running workspaces with Worker threads
 - **Startup recovery** — session repair and pending task auto-recovery after restart
 

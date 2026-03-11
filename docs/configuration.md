@@ -316,7 +316,7 @@ For the full design, see [Tier-Based Model Selection](./multi-model.md).
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `tools.timeout` | number | `30` | Tool execution timeout in seconds |
+| `tools.timeout` | number | `60` | Tool execution timeout in seconds |
 | `tools.allowedPaths` | string[] | `[]` | Allowed paths for file operations (empty = unrestricted) |
 | `tools.webSearch.provider` | string | — | Search provider: `tavily`, `google`, `bing`, `duckduckgo` |
 | `tools.webSearch.apiKey` | string | — | API key for the search provider |
@@ -337,7 +337,21 @@ For the full design, see [Tier-Based Model Selection](./multi-model.md).
 | `system.homeDir` | string | `"~/.pegasus"` | Home directory for auth, logs, browser profile, and other runtime data |
 | `system.logFormat` | string | `"json"` | Log output format: `json` (structured) or `line` (human-readable) |
 
-> **Note on `homeDir`**: Auth credentials are stored at `{homeDir}/auth/`, logs at `{homeDir}/logs/`, and browser profile at `{homeDir}/browser/`. All paths are derived from `homeDir`.
+> **Note on `homeDir`**: All runtime data paths are derived from `homeDir`:
+>
+> | Path | Purpose |
+> |------|---------|
+> | `{homeDir}/agents/main/session/` | MainAgent session (current.jsonl + archives) |
+> | `{homeDir}/agents/main/memory/` | MainAgent long-term memory (facts + episodes) |
+> | `{homeDir}/agents/main/subagents/` | MainAgent subagent task logs |
+> | `{homeDir}/agents/projects/` | Project workspaces |
+> | `{homeDir}/logs/` | Application logs |
+> | `{homeDir}/media/` | Image/media storage |
+> | `{homeDir}/personas/` | Persona definitions (unused by default — see `identity.personaPath`) |
+> | `{homeDir}/auth/` | Auth credentials (OAuth tokens, MCP auth) |
+> | `{homeDir}/model-limits/` | Cached model limits from providers |
+> | `{homeDir}/browser/` | Browser user data (Playwright profile) |
+> | `{homeDir}/stats.json` | Persisted cumulative statistics |
 
 ## Logging
 

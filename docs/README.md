@@ -69,26 +69,32 @@ pegasus/
 │   ├── agents/          # MainAgent + Task Agent
 │   ├── cognitive/       # Reason → Act + PostTaskReflector
 │   ├── channels/        # Channel adapter types
+│   ├── context/         # Context window management (budget, compaction, overflow)
 │   ├── events/          # EventType, EventBus
 │   ├── identity/        # Persona + system prompt builder
 │   ├── infra/           # Config, Logger, LLM clients, ModelRegistry
 │   ├── mcp/             # MCP server integration + OAuth
+│   ├── media/           # Image processing + storage
 │   ├── models/          # ToolCall, ToolDefinition types
 │   ├── projects/        # Project system (Worker threads)
 │   ├── workers/         # Unified Worker transport (WorkerAdapter)
 │   ├── subagent/        # SubAgent lifecycle (SubAgentManager)
+│   ├── security/        # Message classification, owner identity
 │   ├── session/         # Session persistence + compaction
 │   ├── skills/          # Skill loader + registry
-│   ├── subagents/   # Sub-agent type specialization (SUBAGENT.md)
+│   ├── stats/           # Runtime statistics (AppStats)
+│   ├── storage/         # Storage path management
+│   ├── subagents/       # Subagent type specialization (SUBAGENT.md)
 │   ├── task/            # TaskFSM + TaskContext + TaskPersister
 │   ├── tools/           # Tool registry, executor, builtins
+│   ├── tui/             # Terminal UI (Solid.js + @opentui/solid)
 │   └── cli.ts           # CLI entry point
 ├── tests/
 │   ├── unit/
 │   └── integration/
 ├── docs/                # Design documents (this directory)
 ├── skills/              # Built-in skill definitions
-├── data/                # Runtime data (sessions, tasks, memory)
+├── data/                # Runtime data (personas)
 └── config.yml           # Default configuration
 ```
 
@@ -115,6 +121,7 @@ pegasus/
 - [Tool System](./tools.md) — registration, execution, timeout, LLM function calling
 - [Memory System](./memory-system.md) — long-term memory (facts + episodes)
 - [Session Compact](./session-compact.md) — auto-compact with context window awareness
+- [Context Budget](./context-budget.md) — token budget computation, compaction, overflow recovery
 - [Skill System](./skill-system.md) — SKILL.md format, loader, registry, triggering
 - [Vision Support](./vision.md) — image input, storage, hydration, pruning
 - [Project System](./project-system.md) — long-lived task spaces, Worker threads
@@ -124,6 +131,7 @@ pegasus/
 
 ### Observability
 - [AppStats](./app-stats.md) — runtime statistics for TUI dashboard (counters, snapshots, polling)
+- [TUI](./tui.md) — terminal dashboard (Solid.js + @opentui/solid)
 
 ### Operations
 - [Running Guide](./running.md) — setup, usage, deployment

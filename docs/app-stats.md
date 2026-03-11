@@ -1,6 +1,6 @@
 # AppStats — Runtime Statistics for TUI & Observability
 
-> Source code: `src/stats/` (planned)
+> Source code: `src/stats/`
 
 ## Why
 
@@ -70,7 +70,7 @@ needed, no changes to the LLM module.
 interface AppStats {
   // ── Identity & Status ──
   persona: string
-  status: "online" | "idle" | "busy"
+  status: "idle" | "busy"
   startedAt: number                      // Unix ms — display layer computes uptime
 
   // ── Model ──
@@ -88,13 +88,15 @@ interface AppStats {
       cacheReadTokens: number
       cacheWriteTokens: number
       outputTokens: number
-    }
+      latencyMs: number
+    } | null
     byModel: Record<string, {
       calls: number
       totalPromptTokens: number
       totalOutputTokens: number
       totalCacheReadTokens: number
       totalCacheWriteTokens: number
+      totalLatencyMs: number
     }>
     compacts: number
   }
@@ -106,8 +108,8 @@ interface AppStats {
     compactThreshold: number             // 0-1, e.g. 0.75
   }
 
-  // ── Tasks ──
-  tasks: {
+  // ── Subagents ──
+  subagents: {
     active: number
     completed: number
     failed: number
@@ -193,7 +195,7 @@ Two independent paths: **stats flow** (polling) and **message flow** (ChannelAda
 | `llm.compacts` | Agent._compactState | After successful compaction |
 | `budget.used` | Agent.onLLMUsage callback | lastPromptTokens from result |
 | `budget.total` | PegasusApp.start() | Once at startup (from model config) |
-| `tasks.active/completed/failed` | EventBus TASK_* handlers | Task state changes |
+| `subagents.active/completed/failed` | EventBus TASK_* handlers | Task state changes |
 | `tools.total/builtin/mcp` | PegasusApp.start() | Once at startup + MCP reload |
 | `tools.calls/success/fail` | EventBus TOOL_CALL_* handlers | Tool execution results |
 | `memory.factCount/episodeCount` | Periodic scan (30s) | Timer reads directory |

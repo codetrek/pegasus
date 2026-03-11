@@ -85,6 +85,35 @@ pegasus/
 │   ├── models/                     # Data models
 │   │   └── tool.ts                 # ToolDefinition, ToolCall types
 │   │
+│   ├── context/                    # Context window management
+│   │   ├── budget.ts               # computeTokenBudget (input budget, compact trigger)
+│   │   ├── constants.ts            # Tuning parameters (thresholds, limits)
+│   │   ├── context-windows.ts      # Model → context window size mapping
+│   │   ├── model-limits.ts         # Static model limits registry
+│   │   ├── model-limits-cache.ts   # Cached provider-fetched model limits
+│   │   ├── overflow.ts             # Context overflow error detection
+│   │   ├── summarizer.ts           # Chunked message summarization
+│   │   ├── tool-result-guard.ts    # Tool result truncation
+│   │   └── providers/              # Provider-specific model limit fetchers
+│   │
+│   ├── stats/                      # Runtime statistics
+│   │   ├── app-stats.ts            # AppStats type + create/record helpers
+│   │   ├── stats-persistence.ts    # Save/load cumulative stats to disk
+│   │   └── index.ts                # Re-exports
+│   │
+│   ├── storage/                    # Storage path management
+│   │   └── paths.ts                # AgentStorePaths builders (main, subagent, project)
+│   │
+│   ├── tui/                        # Terminal UI (Solid.js + @opentui/solid)
+│   │   ├── app.tsx                 # Root component (responsive layout)
+│   │   ├── main.tsx                # Render entry point
+│   │   ├── bridge.ts              # AppStats → Solid store polling bridge
+│   │   ├── store.ts                # Reactive store (chat messages, stats)
+│   │   ├── theme.tsx               # Color theme constants
+│   │   ├── components/             # Shared components (TopBar, InputBar, TabBar)
+│   │   ├── panels/                 # Panel components (ChatPanel, OpsPanel, MetricsPanel)
+│   │   └── hooks/                  # Custom hooks (terminal size)
+│   │
 │   └── infra/                      # Infrastructure
 │       ├── config-schema.ts        # Zod schema for configuration
 │       ├── config-loader.ts        # YAML + env var loading
@@ -103,11 +132,29 @@ pegasus/
 │   └── integration/                # Integration tests
 │
 └── data/                           # Runtime data (.gitignored)
-    ├── main/                       # Main Agent session (current.jsonl)
-    ├── tasks/                      # Task execution logs (JSONL per task)
-    ├── memory/                     # Long-term memory (facts/, episodes/)
-    ├── personas/                   # Persona config files
-    └── logs/                       # Application logs
+    └── personas/                   # Persona config files
+```
+
+### Home Directory (`~/.pegasus/`)
+
+Runtime data stored under `system.homeDir` (default `~/.pegasus/`):
+
+```
+~/.pegasus/
+├── agents/
+│   ├── main/
+│   │   ├── session/                # MainAgent session (current.jsonl + archives)
+│   │   ├── memory/                 # Long-term memory (facts/, episodes/)
+│   │   └── subagents/              # Subagent task logs
+│   └── projects/                   # Project workspaces (one dir per project)
+├── logs/                           # Application logs (daily rotation)
+├── media/                          # Image/media storage
+├── auth/                           # Auth credentials (OAuth tokens, MCP auth)
+├── model-limits/                   # Cached model limits from providers
+├── browser/                        # Browser user data (Playwright profile)
+├── skills/                         # User-defined global skills
+├── subagents/                      # User-defined subagent types
+└── stats.json                      # Persisted cumulative statistics
 ```
 
 ## Module Dependencies
