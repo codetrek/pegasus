@@ -47,7 +47,7 @@ import { getLogger } from "../infra/logger.ts";
 import { createTokenCounter, type TokenCounter } from "../infra/token-counter.ts";
 import { shortId } from "../infra/id.ts";
 import { SessionStore } from "../session/store.ts";
-import { formatToolTimestamp, formatTimestamp } from "../infra/time.ts";
+import { formatToolTimestamp, formatTimestamp, formatDuration } from "../infra/time.ts";
 import {
   computeTokenBudget,
   truncateToolResult,
@@ -64,6 +64,7 @@ import type {
   OutboundMessage,
 } from "../channels/types.ts";
 import { sanitizeForPrompt } from "../infra/sanitize.ts";
+import { formatNumber, formatToolStats } from "../infra/format.ts";
 import { formatSize } from "./prompts/index.ts";
 import type { Reflection } from "./reflection.ts";
 import type { SubAgentTypeRegistry } from "./subagents/registry.ts";
@@ -1711,8 +1712,19 @@ export class Agent {
             error: result.error ?? "Unknown error",
           });
         }
+        const duration = formatDuration(Date.now() - info.startedAt);
         logger.info(
-          { subagentId, agentType: agentType, success: result.success, llmCalls: result.llmCallCount },
+          {
+            subagentId,
+            agentType,
+            success: result.success,
+            duration,
+            llmCalls: result.llmCallCount,
+            inputTokens: formatNumber(result.totalPromptTokens),
+            cacheReadTokens: formatNumber(result.totalCacheReadTokens),
+            outputTokens: formatNumber(result.totalOutputTokens),
+            tools: formatToolStats(result.toolStats),
+          },
           "subagent_completed",
         );
       })
@@ -1724,7 +1736,21 @@ export class Agent {
           subagentId,
           error: errorMsg,
         });
-        logger.error({ subagentId, agentType: agentType, err }, "subagent_error");
+        const duration = formatDuration(Date.now() - info.startedAt);
+        const stats = agent.getAccumulatedStats();
+        logger.error(
+          {
+            subagentId,
+            agentType,
+            err: errorMsg,
+            duration,
+            inputTokens: formatNumber(stats.totalPromptTokens),
+            cacheReadTokens: formatNumber(stats.totalCacheReadTokens),
+            outputTokens: formatNumber(stats.totalOutputTokens),
+            tools: formatToolStats(stats.toolStats),
+          },
+          "subagent_error",
+        );
       });
   }
 
