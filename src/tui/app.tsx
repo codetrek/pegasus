@@ -14,7 +14,6 @@ import { InputBar } from "./components/input-bar.tsx"
 import { TabBar, type TabId } from "./components/tab-bar.tsx"
 import { THEME } from "./theme.tsx"
 import { requestShutdown, showHint } from "./store.ts"
-import { copyToClipboard } from "./clipboard.ts"
 import { computeLayoutMode } from "./hooks/use-terminal-size.ts"
 
 /** Fixed column widths */
@@ -31,6 +30,10 @@ export function App() {
   // Allow process.stdout.write to bypass opentui's rendering pipeline.
   // Required for OSC 52 clipboard sequences to reach the terminal.
   renderer.disableStdoutInterception()
+
+  // Disable mouse tracking — let the terminal handle selection natively.
+  // Capturing mouse events causes SGR escape sequence leaks on exit.
+  renderer.useMouse = false
 
   // Double Ctrl+C to exit: first press warns, second within 2s exits.
   let ctrlcCount = 0
@@ -57,24 +60,12 @@ export function App() {
     }
   })
 
-  // Copy-on-select: mouse up copies selected text to clipboard
-  const copySelection = () => {
-    const selection = renderer.getSelection()
-    if (!selection) return
-    const text = selection.getSelectedText()
-    if (!text) return
-    copyToClipboard(text)
-    renderer.clearSelection()
-    showHint("Copied", 1000)
-  }
-
   return (
     <box
       width="100%"
       height="100%"
       flexDirection="column"
       backgroundColor={THEME.bg}
-      onMouseUp={copySelection}
     >
       {/* Top bar */}
       <TopBar />
