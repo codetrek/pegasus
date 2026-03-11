@@ -8,7 +8,7 @@ Pegasus has a built-in logging system with automatic file output, log rotation, 
 
 ### 1. Automatic File Logging
 
-- **Always Enabled**: Logs are always written to `{dataDir}/logs/pegasus.log`
+- **Always Enabled**: Logs are always written to `{homeDir}/logs/pegasus.log`
 - **Cannot be Disabled**: File logging is a core feature and always active
 
 ### 2. Configurable Log Format
@@ -35,7 +35,7 @@ Pegasus has a built-in logging system with automatic file output, log rotation, 
 ### Default Behavior
 
 By default, Pegasus:
-- ✅ **Always** writes logs to file (`data/logs/pegasus.log`)
+- ✅ **Always** writes logs to file (`~/.pegasus/logs/pegasus.log`)
 - Logs only go to file — no console output
 
 ### View Logs
@@ -43,16 +43,16 @@ By default, Pegasus:
 **Using standard Unix tools**:
 ```bash
 # Tail log file
-tail -f data/logs/pegasus.log
+tail -f ~/.pegasus/logs/pegasus.log
 
 # View last 100 lines
-tail -100 data/logs/pegasus.log
+tail -100 ~/.pegasus/logs/pegasus.log
 
 # Search for specific keyword
-grep "error" data/logs/pegasus.log
+grep "error" ~/.pegasus/logs/pegasus.log
 
 # Pretty-print JSON logs
-cat data/logs/pegasus.log | jq '.'
+cat ~/.pegasus/logs/pegasus.log | jq '.'
 ```
 
 ## Configuration
@@ -64,8 +64,8 @@ system:
   # Log level: debug | info | warn | error | silent
   logLevel: info
 
-  # Data directory (logs saved to {dataDir}/logs/pegasus.log)
-  dataDir: data
+  # Home directory (logs saved to {homeDir}/logs/pegasus.log)
+  homeDir: ~/.pegasus
 
   # Log output format: json | line (default: json)
   logFormat: json
@@ -76,11 +76,11 @@ system:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `PEGASUS_LOG_LEVEL` | Log level | `info` |
-| `PEGASUS_DATA_DIR` | Data directory | `data` |
+| `PEGASUS_HOME_DIR` | Home directory | `~/.pegasus` |
 | `PEGASUS_LOG_FORMAT` | Log output format: `json` or `line` | `json` |
 
 **Note**:
-- Log file path is always `{PEGASUS_DATA_DIR}/logs/pegasus.log`
+- Log file path is always `{PEGASUS_HOME_DIR}/logs/pegasus.log`
 - File logging cannot be disabled
 - `logFormat` controls **how** logs are formatted (format)
 
@@ -91,8 +91,8 @@ system:
 ```yaml
 system:
   logLevel: debug
-  dataDir: data
-  # Logs written to data/logs/pegasus.log
+  homeDir: ~/.pegasus
+  # Logs written to ~/.pegasus/logs/pegasus.log
   # No console output
 ```
 
@@ -101,7 +101,7 @@ system:
 ```yaml
 system:
   logLevel: debug
-  dataDir: data
+  homeDir: ~/.pegasus
   logFormat: line  # Human-readable single-line format
 ```
 
@@ -110,7 +110,7 @@ system:
 ```yaml
 system:
   logLevel: info
-  dataDir: /var/lib/pegasus
+  homeDir: /var/lib/pegasus
   logFormat: json           # Structured JSON for log aggregation
   # Logs written to /var/lib/pegasus/logs/pegasus.log
 ```
@@ -120,7 +120,7 @@ system:
 ```yaml
 system:
   logLevel: silent  # Minimize logging overhead
-  dataDir: data
+  homeDir: ~/.pegasus
   # Still writes to file, but only critical errors
 ```
 
@@ -156,11 +156,11 @@ Human-readable single-line format, ideal for development and quick debugging:
 When using `logFormat: json` (default), use `jq` or switch to `line` format to view logs:
 
 ```bash
-$ tail -f data/logs/pegasus.log
+$ tail -f ~/.pegasus/logs/pegasus.log
 {"level":"info","time":"2026-02-24T10:00:00.000Z","module":"config_loader","msg":"loading_base_config","path":"config.yml"}
 
 # Or use jq for pretty-printed JSON
-$ tail -f data/logs/pegasus.log | jq '.'
+$ tail -f ~/.pegasus/logs/pegasus.log | jq '.'
 ```
 
 ## Log Rotation
@@ -183,7 +183,7 @@ $ tail -f data/logs/pegasus.log | jq '.'
 ### Log File Examples
 
 ```
-data/logs/
+~/.pegasus/logs/
 ├── pegasus.log              # Current log file
 ├── pegasus.log.2024-02-12   # Yesterday's log
 ├── pegasus.log.2024-02-11   # Two days ago
@@ -202,10 +202,10 @@ For immediate cleanup or custom retention policy:
 
 ```bash
 # Delete logs older than 7 days
-find data/logs/ -name "pegasus.log.*" -mtime +7 -delete
+find ~/.pegasus/logs/ -name "pegasus.log.*" -mtime +7 -delete
 
 # Keep only last 10 log files
-cd data/logs && ls -t pegasus.log.* | tail -n +11 | xargs rm -f
+cd ~/.pegasus/logs && ls -t pegasus.log.* | tail -n +11 | xargs rm -f
 ```
 
 ## Troubleshooting
@@ -224,7 +224,7 @@ If disk space is a concern:
 ### No Console Output
 
 Logs only go to file. To view logs in real-time, use:
-- `tail -f data/logs/pegasus.log`
+- `tail -f ~/.pegasus/logs/pegasus.log`
 - For human-readable format, set `logFormat: line`
 
 ### Log File Too Large
@@ -286,4 +286,4 @@ The `logFormat` setting provides flexibility for different environments:
 
 - [Pino Documentation](https://getpino.io/)
 - [Pino-roll Documentation](https://github.com/feugy/pino-roll)
-- [Configuration Guide](./configuration.md)
+- [Configuration Guide](../llm/configuration.md)

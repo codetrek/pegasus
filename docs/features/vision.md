@@ -57,13 +57,13 @@ Tool Image Flow (Task Agent):
 
 ### ImageManager (`src/media/image-manager.ts`)
 
-Single owner of image storage. Only component that writes to `data/media/`.
+Single owner of image storage. Only component that writes to `~/.pegasus/media/`.
 
 - **store()**: compress → hash → dedup → write file → SQLite → return ImageRef
 - **read()**: return base64 by ID (for hydration and image_read tool)
 - **close()**: release SQLite connection (called by MainAgent.stop())
 
-Storage: `data/media/images/{hash12}.{ext}` + `data/media/media.db` (SQLite metadata).
+Storage: `~/.pegasus/media/images/{hash12}.{ext}` + `~/.pegasus/media/media.db` (SQLite metadata).
 
 ### Image Resize (`src/media/image-resize.ts`)
 
@@ -154,12 +154,12 @@ Tools produce images via `ToolContext.storeImage` → ImageManager → `ToolResu
 
 ## What Does NOT Change
 
-- TaskFSM, EventBus, cognitive pipeline, memory system — all unchanged
+- AgentState, EventBus, cognitive pipeline, memory system — all unchanged
 - PostTaskReflector intentionally ignores images (does memory extraction, not image analysis)
 
 ## Deferred (Phase 2)
 
 - MCP image passthrough (Worker thread write access needed)
 - Image GC (cleanup unreferenced images)
-- Audio/video support (data/media/ structure ready)
+- Audio/video support (~/.pegasus/media/ structure ready)
 - Image in OutboundMessage (agent sending images to user)

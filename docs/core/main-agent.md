@@ -2,7 +2,7 @@
 
 Main Agent is Pegasus's **inner voice** — its continuous mental activity. Like a human's inner monologue when thinking through a problem, Main Agent's LLM output is self-talk: reasoning, weighing options, planning next steps. The user never sees this internal dialogue directly.
 
-All outward behavior is through explicit tool calls. When Main Agent wants to speak to the user, it calls the `reply` tool. When it needs complex work done, it calls `spawn_task`. The LLM's text output is purely internal cognition.
+All outward behavior is through explicit tool calls. When Main Agent wants to speak to the user, it calls the `reply` tool. When it needs complex work done, it calls `spawn_subagent`. The LLM's text output is purely internal cognition.
 
 ## Core Concept: Inner Monologue
 
@@ -282,7 +282,7 @@ Main Agent maintains a session-level message history. This is the record of its 
 ### Persistence
 
 ```
-data/agents/main/session/
+~/.pegasus/agents/main/session/
 ├── current.jsonl              ← active session
 ├── 2026-02-25-143000.jsonl    ← compacted previous session
 └── 2026-02-24-180000.jsonl    ← older
@@ -312,13 +312,9 @@ SessionStore injects cancellation results to close them:
 
 This is purely a session data integrity concern — SessionStore doesn't know or care about tasks. It just ensures every tool call has a matching tool result so the message history is well-formed for the next LLM call.
 
-**Task recovery** (Task System's responsibility):
+**Subagent recovery** (handled during Agent startup):
 
-Handled by Agent during its own `start()`, completely independent of Main Agent:
-
-1. TaskPersister scans `data/agents/main/tasks/pending.json` for unfinished tasks
-2. For each: append `TASK_FAILED` to its JSONL log, remove from `pending.json`
-3. Push failure notification through the `onNotify` callback → enters Main Agent queue
+Pending subagents from a previous crash are marked as failed and their results are pushed through the notification callback to Main Agent's queue.
 
 Main Agent receives these as normal `task_notify` events. It doesn't know or care that they came from recovery vs normal execution.
 
@@ -344,48 +340,13 @@ Token count is tracked in two parts:
 
 When estimated total exceeds threshold, compact before the next LLM call.
 
-## System Prompt Design
+## System Prompt
 
 The system prompt is built **once** at startup and cached for all LLM calls. This enables LLM prefix caching — the provider can reuse the cached token prefix across calls, saving cost and latency.
 
-### Prompt Modes
+Two modes: **main** (full MainAgent prompt) and **task** (minimal SubAgent prompt). The prompt is source code — see `src/agents/prompts/` for the actual content.
 
-The prompt builder (`src/prompts/main-agent.ts`) supports two modes via `buildSystemPrompt(options)`:
-
-**Main Agent (mode: "main")** — full prompt with all sections:
-
-| Section | Purpose |
-|---------|---------|
-| Identity | Persona name, role, personality, style, values, background |
-| Safety | Anti-power-seeking guardrails for autonomous agent |
-| How You Think | Inner monologue concept, reply() as only communication |
-| Tools | Per-tool descriptions for all 15 MainAgent tools |
-| Thinking Style | When to narrate vs silently call tools |
-| When to Reply vs Spawn | Decision guidelines for direct reply vs task |
-| SubAgent Types | Injected from SubAgentTypeRegistry |
-| Channels and reply() | Channel metadata format + per-channel style guidelines |
-| Session History | Compact info + archive access |
-| Available Skills | Injected from SkillRegistry (2% of context window budget) |
-
-**Task Agent (mode: "task")** — minimal prompt:
-
-| Section | Purpose |
-|---------|---------|
-| Identity | Same persona identity |
-| Safety | Same safety guardrails |
-| SUBAGENT.md body | Type-specific instructions (explore/plan/general) |
-
-Task Agents skip How You Think, Tools, Thinking Style, Reply vs Spawn, Channels, Session History, and Skills — saving ~100 lines of irrelevant tokens per LLM call.
-
-> **Source of truth:** The actual prompt text lives in `src/prompts/` — see `main-agent.ts` (MainAgent sections), `shared.ts` (identity/runtime/safety), `subagent.ts` (SubAgent prompt), and `internal.ts` (reflection/compact/extract).
-
-### Input Sanitization
-
-External channel messages are sanitized via `sanitizeForPrompt()` (`src/infra/sanitize.ts`) before entering the session. Strips Unicode control/format/separator characters while preserving normal whitespace. Defends against prompt injection via crafted Unicode sequences.
-
-### Dynamic Part (injected into messages)
-
-Memory index is injected as a user message on the first LLM call (iteration 1 only), not in the system prompt. This keeps the system prompt stable for prefix caching.
+The prompt is only rebuilt when skills change or the session restarts.
 
 Multiple channels connect to the same Main Agent through a unified adapter interface:
 
@@ -448,9 +409,9 @@ Main Agent and the Task System are separate layers:
 | User interaction | Via `reply` tool | None (internal only) |
 | State | Session history (cross-task) | TaskContext (per-task) |
 | Tools | reply + spawn_task + simple tools | Full tool suite |
-| Persistence | data/agents/main/session/ (session JSONL) | data/agents/main/tasks/ (task JSONL) |
+| Persistence | ~/.pegasus/agents/main/session/ (session JSONL) | ~/.pegasus/agents/main/tasks/ (task JSONL) |
 | Lifetime | Entire session | Single task |
 | Communication | Receives notifications via callback | Pushes results to Main Agent queue |
 | Recovery | Repairs unclosed tool calls in session | Marks pending tasks as failed |
 
-The Task System (Agent, TaskFSM, cognitive pipeline, EventBus) is unchanged internally. Main Agent creates tasks through `spawn_task`, and receives results via the `onNotify` callback pushed directly into its message queue.
+The Task System (Agent, cognitive pipeline, EventBus) is unchanged internally. Main Agent creates tasks through `spawn_task`, and receives results via the `onNotify` callback pushed directly into its message queue.

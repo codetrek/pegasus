@@ -9,10 +9,10 @@ Pegasus is not a request-response service. It is a **continuously running autono
 | Principle | Meaning |
 |-----------|---------|
 | **Everything is an Event** | User messages, tool returns, scheduled triggers, state changes — all are Events, dispatched through the EventBus |
-| **Task = State Machine** | Each task is an independent TaskFSM with explicit states and transition rules, not a while-loop |
+| **Task = State Machine** | Each agent has a 3-state lifecycle (IDLE/BUSY/WAITING) with explicit transition rules |
 | **Agent is an Event Processor** | No `while True` loop, no `await task.run()` blocking. Only: receive event → drive state machine → produce new events |
 | **Non-blocking, Fully Async, Concurrent** | Agent event handlers never block; multiple tasks interleave, sharing compute |
-| **Stateless Cognitive Processors** | Cognitive stage processors (Thinker, Planner, Actor, PostTaskReflector) hold no state and can be reused by any task |
+| **Stateless Cognitive Processors** | Cognitive stage processors (PostTaskReflector) hold no state and can be reused by any task |
 | **Identity Consistency** | Regardless of concurrent task count or session boundaries, personality and behavioral style remain consistent |
 | **Persistent Memory** | Experience is never lost; the system learns and improves from history |
 | **Model Agnostic** | Core logic is not bound to a specific LLM; supports dynamic switching and routing |
@@ -24,7 +24,7 @@ Pegasus is not a request-response service. It is a **continuously running autono
 │  The system has three core layers:                           │
 │                                                              │
 │  1. Main Agent — Conversation brain (decides what to do)     │
-│  2. Event + TaskFSM — Execution engine (how to do it)        │
+│  2. Event + AgentState — Execution engine (how to do it)        │
 │  3. Channel Adapters — I/O adaptation (where it comes from   │
 │     and where it goes back)                                  │
 │                                                              │
@@ -45,7 +45,7 @@ Pegasus is not a request-response service. It is a **continuously running autono
 ├─────────────────────────────────────────────────────┤
 │        Main Agent (Global LLM Persona / Conv. Brain) │
 │   Session Mgmt │ Conversation Decisions │ Simple     │
-│   Tools │ Task Dispatch via spawn_task │              │
+│   Tools │ Task Dispatch via spawn_subagent │              │
 │   SubAgent Dispatch via spawn_subagent               │
 │       ↓ Spawns task or SubAgent when needed ↓        │
 ├─────────────────────────────────────────────────────┤
@@ -56,12 +56,12 @@ Pegasus is not a request-response service. It is a **continuously running autono
 │   Event Dispatch │ State Transitions │ Cognitive      │
 │   Stage Dispatch │ Concurrency Control                │
 ├─────────────────────────────────────────────────────┤
-│        TaskFSM Layer (Task State Machine)             │
-│   IDLE → REASONING → ACTING → COMPLETED              │
-│             │ SUSPENDED │ FAILED │                    │
+│        AgentState (Agent Lifecycle)                    │
+│   IDLE ←→ BUSY ←→ WAITING                            │
+│                                                       │
 ├─────────────────────────────────────────────────────┤
 │       Cognitive Processors (Stateless)                │
-│   Thinker │ Planner │ Actor │ PostTaskReflector       │
+│   PostTaskReflector (async memory learning)           │
 ├─────────────────────────────────────────────────────┤
 │          Identity Layer                               │
 │   Persona │ Preferences │ Evolution                   │
@@ -92,7 +92,7 @@ Pegasus is not a request-response service. It is a **continuously running autono
                             │ InboundMessage
                             ▼
                      ┌──────────────┐
-                     │  Main Agent  │──── Session History (data/agents/main/session/)
+                     │  Main Agent  │──── Session History (~/.pegasus/agents/main/session/)
                      │  (LLM brain) │
                      └──────┬───────┘
                             │ spawn_task / spawn_subagent
@@ -110,14 +110,13 @@ Pegasus is not a request-response service. It is a **continuously running autono
                      └──────┬───────┘
                             │ Lookup / drive
                             ▼
-             ┌──────────────────────────────┐
-             │       TaskRegistry           │
-             │  ┌──────┐ ┌──────┐ ┌──────┐  │
-             │  │Task A│ │Task B│ │Task C│  │
-             │  │  FSM │ │  FSM │ │  FSM │  │
-             │  │ACTING│ │REASON│ │IDLE  │  │
-             │  └──────┘ └──────┘ └──────┘  │
-             └──────────────────────────────┘
+                ┌──────────────────────────────┐
+                │        Agent Pool            │
+                │  ┌──────┐ ┌──────┐ ┌──────┐  │
+                │  │Sub A │ │Sub B │ │Sub C │  │
+                │  │ BUSY │ │ IDLE │ │WAIT  │  │
+                │  └──────┘ └──────┘ └──────┘  │
+                └──────────────────────────────┘
                             │ Invokes
                  ┌──────────┼──────────┐
                  ▼          ▼          ▼
@@ -130,7 +129,7 @@ Pegasus is not a request-response service. It is a **continuously running autono
 
 The cognitive pipeline has two active stages. There is no REFLECTING state in the FSM.
 
-**TaskState has 6 states:** `IDLE`, `REASONING`, `ACTING`, `SUSPENDED`, `COMPLETED`, `FAILED`.
+**AgentState has 3 states: IDLE, BUSY, WAITING**
 
 The Reason → Act cycle can loop: after acting (tool calls), the FSM transitions back to REASONING for the next iteration, enabling multi-turn tool use without a dedicated reflection state.
 
@@ -167,7 +166,7 @@ class CognitiveLoop {
 // ✅ New approach: event-driven, Agent is a processor
 class Agent {
     async _onTaskEvent(event: Event) {
-        const task = this.registry.get(event.taskId)
+        const task = this.registry.get(event.agentId)
         const newState = task.transition(event)       // Pure state transition
         this._dispatch(task, newState)                // Non-blocking, spawns next stage
         // Returns immediately, processes next event
@@ -183,10 +182,10 @@ Each subsystem's detailed design is split into its own document:
 |----------|---------|
 | [main-agent.md](./main-agent.md) | Main Agent: global LLM persona, conversation management, multi-channel adapters, Session persistence |
 | [events.md](./events.md) | Event system: Event, EventType, EventBus, priority queue |
-| [task-fsm.md](./task-fsm.md) | Task state machine: TaskState (6 states), TaskFSM, TaskContext, transition table |
-| [agent.md](./agent.md) | Agent core: event processing, cognitive stage dispatch, concurrency control (semaphore), lifecycle |
-| [cognitive.md](./cognitive.md) | Cognitive pipeline: Reason → Act (2-stage), PostTaskReflector (async post-completion), processor interfaces |
-| [task-persistence.md](./task-persistence.md) | Task persistence: incremental JSONL event logs, replay, index |
-| [memory-system.md](./memory-system.md) | Long-term memory: facts + episodes, Markdown file storage |
-| [tools.md](./tools.md) | Tool system: registration, execution, timeout, LLM function calling |
-| [project-structure.md](./project-structure.md) | Code directory structure and module dependency graph |
+| [task-fsm.md](./task-fsm.md) | Task state machine: AgentState (3 states), AgentStateManager, ExecutionState |
+| [agent.md](./agent.md) | Agent core: event processing, cognitive stage dispatch, concurrency control, lifecycle |
+| [cognitive.md](./cognitive.md) | Cognitive pipeline: Reason → Act (2-stage), PostTaskReflector (async memory learning) |
+| [task-persistence.md](../features/task-persistence.md) | Task persistence: incremental JSONL event logs, replay, index |
+| [memory-system.md](../features/memory-system.md) | Long-term memory: facts + episodes, Markdown file storage |
+| [tools.md](../features/tools.md) | Tool system: registration, execution, timeout, LLM function calling |
+| [project-structure.md](../project-structure.md) | Code directory structure and module dependency graph |

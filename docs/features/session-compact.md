@@ -137,7 +137,7 @@ The `previousSession` field references the archived file. Main Agent can read it
 ### File Layout
 
 ```
-data/agents/main/session/
+~/.pegasus/agents/main/session/
 ├── current.jsonl              ← active session (starts with summary)
 ├── 20260225T143000.jsonl      ← most recent archive (readable via tool)
 ├── 20260224T180000.jsonl      ← older archive (kept, not actively referenced)

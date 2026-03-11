@@ -1,6 +1,6 @@
 # Event System
 
-> Source code: `src/pegasus/events/`
+> Source code: `src/agents/events/`
 
 ## Core Idea
 
@@ -16,7 +16,7 @@ Event
 ├── type: EventType             # event type
 ├── timestamp: number           # Unix ms timestamp
 ├── source: string              # origin ("user", "cognitive.reason", "system"...)
-├── taskId: string | null       # associated task ID (null = unassigned)
+├── agentId: string | null      # associated agent ID (null = unassigned)
 ├── payload: Record<string, unknown>  # data carried by the event
 ├── priority: number | null     # custom priority (null → use EventType numeric value)
 └── parentEventId: string | null # causality chain: derived from which event
@@ -28,7 +28,7 @@ Event
 
 **Priority**: `effectivePriority` determines the event's order in the queue. By default it uses the EventType numeric value (lower = higher priority), but can be overridden via the `priority` field.
 
-**Derivation**: `deriveEvent(parent, type, overrides)` creates a new event that inherits `taskId`, `source`, and the causality chain from the parent.
+**Derivation**: `deriveEvent(parent, type, overrides)` creates a new event that inherits `agentId`, `source`, and the causality chain from the parent.
 
 ## EventType
 
@@ -62,10 +62,17 @@ EventType
 │   ├── REFLECTION_COMPLETE  = 345      # async post-task reflection done
 │   └── NEED_MORE_INFO       = 350      # needs more information
 │
-└── Tool / capability events (400-499)
-    ├── TOOL_CALL_REQUESTED  = 400      # tool call requested
-    ├── TOOL_CALL_COMPLETED  = 410      # tool call completed
-    └── TOOL_CALL_FAILED     = 420      # tool call failed
+├── Tool / capability events (400-499)
+│   ├── TOOL_CALL_REQUESTED  = 400      # tool call requested
+│   ├── TOOL_CALL_COMPLETED  = 410      # tool call completed
+│   ├── TOOL_CALL_FAILED     = 420      # tool call failed
+│   └── BROWSER_PAGE_CLOSED  = 430      # browser page closed
+│
+└── Auth events (500-549)
+    ├── AUTH_TOKEN_REFRESHED = 500      # auth token refreshed
+    ├── AUTH_TOKEN_EXPIRING  = 510      # auth token expiring soon
+    ├── AUTH_TOKEN_EXPIRED   = 520      # auth token expired
+    └── AUTH_REFRESH_FAILED  = 530      # auth refresh failed
 ```
 
 **Significance of segments**: lower numeric values mean higher priority. System events (0-99) always take precedence over user messages (100-199), and user messages take precedence over internal state changes (200+). This guarantees that a system shutdown signal will never be queued behind a flood of task events.
@@ -103,20 +110,20 @@ class EventBus {
 User inputs "Search for AI Agent papers"
 
   ① MESSAGE_RECEIVED {text: "Search for...", source: "user"}
-     ↓ Agent._onExternalInput
-  ② TASK_CREATED {taskId: "abc123"}
-     ↓ Agent._onTaskEvent → TaskFSM: IDLE → REASONING
-  ③ REASON_DONE {taskId: "abc123", payload: {approach: "tool_use", steps: [...]}}
-     ↓ Agent._onTaskEvent → TaskFSM: REASONING → ACTING
-  ④ TOOL_CALL_COMPLETED {taskId: "abc123", payload: {tool: "search", result: ...}}
-     ↓ Agent._onTaskEvent → TaskFSM: ACTING → REASONING (tool_call steps → back to reason)
-  ⑤ REASON_DONE {taskId: "abc123", payload: {approach: "direct", response: "..."}}
-     ↓ Agent._onTaskEvent → TaskFSM: REASONING → ACTING
-  ⑥ STEP_COMPLETED {taskId: "abc123"}
-     ↓ Agent._onTaskEvent → TaskFSM: ACTING → COMPLETED (respond steps → done)
-  ⑦ TASK_COMPLETED {taskId: "abc123", payload: {result: ...}}
+     ↓ Agent event handler
+  ② TASK_CREATED {agentId: "abc123"}
+     ↓ Agent processes event
+  ③ REASON_DONE {agentId: "abc123", payload: {approach: "tool_use", steps: [...]}}
+     ↓ Agent processes event
+  ④ TOOL_CALL_COMPLETED {agentId: "abc123", payload: {tool: "search", result: ...}}
+     ↓ Agent processes event
+  ⑤ REASON_DONE {agentId: "abc123", payload: {approach: "direct", response: "..."}}
+     ↓ Agent processes event
+  ⑥ STEP_COMPLETED {agentId: "abc123"}
+     ↓ Agent processes event
+  ⑦ TASK_COMPLETED {agentId: "abc123", payload: {result: ...}}
      ... async: PostTaskReflector runs in background ...
-  ⑧ REFLECTION_COMPLETE {taskId: "abc123", payload: {factsWritten: 2, hasEpisode: true}}
+  ⑧ REFLECTION_COMPLETE {agentId: "abc123", payload: {factsWritten: 2, hasEpisode: true}}
 ```
 
 Each event is independent and immutable. Each event points to the previous one via `parentEventId`, forming a complete causality chain.

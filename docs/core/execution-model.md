@@ -1,7 +1,7 @@
 # Execution Model: MainAgent, SubAgent, AITask, Project
 
 > **Status**: Implemented
-> **Supersedes**: Parts of [SubAgent Types](./subagent-types.md) (renames "subagent" → "AITask") and extends [Project System](./project-system.md)
+> **Supersedes**: Parts of [SubAgent Types](../features/subagent-types.md) (renames "subagent" → "AITask") and extends [Project System](../features/project-system.md)
 
 ## Problem Statement
 
@@ -67,7 +67,7 @@ MainAgent (conversation brain, always running)
 | **Persistent memory** | Yes (global) | No | No | Yes (project-scoped) |
 | **Session persistence** | Yes | Yes (for debugging + resume) | No (task logs only) | Yes |
 | **User communication** | `reply()` tool | Via `notify` → MainAgent | Via `notify` → caller | Via `notify` → MainAgent |
-| **Data directory** | `data/agents/main/` | `data/agents/subagents/<id>/` | `data/agents/main/tasks/` | `data/agents/projects/<name>/` |
+| **Data directory** | `~/.pegasus/agents/main/` | `~/.pegasus/agents/subagents/<id>/` | `~/.pegasus/agents/main/tasks/` | `~/.pegasus/agents/projects/<name>/` |
 
 ### When to Use What
 
@@ -82,171 +82,11 @@ These guidelines are injected into MainAgent's system prompt to help the LLM cho
 
 **Decision rule**: If the task can be described in one sentence and done in one pass, use AITask. If it needs breakdown, coordination, or multi-step execution, use SubAgent. If it spans days/weeks and needs its own context, use Project.
 
-### System Prompt: Delegation Guide
+### System Prompt
 
-The following sections replace the current `buildToolsSection()` and `buildDelegationSection()` in `src/prompts/main-agent.ts`. They are injected into MainAgent's system prompt to guide the LLM on how to delegate work.
+The delegation guide and tool descriptions are part of MainAgent's system prompt. The prompt is source code — see `src/agents/prompts/main-agent.ts` for the actual content.
 
-#### Tools Section (replaces current)
-
-```
-## Tools
-
-### Communication
-- reply(text, channelId, replyTo?): The ONLY way the user hears you.
-  Always pass back channel metadata.
-
-### Delegation
-- spawn_task(type, description, input): Run a single atomic task in the background.
-  Types: general (full access), explore (read-only), plan (analysis).
-  Use for simple, self-contained work that needs no coordination.
-- spawn_subagent(description, input): Launch an autonomous SubAgent that can
-  break down complex work, spawn its own tasks, and coordinate results.
-  Use when the work requires multiple steps, parallel research, or synthesis.
-- resume_subagent(subagent_id, input): Resume a completed SubAgent with new input.
-  Its full conversation history is restored.
-
-### Projects
-- create_project(name, goal, background?, constraints?, model?, workdir?):
-  Create a persistent project workspace for long-running efforts (days/weeks).
-- disable_project(name) / enable_project(name): Disable/re-enable a project.
-- archive_project(name): Archive a project permanently.
-
-### Skills
-- use_skill(skill, args?): Invoke a registered skill by name.
-
-### Memory (long-term knowledge)
-- memory_list(): List all memory files with summaries. Start here.
-- memory_read(path): Read a specific memory file.
-- memory_write(path, content): Create or overwrite a memory file.
-- memory_patch(path, old_str, new_str): Update a section in a memory file.
-- memory_append(path, entry, summary?): Add an entry to a memory file.
-
-### Context
-- current_time(timezone?): Get current date and time.
-- task_list(date?): List historical tasks for a date.
-- task_replay(taskId): Replay a past task's full conversation.
-- session_archive_read(file): Read the previous archived session.
-- resume_task(taskId, input): Resume a suspended task with additional information.
-```
-
-#### Delegation Guide (replaces current "When to Reply vs Spawn")
-
-```
-## How to Delegate Work
-
-You have three delegation mechanisms, each for a different scale of work:
-
-### reply() — Handle It Yourself
-When you can answer directly from your own knowledge, session context, or a
-quick tool call (time, memory lookup):
-- Simple conversation, greetings, follow-ups
-- Questions you already know the answer to
-- Quick memory reads
-
-### spawn_task() — Single Atomic Task (AITask)
-When the work is a single, self-contained step that needs tools you don't have
-(file I/O, web search, shell commands):
-- "Search the web for X" → spawn_task(type="explore", ...)
-- "Read this file and summarize" → spawn_task(type="explore", ...)
-- "Write this function" → spawn_task(type="general", ...)
-- "Analyze this code and suggest improvements" → spawn_task(type="plan", ...)
-
-The task runs in your own Agent instance. You receive the result automatically
-when it completes. Do NOT poll with task_replay — just wait.
-
-AITask types:
-- explore: Read-only research. Cannot modify files. Use for search, analysis, reading.
-- plan: Read + write to memory. Use for producing structured plans.
-- general: Full capabilities. Use for file I/O, code changes, multi-step execution.
-
-### spawn_subagent() — Complex Multi-Step Work (SubAgent)
-When the work requires breaking down into sub-tasks, parallel execution,
-or coordinating multiple steps:
-- "Research the top 5 frameworks and write a comparison" → spawn_subagent(...)
-  (SubAgent will: spawn 5 explore tasks in parallel → synthesize → write report)
-- "Refactor this module: analyze dependencies, update imports, run tests" → spawn_subagent(...)
-  (SubAgent will: analyze → plan → execute changes → verify)
-- "Investigate this bug across multiple files and fix it" → spawn_subagent(...)
-  (SubAgent will: explore → identify root cause → implement fix → test)
-
-SubAgent is an autonomous orchestrator — it has its own Agent instance, can
-spawn AITasks, and decides independently how to break down and coordinate work.
-You receive progress updates via notify and the final result on completion.
-
-Key differences from spawn_task:
-- SubAgent CAN spawn its own tasks and coordinate them
-- SubAgent runs in an isolated Worker thread (crash-safe)
-- SubAgent has its own session (you don't see internal reasoning)
-- Use spawn_task for "do this one thing"; use spawn_subagent for "figure out
-  how to do this and execute"
-
-### create_project() — Long-Lived Effort (Project)
-When the work spans days or weeks and needs persistent context:
-- "Manage the frontend migration over the next two weeks" → create_project(...)
-- "Monitor and manage our social media presence" → create_project(...)
-- "Oversee the API redesign" → create_project(...)
-
-Projects have persistent memory, their own session history, and survive
-restarts. They accumulate knowledge over time. Communicate with active
-projects via reply(channelType="project", channelId="<name>").
-
-### Decision Flowchart
-
-Can you answer from context/memory?
-  → YES: reply() directly
-  → NO: Do you need external tools?
-      → YES: Is it a single self-contained step?
-          → YES: spawn_task()
-          → NO: Will the work take days/weeks?
-              → YES: create_project()
-              → NO: spawn_subagent()
-
-### After Delegation
-- spawn_task: Result arrives in your session automatically. Think about it,
-  then ALWAYS call reply() to inform the user.
-- spawn_subagent: You may receive progress notifications. The final result
-  arrives when the SubAgent completes. Then call reply().
-- create_project: The project runs independently. It will notify you of
-  milestones. You can check on it or send instructions via
-  reply(channelType="project").
-```
-
-#### SubAgent System Prompt
-
-The SubAgent itself receives a dedicated system prompt section (injected via `buildSubagentPrompt`):
-
-```
-## Your Role
-
-You are a SubAgent — an autonomous orchestrator working on behalf of the main agent.
-You receive a task description and must independently break it down, execute sub-tasks,
-and return a consolidated result.
-
-## How You Work
-
-- You have your own Agent instance with a full set of tools.
-- You can spawn AITasks via spawn_task(type, description, input) to delegate atomic work.
-- AITask types: explore (read-only research), plan (analysis + memory write), general (full capabilities).
-- You coordinate AITask results and synthesize them into a final answer.
-- You can also execute work directly using your own tools — not everything needs a sub-task.
-
-## Communication
-
-- Use notify(message) to send progress updates to the main agent.
-  Do this for major milestones, not every small step.
-- Your final result is returned automatically when your task completes.
-- You do NOT have reply() — you cannot talk to the user directly.
-
-## Rules
-
-1. FOCUS: Stay strictly on the task you were given.
-2. DECOMPOSE: Break complex work into parallel sub-tasks when possible.
-3. COORDINATE: Wait for sub-task results before synthesizing.
-4. PROGRESS: Use notify() for major milestones on long-running work.
-5. CONCISE RESULT: Your final result should be a clear, actionable summary.
-6. EFFICIENT: Don't over-decompose. If you can do something directly, do it.
-7. ERROR HANDLING: If a sub-task fails, decide whether to retry, skip, or fail the whole task.
-```
+SubAgents receive their own system prompt via SUBAGENT.md definitions (see [SubAgent Types](../features/subagent-types.md)).
 
 ## SubAgent Architecture
 
@@ -316,7 +156,7 @@ self.onmessage = async (event) => {
   config: {
     input: string;           // the task description from MainAgent
     systemPrompt?: string;   // optional custom system prompt
-    subagentDir: string;      // e.g. "data/agents/subagents/abc123"
+    subagentDir: string;      // e.g. "~/.pegasus/agents/subagents/abc123"
     memorySnapshot?: string; // MainAgent memory index (read-only, injected once)
     contextWindow?: number;  // optional override
   }
@@ -327,7 +167,7 @@ self.onmessage = async (event) => {
   type: "init",
   mode: "project",
   config: {
-    projectPath: string;     // e.g. "data/agents/projects/frontend-redesign"
+    projectPath: string;     // e.g. "~/.pegasus/agents/projects/frontend-redesign"
     contextWindow?: number;
   }
 }
@@ -377,7 +217,7 @@ SubAgent persists its session to disk for two purposes:
 2. **Resume**: MainAgent can resume a completed SubAgent with new input
 
 ```
-data/agents/subagents/
+~/.pegasus/agents/subagents/
 ├── abc123/
 │   ├── session/
 │   │   └── current.jsonl    ← SubAgent conversation history
@@ -480,7 +320,7 @@ interface WorkerEntry {
 ### Manager Responsibilities
 
 **ProjectManager** (unchanged from current design):
-- Scan `data/agents/projects/*/PROJECT.md` on startup
+- Scan `~/.pegasus/agents/projects/*/PROJECT.md` on startup
 - CRUD operations (create, disable, enable, archive)
 - Status transitions and PROJECT.md updates
 - Calls `WorkerAdapter.startWorker()` / `stopWorker()` for lifecycle
@@ -489,7 +329,7 @@ interface WorkerEntry {
 - Spawn SubAgent Workers on demand (from `spawn_subagent` tool)
 - Track active SubAgents
 - Auto-destroy Worker when SubAgent completes
-- Manage session persistence path (`data/agents/subagents/<id>/`)
+- Manage session persistence path (`~/.pegasus/agents/subagents/<id>/`)
 - Handle `resume_subagent` (load session, spawn new Worker)
 
 ## Communication Model
@@ -701,8 +541,8 @@ Only starts after Phase 1 is merged to main.
 |-----------|-------------|
 | `src/workers/worker-adapter.ts` | Unified Worker transport (extracted from ProjectAdapter) |
 | `src/workers/agent-worker.ts` | Unified Worker bootstrap (replaces project-worker.ts) |
-| `src/subagent/manager.ts` | SubAgentManager — spawn, track, destroy Workers |
-| `src/subagent/types.ts` | SubAgent type definitions |
+| `src/agents/subagents/manager.ts` | SubAgentManager — spawn, track, destroy Workers |
+| `src/agents/subagents/types.ts` | SubAgent type definitions |
 | `src/tools/builtins/spawn-subagent-tool.ts` | New `spawn_subagent` tool for MainAgent |
 | `src/tools/builtins/resume-subagent-tool.ts` | New `resume_subagent` tool for MainAgent |
 
@@ -720,8 +560,8 @@ Only starts after Phase 1 is merged to main.
 
 ```
 src/workers/          ← unified Worker management
-src/subagent/         ← SubAgent lifecycle (NOT src/subagents/ — that's gone in Phase 1)
-data/agents/subagents/       ← runtime SubAgent sessions (created at runtime)
+src/agents/subagents/         ← SubAgent lifecycle (NOT src/subagents/ — that's gone in Phase 1)
+~/.pegasus/agents/subagents/       ← runtime SubAgent sessions (created at runtime)
 ```
 
 **Documentation updates**:
@@ -748,7 +588,7 @@ data/agents/subagents/       ← runtime SubAgent sessions (created at runtime)
 |----------|-------------|
 | [Architecture](./architecture.md) | Updated to show four execution tiers |
 | [Main Agent](./main-agent.md) | Updated tool set (spawn_task + spawn_subagent) |
-| [SubAgent Types](./subagent-types.md) | Renamed to "AITask Types"; content mostly unchanged |
-| [Project System](./project-system.md) | Worker threading model shared; ProjectAdapter → WorkerAdapter |
+| [SubAgent Types](../features/subagent-types.md) | Renamed to "AITask Types"; content mostly unchanged |
+| [Project System](../features/project-system.md) | Worker threading model shared; ProjectAdapter → WorkerAdapter |
 | [Agent Core](./agent.md) | Unchanged — Agent class used by MainAgent, SubAgent, and Project |
 | [Cognitive Processors](./cognitive.md) | Unchanged — same pipeline for all tiers |

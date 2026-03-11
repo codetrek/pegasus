@@ -6,7 +6,7 @@
 
 Not every background task needs the same tools or instructions. A web search should not have write_file. A planning task should not be calling web_search. AITask Types let the MainAgent spawn **specialized tasks** with per-type tool sets and system prompts.
 
-AITask types are defined as **files** (SUBAGENT.md), not hardcoded. Users can add custom task types by creating files in `data/subagents/`.
+AITask types are defined as **files** (SUBAGENT.md), not hardcoded. Users can add custom task types by creating files in `~/.pegasus/subagents/`.
 
 ## File Format
 
@@ -17,7 +17,7 @@ subagents/
   general/SUBAGENT.md    # builtin, git tracked
   explore/SUBAGENT.md
   plan/SUBAGENT.md
-data/subagents/           # user-created, runtime (overrides builtin)
+~/.pegasus/subagents/           # user-created, runtime (overrides builtin)
   deepresearch/SUBAGENT.md
 ```
 
@@ -94,73 +94,25 @@ Today, every spawned task gets the full `allTaskTools` array (26+ tools) and a g
 
 ### System Prompts
 
-Each task type gets a specialized system prompt section. The `buildSystemPrompt` function takes a `taskType` parameter (orthogonal to cognitive stage) to select the appropriate instructions.
-
-**general** (existing prompt — unchanged):
-```
-## Your Role
-You are a background task worker. Your results will be returned to a main agent...
-
-## Rules
-1. FOCUS: Stay strictly on the task...
-2. CONCISE RESULT: Synthesize... keep under 2000 chars.
-3. EFFICIENT: Use the minimum number of tool calls...
-4. If a tool call fails, note briefly and move on.
-5. NOTIFY: Use notify() for major milestones...
-```
-
-**explore**:
-```
-## Your Role
-You are a research assistant. Your job is to gather information, search, read, and analyze.
-Your results will be returned to a main agent. You do NOT interact with the user directly.
-
-## Rules
-1. READ ONLY: You must NOT create, modify, or delete any files. You are here to observe and report.
-2. FOCUS: Stay strictly on the research question. Do not explore tangential topics.
-3. CONCISE RESULT: Synthesize findings into a clear, concise summary (under 2000 chars).
-4. EFFICIENT: Use the minimum number of tool calls. Don't over-research.
-5. If a tool call fails, note briefly and move on.
-6. NOTIFY: Use notify() for progress updates on long searches.
-```
-
-**plan**:
-```
-## Your Role
-You are a planning assistant. Your job is to analyze problems and produce structured plans.
-Your results will be returned to a main agent. You do NOT interact with the user directly.
-
-## Rules
-1. ANALYSIS FIRST: Read and understand the relevant code/data before proposing anything.
-2. STRUCTURED OUTPUT: Present your plan with clear steps, each with specific actions and rationale.
-3. READ ONLY (mostly): You may read files and search the web, but do NOT modify code files.
-   You may write to memory (memory_write/memory_append) to persist your plan.
-4. CONCISE RESULT: Keep your final plan under 2000 characters.
-5. EFFICIENT: Use the minimum number of tool calls needed.
-6. If a tool call fails, note briefly and move on.
-7. NOTIFY: Use notify() for progress updates.
-```
+Each subagent type gets a specialized system prompt from its SUBAGENT.md body. The prompt is source code — see `subagents/*/SUBAGENT.md` for the actual content of each type (general, explore, plan).
 
 ## Design Decisions
 
-### 1. `spawn_task` gets a `type` parameter
+### 1. `spawn_subagent` gets a `type` parameter
 
-MainAgent's LLM uses `spawn_task(type, description, input)` to specify the task type. The type defaults to `"general"` for backward compatibility.
+MainAgent's LLM uses `spawn_subagent(type, description, input)` to specify the subagent type. The type defaults to `"general"` for backward compatibility.
 
 The MainAgent system prompt explains when to use each type:
 ```
-- spawn_task(type: "explore"): research, web search, code reading, information gathering (read-only)
-- spawn_task(type: "plan"): analyze a problem, produce a structured plan (read + write plans)
-- spawn_task(type: "general"): full capabilities — file I/O, code changes, multi-step work
+- spawn_subagent(type: "explore"): research, web search, code reading, information gathering (read-only)
+- spawn_subagent(type: "plan"): analyze a problem, produce a structured plan (read + write plans)
+- spawn_subagent(type: "general"): full capabilities — file I/O, code changes, multi-step work
 ```
 
-### 2. Type stored in TaskContext, flows through events
+### 2. Type flows through agent creation
 
-`TaskContext` gets a `taskType` field. The type flows:
-- `spawn_task(type)` → `Agent.submit(text, source, type)` → `MESSAGE_RECEIVED` event payload → `TaskFSM.fromEvent()` → `context.taskType`
-- Agent reads `context.taskType` to select tools and system prompt at each cognitive iteration
-
-On resume, `taskType` is preserved (not cleared by `prepareContextForResume`).
+The subagent type determines which tools and system prompt the agent receives.
+Agent reads the type to select tools and system prompt at each cognitive iteration.
 
 ### 3. Tool restriction is two-layer defense
 
@@ -168,13 +120,9 @@ On resume, `taskType` is preserved (not cleared by `prepareContextForResume`).
 
 **Execution layer** (safety net): Before executing a tool call in `_runAct`, Agent validates the tool name against the task's type-specific allowed tool list. A disallowed tool call returns an error result (not an exception) — this guards against prompt injection or LLM hallucination.
 
-### 4. `buildSystemPrompt` parameter separation
+### 4. Prompt and tool registry selection
 
-The current `stage` parameter in `buildSystemPrompt(persona, stage)` refers to the cognitive stage (e.g., `"reason"`). Task type is an orthogonal dimension. The function signature changes to `buildSystemPrompt(persona, { taskType? })` — the existing `"reason"` stage behavior is replaced by `taskType: "general"` (same prompt content, better naming).
-
-### 5. Per-type tool registries in Agent
-
-Agent creates a `Map<TaskType, ToolRegistry>` at construction time. Each key maps to a ToolRegistry populated with the appropriate tool subset. When `_runReason` runs, it selects the registry matching `task.context.taskType` and passes it to `Thinker.run()`.
+The subagent type determines both the system prompt (from SUBAGENT.md body) and the tool registry. Agent selects the appropriate tool set at creation time based on the type.
 
 Thinker's `run()` method accepts an optional `toolRegistry` parameter that overrides the instance default. This keeps Thinker stateless — the same instance serves all task types.
 
@@ -191,22 +139,16 @@ Thinker's `run()` method accepts an optional `toolRegistry` parameter that overr
 ```
 User: "search for the latest AI papers"
   ↓
-MainAgent LLM decides: spawn_task(type="explore", input="...")
+MainAgent LLM decides: spawn_subagent(type="explore", input="...")
   ↓
-MainAgent extracts type, calls agent.submit(input, source, type="explore")
+MainAgent creates a new Agent with type="explore"
   ↓
-Agent emits MESSAGE_RECEIVED with payload.taskType = "explore"
-  ↓
-TaskFSM.fromEvent() → context.taskType = "explore"
-  ↓
-Agent._runReason(task)
-  → selects exploreToolRegistry from per-type map
-  → builds system prompt with taskType="explore"
+Agent configured with:
+  → explore-specific ToolRegistry (read-only tools)
+  → explore-specific system prompt from SUBAGENT.md
   → LLM sees explore-specific tools + explore-specific prompt
   ↓
-Task executes with restricted tools and specialized instructions
-  ↓
-Agent._runAct(task)
+Agent executes with restricted tools and specialized instructions
   → validates tool calls against explore allowed list
   → executes approved tools, rejects disallowed ones
 ```

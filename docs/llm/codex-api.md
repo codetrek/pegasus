@@ -84,8 +84,8 @@ llm:
   codex:
     enabled: true     # default: false, or CODEX_ENABLED=true
 
-  roles:
-    subAgent: codex/gpt-5.3-codex   # use Codex for tasks
+  tiers:
+    fast: codex/gpt-5.3-codex   # use Codex for fast tasks
 ```
 
 No API key or OAuth config needed — everything is built-in. When `llm.codex.enabled: true`, Pegasus runs OAuth login at startup (opens browser for ChatGPT authorization). Tokens are stored in `~/.pegasus/auth/codex.json` and auto-refreshed.
