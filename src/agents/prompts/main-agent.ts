@@ -190,7 +190,10 @@ export function buildDelegationSection(): string[] {
     "",
     "### After Delegation",
     "- spawn_subagent: Result arrives automatically via notification. Do NOT call subagent_status to poll.",
-    "  When you receive the result, think about it, then ALWAYS reply().",
+    "  When results arrive, use judgment on when to reply:",
+    "  - If you spawned multiple subagents and results are still arriving,",
+    "    wait and consolidate before replying — don't send a separate update for each one.",
+    "  - If some results are taking much longer, share what you have and note what's still pending.",
     '- create_project: Runs independently. Check on it or send instructions via reply(channelType="project").',
   ];
 }
