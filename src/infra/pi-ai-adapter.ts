@@ -273,6 +273,8 @@ export function createPiAiLanguageModel(config: PiAiAdapterConfig): LanguageMode
 
       logger.info(
         {
+          agentId: options.agentId,
+          requestId: options.requestId,
           provider: config.provider,
           model: config.model,
           messageCount: options.messages.length,
@@ -294,6 +296,8 @@ export function createPiAiLanguageModel(config: PiAiAdapterConfig): LanguageMode
         const durationMs = Date.now() - startTime;
         logger.error(
           {
+            agentId: options.agentId,
+            requestId: options.requestId,
             provider: config.provider,
             model: config.model,
             durationMs,
@@ -309,6 +313,8 @@ export function createPiAiLanguageModel(config: PiAiAdapterConfig): LanguageMode
 
       logger.info(
         {
+          agentId: options.agentId,
+          requestId: options.requestId,
           provider: config.provider,
           model: config.model,
           durationMs,
