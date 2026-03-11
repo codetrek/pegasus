@@ -3,9 +3,10 @@
  *
  * Loading flow:
  * 1. Hardcoded defaults (DEFAULT_CONFIG)
- * 2. config.yml deep-merge override (with ${ENV_VAR} interpolation)
- * 3. config.local.yml deep-merge override (with ${ENV_VAR} interpolation)
- * 4. Zod schema validation
+ * 2. config.yml deep-merge override (project base, with ${ENV_VAR} interpolation)
+ * 3. ~/.pegasus/config.yml deep-merge override (user-level, shared across projects)
+ * 4. config.local.yml deep-merge override (project-local, gitignored)
+ * 5. Zod schema validation
  *
  * No hardcoded env var names — env var names are user-defined in config YAML
  * via ${VAR:-default} interpolation syntax. The only exception is PEGASUS_CONFIG
@@ -226,13 +227,25 @@ function findAndMergeConfigs(): any {
     localConfig = loadConfigFile(path);
   }
 
-  // Merge configs: local overrides base
-  if (baseConfig && localConfig) {
-    logger.info("merging_base_and_local_configs");
-    return deepMerge(baseConfig, localConfig);
+  // Load user-level config (~/.pegasus/config.yml) — shared across projects
+  const home = process.env.HOME || os.homedir();
+  const userConfigPath = `${home}/.pegasus/config.yml`;
+  let userConfig: any = null;
+  if (existsSync(userConfigPath)) {
+    logger.info({ path: userConfigPath }, "loading_user_config");
+    userConfig = loadConfigFile(userConfigPath);
   }
 
-  return localConfig || baseConfig || null;
+  // Merge: base → user → local (each layer overrides the previous)
+  let merged = baseConfig;
+  if (userConfig) {
+    merged = merged ? deepMerge(merged, userConfig) : userConfig;
+  }
+  if (localConfig) {
+    merged = merged ? deepMerge(merged, localConfig) : localConfig;
+  }
+
+  return merged || null;
 }
 
 /**
@@ -263,7 +276,7 @@ function configToSettings(config: any): Settings {
  *
  * Loading flow:
  * 1. Start with hardcoded defaults (DEFAULT_CONFIG)
- * 2. Deep-merge config files (with env var interpolation)
+ * 2. Deep-merge config files (project → user → local, with env var interpolation)
  * 3. Map to Settings shape and validate via Zod
  */
 export function loadSettings(): Settings {
