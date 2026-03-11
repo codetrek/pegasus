@@ -340,48 +340,13 @@ Token count is tracked in two parts:
 
 When estimated total exceeds threshold, compact before the next LLM call.
 
-## System Prompt Design
+## System Prompt
 
 The system prompt is built **once** at startup and cached for all LLM calls. This enables LLM prefix caching — the provider can reuse the cached token prefix across calls, saving cost and latency.
 
-### Prompt Modes
+Two modes: **main** (full MainAgent prompt) and **task** (minimal SubAgent prompt). The prompt is source code — see `src/agents/prompts/` for the actual content.
 
-The prompt builder (`src/agents/prompts/main-agent.ts`) supports two modes via `buildSystemPrompt(options)`:
-
-**Main Agent (mode: "main")** — full prompt with all sections:
-
-| Section | Purpose |
-|---------|---------|
-| Identity | Persona name, role, personality, style, values, background |
-| Safety | Anti-power-seeking guardrails for autonomous agent |
-| How You Think | Inner monologue concept, reply() as only communication |
-| Tools | Per-tool descriptions for all 15 MainAgent tools |
-| Thinking Style | When to narrate vs silently call tools |
-| When to Reply vs Spawn | Decision guidelines for direct reply vs task |
-| SubAgent Types | Injected from SubAgentTypeRegistry |
-| Channels and reply() | Channel metadata format + per-channel style guidelines |
-| Session History | Compact info + archive access |
-| Available Skills | Injected from SkillRegistry (2% of context window budget) |
-
-**Task Agent (mode: "task")** — minimal prompt:
-
-| Section | Purpose |
-|---------|---------|
-| Identity | Same persona identity |
-| Safety | Same safety guardrails |
-| SUBAGENT.md body | Type-specific instructions (explore/plan/general) |
-
-Task Agents skip How You Think, Tools, Thinking Style, Reply vs Spawn, Channels, Session History, and Skills — saving ~100 lines of irrelevant tokens per LLM call.
-
-> **Source of truth:** The actual prompt text lives in `src/agents/prompts/` — see `main-agent.ts` (MainAgent sections), `shared.ts` (identity/runtime/safety), `subagent.ts` (SubAgent prompt), and `internal.ts` (reflection/compact/extract).
-
-### Input Sanitization
-
-External channel messages are sanitized via `sanitizeForPrompt()` (`src/infra/sanitize.ts`) before entering the session. Strips Unicode control/format/separator characters while preserving normal whitespace. Defends against prompt injection via crafted Unicode sequences.
-
-### Dynamic Part (injected into messages)
-
-Memory index is injected as a user message on the first LLM call (iteration 1 only), not in the system prompt. This keeps the system prompt stable for prefix caching.
+The prompt is only rebuilt when skills change or the session restarts.
 
 Multiple channels connect to the same Main Agent through a unified adapter interface:
 

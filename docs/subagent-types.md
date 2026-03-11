@@ -94,52 +94,7 @@ Today, every spawned task gets the full `allTaskTools` array (26+ tools) and a g
 
 ### System Prompts
 
-Each task type gets a specialized system prompt section. The `buildSystemPrompt` function takes a `taskType` parameter (orthogonal to cognitive stage) to select the appropriate instructions.
-
-**general** (existing prompt — unchanged):
-```
-## Your Role
-You are a background task worker. Your results will be returned to a main agent...
-
-## Rules
-1. FOCUS: Stay strictly on the task...
-2. CONCISE RESULT: Synthesize... keep under 2000 chars.
-3. EFFICIENT: Use the minimum number of tool calls...
-4. If a tool call fails, note briefly and move on.
-5. NOTIFY: Use notify() for major milestones...
-```
-
-**explore**:
-```
-## Your Role
-You are a research assistant. Your job is to gather information, search, read, and analyze.
-Your results will be returned to a main agent. You do NOT interact with the user directly.
-
-## Rules
-1. READ ONLY: You must NOT create, modify, or delete any files. You are here to observe and report.
-2. FOCUS: Stay strictly on the research question. Do not explore tangential topics.
-3. CONCISE RESULT: Synthesize findings into a clear, concise summary (under 2000 chars).
-4. EFFICIENT: Use the minimum number of tool calls. Don't over-research.
-5. If a tool call fails, note briefly and move on.
-6. NOTIFY: Use notify() for progress updates on long searches.
-```
-
-**plan**:
-```
-## Your Role
-You are a planning assistant. Your job is to analyze problems and produce structured plans.
-Your results will be returned to a main agent. You do NOT interact with the user directly.
-
-## Rules
-1. ANALYSIS FIRST: Read and understand the relevant code/data before proposing anything.
-2. STRUCTURED OUTPUT: Present your plan with clear steps, each with specific actions and rationale.
-3. READ ONLY (mostly): You may read files and search the web, but do NOT modify code files.
-   You may write to memory (memory_write/memory_append) to persist your plan.
-4. CONCISE RESULT: Keep your final plan under 2000 characters.
-5. EFFICIENT: Use the minimum number of tool calls needed.
-6. If a tool call fails, note briefly and move on.
-7. NOTIFY: Use notify() for progress updates.
-```
+Each subagent type gets a specialized system prompt from its SUBAGENT.md body. The prompt is source code — see `subagents/*/SUBAGENT.md` for the actual content of each type (general, explore, plan).
 
 ## Design Decisions
 
@@ -165,13 +120,9 @@ Agent reads the type to select tools and system prompt at each cognitive iterati
 
 **Execution layer** (safety net): Before executing a tool call in `_runAct`, Agent validates the tool name against the task's type-specific allowed tool list. A disallowed tool call returns an error result (not an exception) — this guards against prompt injection or LLM hallucination.
 
-### 4. `buildSystemPrompt` parameter separation
+### 4. Prompt and tool registry selection
 
-The current `stage` parameter in `buildSystemPrompt(persona, stage)` refers to the cognitive stage (e.g., `"reason"`). Task type is an orthogonal dimension. The function signature changes to `buildSystemPrompt(persona, { taskType? })` — the existing `"reason"` stage behavior is replaced by `taskType: "general"` (same prompt content, better naming).
-
-### 5. Per-type tool registries in Agent
-
-Agent creates a `Map<TaskType, ToolRegistry>` at construction time. Each key maps to a ToolRegistry populated with the appropriate tool subset. When `_runReason` runs, it selects the registry matching `task.context.taskType` and passes it to `Thinker.run()`.
+The subagent type determines both the system prompt (from SUBAGENT.md body) and the tool registry. Agent selects the appropriate tool set at creation time based on the type.
 
 Thinker's `run()` method accepts an optional `toolRegistry` parameter that overrides the instance default. This keeps Thinker stateless — the same instance serves all task types.
 
