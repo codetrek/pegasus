@@ -196,6 +196,14 @@ export interface AgentResult {
   error?: string;
   /** Number of LLM calls made. */
   llmCallCount: number;
+  /** Total prompt tokens consumed across all LLM calls. */
+  totalPromptTokens: number;
+  /** Total cache-read tokens across all LLM calls. */
+  totalCacheReadTokens: number;
+  /** Total output (completion) tokens across all LLM calls. */
+  totalOutputTokens: number;
+  /** Per-tool-name call stats: { ok, fail } counts. */
+  toolStats: Map<string, { ok: number; fail: number }>;
   /** Image refs collected from tool results during execution. */
   imageRefs?: Array<{ id: string; mimeType: string }>;
 }
@@ -282,6 +290,14 @@ export class Agent {
 
   /** Holds the last execution result for run() to resolve. */
   private _lastResult: AgentResult | null = null;
+
+  /** Accumulated token usage across all LLM calls in this Agent instance. */
+  private _totalPromptTokens = 0;
+  private _totalCacheReadTokens = 0;
+  private _totalOutputTokens = 0;
+
+  /** Per-tool-name call stats: { ok, fail } counts. */
+  private _toolStats = new Map<string, { ok: number; fail: number }>();
 
   /** Task IDs that should persist messages incrementally (run with persistSession=true). */
   private _persistingTasks = new Set<string>();
@@ -376,6 +392,21 @@ export class Agent {
     this._llmUsageCallback = cb;
   }
 
+  /** Get accumulated token/tool stats. Used by parent to retrieve partial stats on error. */
+  getAccumulatedStats(): {
+    totalPromptTokens: number;
+    totalCacheReadTokens: number;
+    totalOutputTokens: number;
+    toolStats: Map<string, { ok: number; fail: number }>;
+  } {
+    return {
+      totalPromptTokens: this._totalPromptTokens,
+      totalCacheReadTokens: this._totalCacheReadTokens,
+      totalOutputTokens: this._totalOutputTokens,
+      toolStats: new Map(this._toolStats),
+    };
+  }
+
   /** Send an inbound message to this conversation agent. */
   send(message: InboundMessage): void {
     this.queue.push({ kind: "message", message });
@@ -422,6 +453,10 @@ export class Agent {
         success: false,
         error: err instanceof Error ? err.message : String(err),
         llmCallCount: 0,
+        totalPromptTokens: this._totalPromptTokens,
+        totalCacheReadTokens: this._totalCacheReadTokens,
+        totalOutputTokens: this._totalOutputTokens,
+        toolStats: new Map(this._toolStats),
       };
     }
     return this._lastResult!;
@@ -532,8 +567,12 @@ export class Agent {
   /** Called during stop(). Subclasses can do async cleanup. */
   protected async onStop(): Promise<void> {}
 
-  /** Called after each LLM call. Subclasses track usage, trigger compaction. */
-  protected async onLLMUsage(_result: GenerateTextResult): Promise<void> {}
+  /** Accumulate token usage from each LLM call. Subclasses may override but should call super. */
+  protected async onLLMUsage(result: GenerateTextResult): Promise<void> {
+    this._totalPromptTokens += result.usage.promptTokens ?? 0;
+    this._totalCacheReadTokens += result.usage.cacheReadTokens ?? 0;
+    this._totalOutputTokens += result.usage.completionTokens ?? 0;
+  }
 
   /** Called when pending work completes. Subclasses decide what to do with results. */
   protected async onPendingWorkComplete(_result: PendingWorkResult): Promise<void> {}
@@ -775,6 +814,12 @@ export class Agent {
         ctx,
       );
       this.toolExecutor.emitCompletion(tc.name, result, ctx);
+
+      // Record per-tool-name stats
+      const entry = this._toolStats.get(tc.name) ?? { ok: 0, fail: 0 };
+      if (result.success) entry.ok++; else entry.fail++;
+      this._toolStats.set(tc.name, entry);
+
       let toolResult = formatToolResult(tc.id, tc.name, result);
 
       // Apply result formatting: timestamp prefix + truncation
@@ -791,6 +836,9 @@ export class Agent {
       collector.addResult(index, toolResult);
     })().catch((err) => {
       logger.error({ err, agentId, toolName: tc.name }, "execute_tool_async_error");
+      const entry = this._toolStats.get(tc.name) ?? { ok: 0, fail: 0 };
+      entry.fail++;
+      this._toolStats.set(tc.name, entry);
       collector.addResult(index, {
         toolCallId: tc.id,
         content: JSON.stringify({ error: err instanceof Error ? err.message : String(err) }),
@@ -836,6 +884,10 @@ export class Agent {
           : `Task ${finishReason}`
         : undefined,
       llmCallCount: state?.iteration ?? 0,
+      totalPromptTokens: this._totalPromptTokens,
+      totalCacheReadTokens: this._totalCacheReadTokens,
+      totalOutputTokens: this._totalOutputTokens,
+      toolStats: new Map(this._toolStats),
       ...(imageRefs.length > 0 ? { imageRefs } : {}),
     };
 
