@@ -1203,15 +1203,24 @@ export class Agent {
           error: event.payload["error"] as string | undefined,
         });
 
-        const resultText = event.type === EventType.TASK_COMPLETED
-          ? typeof event.payload["result"] === "string"
+        const finishReason = event.payload["finishReason"] as string | undefined;
+        const now = new Date().toISOString().replace("T", " ").slice(0, 19);
+
+        let msgContent: string;
+        if (finishReason === "max_iterations") {
+          msgContent = `[${now} | System: Subagent ${childId} paused — reached iteration limit. State preserved. Call resume_subagent("${childId}", "continue") if it needs to continue, or ignore if done.]`;
+        } else if (event.type === EventType.TASK_COMPLETED) {
+          const resultText = typeof event.payload["result"] === "string"
             ? event.payload["result"]
-            : JSON.stringify(event.payload["result"])
-          : `Error: ${event.payload["error"]}`;
+            : JSON.stringify(event.payload["result"]);
+          msgContent = `[Subagent ${childId} completed]\n${resultText}`;
+        } else {
+          msgContent = `[Subagent ${childId} failed]\nError: ${event.payload["error"]}`;
+        }
 
         const systemMsg: Message = {
           role: "user",
-          content: `[Child agent ${childId} ${event.type === EventType.TASK_COMPLETED ? "completed" : "failed"}]\n${resultText}`,
+          content: msgContent,
         };
         this.sessionMessages.push(systemMsg);
         await this.sessionStore.append(systemMsg);
@@ -1405,7 +1414,7 @@ export class Agent {
    */
   protected _onTickFired(activeSubagentCount: number): void {
     const now = new Date().toISOString().replace("T", " ").slice(0, 19);
-    const summary = `[System ${now}: ${activeSubagentCount} subagent(s) running. No results yet. Do NOT reply to the user unless you have new information to share. If you already told them you're working on it, stay silent.]`;
+    const summary = `[${now} | System: ${activeSubagentCount} subagent(s) running. No results yet. Do NOT reply to the user unless you have new information to share. If you already told them you're working on it, stay silent.]`;
 
     const statusMsg: Message = { role: "user", content: summary };
     this.sessionMessages.push(statusMsg);

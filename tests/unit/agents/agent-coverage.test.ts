@@ -339,7 +339,7 @@ describe("Agent coverage", () => {
 
       // Verify child result was injected into session
       const content = await Bun.file(`${testDataDir}/session/current.jsonl`).text();
-      expect(content).toContain(`Child agent ${childId} completed`);
+      expect(content).toContain(`Subagent ${childId} completed`);
       expect(content).toContain("child result data");
 
       await agent.stop();
@@ -375,7 +375,7 @@ describe("Agent coverage", () => {
       await Bun.sleep(50);
 
       const content = await Bun.file(`${testDataDir}/session/current.jsonl`).text();
-      expect(content).toContain(`Child agent ${childId} failed`);
+      expect(content).toContain(`Subagent ${childId} failed`);
       expect(content).toContain("child crashed");
 
       await agent.stop();
