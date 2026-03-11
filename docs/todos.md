@@ -117,6 +117,9 @@ Tracked features, improvements, and ideas — what's done and what's next.
 - [ ] Memory usage visualization
 - [ ] Token cost tracking per task/session
 
+### First-Run Onboarding
+- [ ] On first system initialization, guide the user through an interactive onboarding flow to define the intelligent entity's identity: name, role, background, personality, speaking style, core values. Store as persona config instead of using hardcoded defaults.
+
 ### SubAgent Ownership & Hierarchy
 - [x] SubAgent now belongs to its parent Agent via TaskRunner (not a global singleton)
   - Done: SubAgentManager deleted, all subagents managed by TaskRunner

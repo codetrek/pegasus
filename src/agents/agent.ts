@@ -312,8 +312,8 @@ export class Agent {
   // ── Internal tick (auto-status when subagents are running) ──
   private _tickTimer: ReturnType<typeof setTimeout> | null = null;
   private _tickIsFirst = true;
-  private static readonly TICK_FIRST_MS = 30_000;
-  private static readonly TICK_INTERVAL_MS = 60_000;
+  private static readonly TICK_FIRST_MS = 120_000;
+  private static readonly TICK_INTERVAL_MS = 120_000;
 
   // ── Background task manager (bg_run/bg_output/bg_stop) ──
   private _backgroundManager: BackgroundTaskManager;
@@ -1479,7 +1479,7 @@ export class Agent {
    */
   protected _onTickFired(activeSubagentCount: number): void {
     const now = new Date().toISOString().replace("T", " ").slice(0, 19);
-    const summary = `[${now} | System: ${activeSubagentCount} subagent(s) running. No results yet. Do NOT reply to the user unless you have new information to share. If you already told them you're working on it, stay silent.]`;
+    const summary = `[${now} | System: ${activeSubagentCount} subagent(s) running]`;
 
     const statusMsg: Message = { role: "user", content: summary };
     this.sessionMessages.push(statusMsg);
