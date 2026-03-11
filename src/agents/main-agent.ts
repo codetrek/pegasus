@@ -52,6 +52,7 @@ import { mainAgentTools } from "./tools/builtins/index.ts";
 import { MCPManager } from "../mcp/index.ts";
 import { TokenRefreshMonitor } from "../mcp/auth/refresh-monitor.ts";
 import type { Tool, ToolContext } from "./tools/types.ts";
+import type { BrowserManagerLike } from "./tools/tool-context.ts";
 import { buildMainAgentPaths } from "../storage/paths.ts";
 import type { AgentStorePaths } from "../storage/paths.ts";
 
@@ -89,6 +90,8 @@ export interface InjectedSubsystems {
   mcpTools: Tool[];
   /** Owner trust store — created by PegasusApp, used in ToolContext. */
   ownerStore: OwnerStore;
+  /** BrowserManager — created by PegasusApp when browser tools are configured. */
+  browserManager?: BrowserManagerLike;
 }
 
 export interface MainAgentDeps {
@@ -257,6 +260,11 @@ export class MainAgent extends Agent {
       return this.skillRegistry.listAll().length;
     };
     ctx.projectAdapter = this.projectAdapter;
+
+    // Inject browserManager if available
+    if (this.injected.browserManager) {
+      ctx.browserManager = this.injected.browserManager;
+    }
 
     return ctx;
   }

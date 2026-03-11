@@ -106,7 +106,7 @@ function coerceStringArray(val: unknown): unknown {
 }
 
 export const BrowserConfigSchema = z.object({
-  headless: booleanFromString.default(true),
+  headless: booleanFromString.default(false),
   viewport: z.object({
     width: z.coerce.number().int().positive().default(1280),
     height: z.coerce.number().int().positive().default(720),

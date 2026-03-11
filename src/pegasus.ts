@@ -50,6 +50,9 @@ import { formatChannelMeta } from "./agents/agent.ts";
 import { createAppStats, recordLLMUsage, recordToolCall, loadPersistedStats, savePersistedStats } from "./stats/index.ts";
 import type { AppStats } from "./stats/index.ts";
 import { EventType } from "./agents/events/types.ts";
+import { BrowserManager } from "./agents/tools/browser/browser-manager.ts";
+import type { BrowserConfig } from "./agents/tools/browser/types.ts";
+import { createEvent } from "./agents/events/types.ts";
 
 const logger = getLogger("pegasus_app");
 
@@ -76,6 +79,7 @@ export class Pegasus {
   private projectAdapter!: ProjectAdapter;
   private imageManager: ImageManager | null = null;
   private reflectionOrchestrator!: Reflection;
+  private _browserManager: BrowserManager | null = null;
 
   // ── MainAgent ──
   private _mainAgent: MainAgent | null = null;
@@ -370,6 +374,15 @@ export class Pegasus {
       }
     }
 
+    // 8b. BrowserManager: create if browser tools are configured
+    if (this.settings.tools?.browser) {
+      const browserConfig: BrowserConfig = {
+        ...this.settings.tools.browser,
+        userDataDir: path.join(this.settings.homeDir, "browser"),
+      };
+      this._browserManager = new BrowserManager(browserConfig);
+    }
+
     // 9. Projects
     const projectsDir = path.join(this.settings.homeDir, "agents", "projects");
     this.projectManager = new ProjectManager(projectsDir);
@@ -390,6 +403,7 @@ export class Pegasus {
       reflectionOrchestrator: this.reflectionOrchestrator,
       mcpTools: wrappedMcpTools,
       ownerStore: this.ownerStore,
+      browserManager: this._browserManager ?? undefined,
     };
 
     this._mainAgent = new MainAgent({
@@ -407,6 +421,20 @@ export class Pegasus {
     // Wire reply routing if adapters were registered before start()
     if (this._replyCallback) {
       this._mainAgent.onReply(this._replyCallback);
+    }
+
+    // Wire BrowserManager page-closed callback to emit event
+    if (this._browserManager && this._mainAgent) {
+      const mainAgent = this._mainAgent;
+      this._browserManager.setOnPageClosed((agentId: string) => {
+        mainAgent.eventBus.emit(
+          createEvent(EventType.BROWSER_PAGE_CLOSED, {
+            source: "browser_manager",
+            agentId,
+            payload: { agentId },
+          }),
+        );
+      });
     }
 
     // 11. Start MainAgent (loads session + injects memory + builds prompt)
@@ -537,6 +565,12 @@ export class Pegasus {
     if (this.imageManager) {
       this.imageManager.close();
       this.imageManager = null;
+    }
+
+    // 6. Close BrowserManager
+    if (this._browserManager) {
+      await this._browserManager.close();
+      this._browserManager = null;
     }
 
     this._mainAgent = null;

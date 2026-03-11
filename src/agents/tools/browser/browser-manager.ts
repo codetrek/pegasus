@@ -1,11 +1,11 @@
 /**
  * BrowserManager — lifecycle management for Playwright browser.
  *
- * Two-layer architecture:
- *   - BrowserManager (Agent-level): manages the Browser process lifecycle (launch/close).
- *   - BrowserSession (per-task): each task gets its own BrowserContext + Page + refMap.
- *
- * This prevents multiple tasks from trampling each other's page state and ref maps.
+ * Persistent-profile architecture:
+ *   - Uses `launchPersistentContext(userDataDir)` so login sessions, cookies,
+ *     and local storage survive across restarts.
+ *   - All agents share a single BrowserContext but each gets its own Page.
+ *   - CDP mode still connects via `connectOverCDP` (no persistent profile).
  */
 
 import type { BrowserConfig } from "./types.ts";
@@ -18,22 +18,28 @@ const logger = getLogger("browser_manager");
 export type BrowserLauncher = {
   launch(opts: Record<string, unknown>): Promise<any>;
   connectOverCDP(url: string): Promise<any>;
+  launchPersistentContext(userDataDir: string, opts: Record<string, unknown>): Promise<any>;
 };
 
-/** Per-task browser session with its own context, page, and ref map. */
+/** Per-agent browser session — each agent gets its own Page in the shared context. */
 export interface BrowserSession {
-  context: any;                     // Playwright BrowserContext
   page: any;                        // Playwright Page
   refMap: Map<string, string>;      // ref → selector
 }
 
 export class BrowserManager {
+  /** Browser instance — only set in CDP mode. */
   private browser: any | null = null;
+  /** Persistent context — set when using launchPersistentContext (non-CDP). */
+  private persistentContext: any | null = null;
   private launchPromise: Promise<void> | null = null;
   private sessions = new Map<string, BrowserSession>();
   private closed = false;
   private config: BrowserConfig;
   private launcher?: BrowserLauncher;
+
+  /** Callback fired when a page is closed externally (e.g. user closes tab). */
+  private _onPageClosed: ((agentId: string) => void) | null = null;
 
   constructor(config: BrowserConfig, launcher?: BrowserLauncher) {
     this.config = config;
@@ -41,15 +47,23 @@ export class BrowserManager {
   }
 
   /**
-   * Ensure a browser process is running. Launches if needed.
-   * Does NOT create any page — that's handled per-task by getSession().
+   * Register a callback for when a page is closed externally.
+   * Used by PegasusApp to emit BROWSER_PAGE_CLOSED events.
+   */
+  setOnPageClosed(cb: (agentId: string) => void): void {
+    this._onPageClosed = cb;
+  }
+
+  /**
+   * Ensure a browser/context is running. Launches if needed.
+   * Does NOT create any page — that's handled per-agent by getSession().
    */
   async ensureBrowser(): Promise<void> {
     if (this.closed) {
       throw new Error("Browser is shutting down.");
     }
 
-    if (this.browser) {
+    if (this.browser || this.persistentContext) {
       return;
     }
 
@@ -85,9 +99,17 @@ export class BrowserManager {
 
     try {
       if (this.config.cdpUrl) {
+        // CDP mode: connect to existing browser (no persistent profile)
         this.browser = await pw.connectOverCDP(this.config.cdpUrl);
       } else {
-        this.browser = await pw.launch({ headless: this.config.headless });
+        // Persistent context mode: profile data is stored in userDataDir
+        this.persistentContext = await pw.launchPersistentContext(
+          this.config.userDataDir,
+          {
+            headless: this.config.headless,
+            viewport: this.config.viewport,
+          },
+        );
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -98,10 +120,12 @@ export class BrowserManager {
     }
 
     // Register disconnected handler for crash recovery
-    if (this.browser && typeof this.browser.on === "function") {
-      this.browser.on("disconnected", () => {
+    const target = this.persistentContext ?? this.browser;
+    if (target && typeof target.on === "function") {
+      target.on("close", () => {
         logger.warn("browser_disconnected");
         this.browser = null;
+        this.persistentContext = null;
         this.launchPromise = null;
         // All sessions are dead — clear them
         this.sessions.clear();
@@ -113,7 +137,7 @@ export class BrowserManager {
 
   /**
    * Get or create a BrowserSession for the given agentId.
-   * Each task gets its own BrowserContext + Page + refMap.
+   * Each agent gets its own Page in the shared persistent context.
    */
   async getSession(agentId: string): Promise<BrowserSession> {
     let session = this.sessions.get(agentId);
@@ -123,31 +147,44 @@ export class BrowserManager {
 
     await this.ensureBrowser();
 
-    let context: any;
+    let page: any;
     if (this.config.cdpUrl) {
-      // CDP mode: reuse existing context
-      context = this.browser.contexts()[0] ?? (await this.browser.newContext());
+      // CDP mode: reuse existing context, get or create page
+      const context = this.browser.contexts()[0] ?? (await this.browser.newContext());
+      page = context.pages?.().length > 0
+        ? context.pages()[0]
+        : await context.newPage();
     } else {
-      context = await this.browser.newContext({
-        viewport: this.config.viewport,
+      // Persistent context mode: create a new page in the shared context
+      page = await this.persistentContext.newPage();
+    }
+
+    // Register page close listener to detect external closure (user closes tab)
+    if (typeof page.on === "function") {
+      page.on("close", () => {
+        // Only fire callback if the session still exists (not already cleaned up by closeSession)
+        if (this.sessions.has(agentId)) {
+          this.sessions.delete(agentId);
+          logger.info({ agentId }, "browser_page_closed_externally");
+          if (this._onPageClosed) {
+            this._onPageClosed(agentId);
+          }
+        }
       });
     }
 
-    const page = context.pages?.().length > 0
-      ? context.pages()[0]
-      : await context.newPage();
-
-    session = { context, page, refMap: new Map() };
+    session = { page, refMap: new Map() };
     this.sessions.set(agentId, session);
     return session;
   }
 
-  /** Close a single task's session (its BrowserContext). */
+  /** Close a single agent's session (its Page, not the context). */
   async closeSession(agentId: string): Promise<void> {
     const session = this.sessions.get(agentId);
     if (session) {
-      await session.context.close().catch(() => {});
+      // Remove from map first to prevent the "close" event from firing the callback
       this.sessions.delete(agentId);
+      await session.page.close().catch(() => {});
       logger.info({ agentId }, "browser_session_closed");
     }
   }
@@ -277,24 +314,32 @@ export class BrowserManager {
   async close(): Promise<void> {
     this.closed = true;
 
-    // Close all sessions
+    // Close all pages (sessions)
     for (const [, session] of this.sessions) {
-      await session.context.close().catch(() => {});
+      await session.page.close().catch(() => {});
     }
     this.sessions.clear();
 
-    // Close browser process
+    // Close persistent context (which also closes the browser process)
+    if (this.persistentContext) {
+      await this.persistentContext.close().catch(() => {});
+      logger.info("browser_persistent_context_closed");
+    }
+
+    // Close browser process (CDP mode)
     if (this.browser) {
       await this.browser.close().catch(() => {});
       logger.info("browser_closed");
     }
+
     this.browser = null;
+    this.persistentContext = null;
     this.launchPromise = null;
   }
 
   /** Whether a browser is currently active. */
   get isActive(): boolean {
-    return this.browser !== null;
+    return this.browser !== null || this.persistentContext !== null;
   }
 
   /** Resolve a ref (e.g. "e3") to a Playwright selector string. Throws if invalid. */
