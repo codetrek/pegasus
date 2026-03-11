@@ -102,11 +102,19 @@ export class BrowserManager {
         // CDP mode: connect to existing browser (no persistent profile)
         this.browser = await pw.connectOverCDP(this.config.cdpUrl);
       } else {
+        // Auto-detect display: if headless=false but no display server available,
+        // fall back to headless mode silently to avoid "Cannot open display" crash.
+        let headless = this.config.headless;
+        if (!headless && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {
+          logger.warn("no display server detected (DISPLAY/WAYLAND_DISPLAY unset); falling back to headless mode");
+          headless = true;
+        }
+
         // Persistent context mode: profile data is stored in userDataDir
         this.persistentContext = await pw.launchPersistentContext(
           this.config.userDataDir,
           {
-            headless: this.config.headless,
+            headless,
             viewport: this.config.viewport,
           },
         );
@@ -132,7 +140,7 @@ export class BrowserManager {
       });
     }
 
-    logger.info({ headless: this.config.headless }, "browser_launched");
+    logger.info({ cdp: !!this.config.cdpUrl }, "browser_launched");
   }
 
   /**
