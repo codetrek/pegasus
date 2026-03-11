@@ -132,7 +132,7 @@ tools:
   # Browser automation (Playwright)
   # Optional — browser tools still register but return error if not configured
   browser:
-    headless: ${BROWSER_HEADLESS:-true}
+    headless: ${BROWSER_HEADLESS:-false}
     viewport:
       width: ${BROWSER_VIEWPORT_WIDTH:-1280}
       height: ${BROWSER_VIEWPORT_HEIGHT:-720}

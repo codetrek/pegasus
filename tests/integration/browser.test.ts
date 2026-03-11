@@ -16,6 +16,7 @@ const config: BrowserConfig = {
   headless: true,
   viewport: { width: 1280, height: 720 },
   timeout: 15000,
+  userDataDir: "/tmp/test-browser-profile-integration",
 };
 
 // ── Local test server ──────────────────────────────────────────────

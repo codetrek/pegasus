@@ -2,6 +2,8 @@
  * Unit tests for BrowserManager.
  *
  * Uses dependency injection (BrowserLauncher) to avoid requiring a real browser.
+ * Tests the persistent-context architecture: all agents share one BrowserContext,
+ * each agent gets its own Page.
  */
 
 import { describe, it, expect, mock, beforeEach } from "bun:test";
@@ -20,6 +22,7 @@ function defaultConfig(overrides?: Partial<BrowserConfig>): BrowserConfig {
     headless: true,
     viewport: { width: 1280, height: 720 },
     timeout: 5000,
+    userDataDir: "/tmp/test-browser-profile",
     ...overrides,
   };
 }
@@ -37,11 +40,14 @@ const SIMPLE_SNAPSHOT = [
 /**
  * Build mock page, context, browser, and launcher.
  *
- * The mock structure mirrors Playwright's API:
- *   launcher.launch() → browser
- *   browser.newContext() → context
- *   context.pages() → [page] (or empty, falling through to context.newPage())
+ * The mock structure mirrors Playwright's persistent context API:
+ *   launcher.launchPersistentContext(userDataDir, opts) → context
  *   context.newPage() → page
+ *   context.pages() → [page]
+ *
+ * CDP mode still uses:
+ *   launcher.connectOverCDP(url) → browser
+ *   browser.contexts() → [context]
  *
  * page.locator() dispatches based on selector:
  *   - "body" → returns { ariaSnapshot: mock() }
@@ -50,34 +56,66 @@ const SIMPLE_SNAPSHOT = [
 function createMocks() {
   const mockAriaSnapshot = mock(() => Promise.resolve(SIMPLE_SNAPSHOT));
 
-  const mockPage = {
-    goto: mock(() => Promise.resolve()),
-    url: mock(() => "https://example.com"),
-    locator: mock((selector: string) => {
-      if (selector === "body") {
+  // Factory to create distinct mock pages (each agent gets its own)
+  function createMockPage() {
+    const closeHandlers: (() => void)[] = [];
+    return {
+      goto: mock(() => Promise.resolve()),
+      url: mock(() => "https://example.com"),
+      locator: mock((selector: string) => {
+        if (selector === "body") {
+          return {
+            ariaSnapshot: mockAriaSnapshot,
+          };
+        }
+        // For role-based selectors (click/type operations)
         return {
-          ariaSnapshot: mockAriaSnapshot,
+          click: mock(() => Promise.resolve()),
+          fill: mock((_text: string) => Promise.resolve()),
+          press: mock((_key: string) => Promise.resolve()),
         };
-      }
-      // For role-based selectors (click/type operations)
-      return {
-        click: mock(() => Promise.resolve()),
-        fill: mock((_text: string) => Promise.resolve()),
-        press: mock((_key: string) => Promise.resolve()),
-      };
-    }),
-    waitForTimeout: mock(() => Promise.resolve()),
-    mouse: {
-      wheel: mock(() => Promise.resolve()),
-    },
-    screenshot: mock(() => Promise.resolve()),
-  };
+      }),
+      waitForTimeout: mock(() => Promise.resolve()),
+      mouse: {
+        wheel: mock(() => Promise.resolve()),
+      },
+      screenshot: mock(() => Promise.resolve()),
+      close: mock(() => {
+        // Fire registered close handlers
+        for (const handler of closeHandlers) handler();
+        return Promise.resolve();
+      }),
+      on: mock((event: string, handler: () => void) => {
+        if (event === "close") closeHandlers.push(handler);
+      }),
+      _closeHandlers: closeHandlers,
+    };
+  }
 
+  // Default page used when only one is needed
+  const mockPage = createMockPage();
+
+  const closeHandlers: (() => void)[] = [];
   const mockContext = {
     pages: mock(() => [mockPage]),
-    newPage: mock(() => Promise.resolve(mockPage)),
+    newPage: mock(() => Promise.resolve(createMockPage())),
     close: mock(() => Promise.resolve()),
+    on: mock((event: string, handler: () => void) => {
+      if (event === "close") closeHandlers.push(handler);
+    }),
+    _closeHandlers: closeHandlers,
   };
+
+  // For the first call, return the pre-created mockPage
+  mockContext.newPage = mock(() => Promise.resolve(createMockPage()));
+  // Override: first call to newPage returns the default mockPage
+  let newPageCallCount = 0;
+  const originalNewPage = mockContext.newPage;
+  mockContext.newPage = mock(() => {
+    newPageCallCount++;
+    if (newPageCallCount === 1) return Promise.resolve(mockPage);
+    return (originalNewPage as any)();
+  });
 
   const mockBrowser = {
     newContext: mock(() => Promise.resolve(mockContext)),
@@ -89,9 +127,19 @@ function createMocks() {
   const mockLauncher: BrowserLauncher = {
     launch: mock(() => Promise.resolve(mockBrowser)),
     connectOverCDP: mock(() => Promise.resolve(mockBrowser)),
+    launchPersistentContext: mock((_userDataDir: string, _opts: Record<string, unknown>) =>
+      Promise.resolve(mockContext),
+    ),
   };
 
-  return { mockPage, mockAriaSnapshot, mockContext, mockBrowser, mockLauncher };
+  return {
+    mockPage,
+    mockAriaSnapshot,
+    mockContext,
+    mockBrowser,
+    mockLauncher,
+    createMockPage,
+  };
 }
 
 // ── Tests ────────────────────────────────────────────────────────────
@@ -107,11 +155,15 @@ describe("BrowserManager", () => {
 
   // ── 1. ensureBrowser — lazy launch ────────────────────────────────
 
-  it("should lazily launch browser on first getSession()", async () => {
+  it("should lazily launch persistent context on first getSession()", async () => {
     const session = await manager.getSession(TEST_TASK);
 
-    expect(mocks.mockLauncher.launch).toHaveBeenCalledTimes(1);
-    expect(session.page).toBe(mocks.mockPage);
+    expect(mocks.mockLauncher.launchPersistentContext).toHaveBeenCalledTimes(1);
+    expect(mocks.mockLauncher.launchPersistentContext).toHaveBeenCalledWith(
+      "/tmp/test-browser-profile",
+      { headless: true, viewport: { width: 1280, height: 720 } },
+    );
+    expect(session.page).toBeDefined();
     expect(manager.isActive).toBe(true);
   });
 
@@ -122,20 +174,22 @@ describe("BrowserManager", () => {
     const s2 = await manager.getSession(TEST_TASK);
 
     expect(s1).toBe(s2);
-    expect(mocks.mockLauncher.launch).toHaveBeenCalledTimes(1);
+    expect(mocks.mockLauncher.launchPersistentContext).toHaveBeenCalledTimes(1);
   });
 
-  // ── 3. getSession — separate sessions per task ────────────────────
+  // ── 3. getSession — separate sessions per agent (page-per-agent) ──
 
-  it("should create separate sessions for different agentIds", async () => {
+  it("should create separate pages for different agentIds in same context", async () => {
     const s1 = await manager.getSession(TEST_TASK);
     const s2 = await manager.getSession(TEST_TASK_2);
 
     expect(s1).not.toBe(s2);
-    // Both share the same browser
-    expect(mocks.mockLauncher.launch).toHaveBeenCalledTimes(1);
-    // Two separate contexts created
-    expect(mocks.mockBrowser.newContext).toHaveBeenCalledTimes(2);
+    // Both share the same persistent context (only one launchPersistentContext call)
+    expect(mocks.mockLauncher.launchPersistentContext).toHaveBeenCalledTimes(1);
+    // Two newPage calls (one per agent)
+    expect(mocks.mockContext.newPage).toHaveBeenCalledTimes(2);
+    // Pages are different
+    expect(s1.page).not.toBe(s2.page);
   });
 
   // ── 4. navigate ────────────────────────────────────────────────────
@@ -335,13 +389,13 @@ describe("BrowserManager", () => {
 
   // ── 14. close — cleans up ─────────────────────────────────────────
 
-  it("should close browser and clean up state", async () => {
+  it("should close persistent context and clean up state", async () => {
     await manager.getSession(TEST_TASK);
     expect(manager.isActive).toBe(true);
 
     await manager.close();
 
-    expect(mocks.mockBrowser.close).toHaveBeenCalledTimes(1);
+    expect(mocks.mockContext.close).toHaveBeenCalledTimes(1);
     expect(manager.isActive).toBe(false);
   });
 
@@ -378,7 +432,7 @@ describe("BrowserManager", () => {
     expect(mocks.mockLauncher.connectOverCDP).toHaveBeenCalledWith(
       "ws://localhost:9222",
     );
-    expect(mocks.mockLauncher.launch).not.toHaveBeenCalled();
+    expect(mocks.mockLauncher.launchPersistentContext).not.toHaveBeenCalled();
   });
 
   it("should reuse existing context from CDP browser", async () => {
@@ -389,35 +443,48 @@ describe("BrowserManager", () => {
 
     await cdpManager.getSession(TEST_TASK);
 
-    // CDP mode uses contexts()[0] instead of newContext()
+    // CDP mode uses contexts()[0] instead of persistent context
     expect(mocks.mockBrowser.contexts).toHaveBeenCalled();
-    expect(mocks.mockBrowser.newContext).not.toHaveBeenCalled();
   });
 
-  it("should use launch when cdpUrl is not configured", async () => {
+  it("should use launchPersistentContext when cdpUrl is not configured", async () => {
     await manager.getSession(TEST_TASK);
 
-    expect(mocks.mockLauncher.launch).toHaveBeenCalledWith({
-      headless: true,
-    });
+    expect(mocks.mockLauncher.launchPersistentContext).toHaveBeenCalledWith(
+      "/tmp/test-browser-profile",
+      { headless: true, viewport: { width: 1280, height: 720 } },
+    );
     expect(mocks.mockLauncher.connectOverCDP).not.toHaveBeenCalled();
   });
 
-  // ── 18. closeSession ──────────────────────────────────────────────
+  // ── 18. closeSession — closes page, not context ───────────────────
 
-  it("should close a single task session without affecting others", async () => {
-    await manager.getSession(TEST_TASK);
-    await manager.getSession(TEST_TASK_2);
+  it("should close page (not context) when closing a session", async () => {
+    const session = await manager.getSession(TEST_TASK);
 
     await manager.closeSession(TEST_TASK);
 
-    // Context.close called for task-1's session
-    expect(mocks.mockContext.close).toHaveBeenCalledTimes(1);
-    // Browser still active
+    // Page.close called
+    expect(session.page.close).toHaveBeenCalledTimes(1);
+    // Persistent context NOT closed (still active for other agents)
+    expect(mocks.mockContext.close).not.toHaveBeenCalled();
+    // Browser/context still active
     expect(manager.isActive).toBe(true);
-    // task-2 still has session
+  });
+
+  it("should not affect other sessions when closing one", async () => {
+    const s1 = await manager.getSession(TEST_TASK);
     const s2 = await manager.getSession(TEST_TASK_2);
-    expect(s2).toBeDefined();
+
+    await manager.closeSession(TEST_TASK);
+
+    // s1's page closed
+    expect(s1.page.close).toHaveBeenCalledTimes(1);
+    // s2's page NOT closed
+    expect(s2.page.close).not.toHaveBeenCalled();
+    // task-2 still has session
+    const s2Again = await manager.getSession(TEST_TASK_2);
+    expect(s2Again).toBe(s2);
   });
 
   it("should handle closeSession for non-existent agentId", async () => {
@@ -439,28 +506,55 @@ describe("BrowserManager", () => {
 
   // ── 20. disconnected event recovery ───────────────────────────────
 
-  it("should register disconnected handler on browser", async () => {
+  it("should register close handler on persistent context", async () => {
     await manager.getSession(TEST_TASK);
 
-    expect(mocks.mockBrowser.on).toHaveBeenCalledWith(
-      "disconnected",
+    expect(mocks.mockContext.on).toHaveBeenCalledWith(
+      "close",
       expect.any(Function),
     );
   });
 
-  it("should reset state when browser disconnects", async () => {
+  it("should reset state when persistent context closes", async () => {
     await manager.getSession(TEST_TASK);
 
-    // Trigger the disconnected handler
-    const onCall = (mocks.mockBrowser.on as any).mock.calls.find(
-      (c: any[]) => c[0] === "disconnected",
-    );
-    expect(onCall).toBeDefined();
-    const handler = onCall[1];
-    handler();
+    // Trigger the close handler on the context
+    for (const handler of mocks.mockContext._closeHandlers) {
+      handler();
+    }
 
-    // Browser should be null, sessions cleared
+    // Should be null, sessions cleared
     expect(manager.isActive).toBe(false);
+  });
+
+  // ── 21. Page closed externally triggers onPageClosed callback ─────
+
+  it("should fire onPageClosed callback when page is closed externally", async () => {
+    const onPageClosed = mock((_agentId: string) => {});
+    manager.setOnPageClosed(onPageClosed);
+
+    const session = await manager.getSession(TEST_TASK);
+
+    // Simulate external page closure by firing the close handler
+    for (const handler of session.page._closeHandlers) {
+      handler();
+    }
+
+    expect(onPageClosed).toHaveBeenCalledTimes(1);
+    expect(onPageClosed).toHaveBeenCalledWith(TEST_TASK);
+  });
+
+  it("should NOT fire onPageClosed when session is closed programmatically", async () => {
+    const onPageClosed = mock((_agentId: string) => {});
+    manager.setOnPageClosed(onPageClosed);
+
+    await manager.getSession(TEST_TASK);
+
+    // closeSession removes from map first, then calls page.close()
+    // The close event fires but session is already removed → no callback
+    await manager.closeSession(TEST_TASK);
+
+    expect(onPageClosed).not.toHaveBeenCalled();
   });
 
   // ── Edge cases ────────────────────────────────────────────────────
@@ -472,9 +566,9 @@ describe("BrowserManager", () => {
     expect(fresh.isActive).toBe(false);
   });
 
-  it("should handle browser.close() rejection gracefully", async () => {
+  it("should handle context.close() rejection gracefully", async () => {
     await manager.getSession(TEST_TASK);
-    mocks.mockBrowser.close = mock(() =>
+    mocks.mockContext.close = mock(() =>
       Promise.reject(new Error("connection reset")),
     );
 
@@ -511,41 +605,15 @@ describe("BrowserManager", () => {
     );
   });
 
-  it("should pass viewport config to newContext", async () => {
-    const config = defaultConfig({ viewport: { width: 800, height: 600 } });
-    const m = new BrowserManager(config, mocks.mockLauncher);
-    await m.getSession(TEST_TASK);
-
-    expect(mocks.mockBrowser.newContext).toHaveBeenCalledWith({
-      viewport: { width: 800, height: 600 },
-    });
-  });
-
   it("should pass headless=false when configured", async () => {
     const config = defaultConfig({ headless: false });
     const m = new BrowserManager(config, mocks.mockLauncher);
     await m.getSession(TEST_TASK);
 
-    expect(mocks.mockLauncher.launch).toHaveBeenCalledWith({
-      headless: false,
-    });
-  });
-
-  it("should reuse existing page from context.pages()", async () => {
-    // context.pages() returns [mockPage], so newPage should not be called
-    await manager.getSession(TEST_TASK);
-
-    expect(mocks.mockContext.pages).toHaveBeenCalled();
-    // Since pages()[0] exists, newPage should not be called
-    expect(mocks.mockContext.newPage).not.toHaveBeenCalled();
-  });
-
-  it("should create new page when context.pages() is empty", async () => {
-    mocks.mockContext.pages = mock(() => []);
-
-    await manager.getSession(TEST_TASK);
-
-    expect(mocks.mockContext.newPage).toHaveBeenCalledTimes(1);
+    expect(mocks.mockLauncher.launchPersistentContext).toHaveBeenCalledWith(
+      "/tmp/test-browser-profile",
+      { headless: false, viewport: { width: 1280, height: 720 } },
+    );
   });
 
   // ── Concurrent launch guard ─────────────────────────────────────
@@ -554,8 +622,9 @@ describe("BrowserManager", () => {
     // Slow launcher to expose race window
     let resolveFirst!: (val: any) => void;
     const slowLauncher: BrowserLauncher = {
-      launch: mock(() => new Promise((r) => { resolveFirst = r; })),
+      launch: mock(() => Promise.resolve(mocks.mockBrowser)),
       connectOverCDP: mock(() => Promise.resolve(mocks.mockBrowser)),
+      launchPersistentContext: mock(() => new Promise((r) => { resolveFirst = r; })),
     };
     const m = new BrowserManager(defaultConfig(), slowLauncher);
 
@@ -564,23 +633,24 @@ describe("BrowserManager", () => {
     const p2 = m.getSession(TEST_TASK_2);
 
     // Resolve the single launch
-    resolveFirst(mocks.mockBrowser);
+    resolveFirst(mocks.mockContext);
 
     const [s1, s2] = await Promise.all([p1, p2]);
     expect(s1).toBeDefined();
     expect(s2).toBeDefined();
-    expect(slowLauncher.launch).toHaveBeenCalledTimes(1);
+    expect(slowLauncher.launchPersistentContext).toHaveBeenCalledTimes(1);
   });
 
   it("should reset launchPromise on launch failure so retry works", async () => {
     let callCount = 0;
     const failThenSucceedLauncher: BrowserLauncher = {
-      launch: mock(() => {
+      launch: mock(() => Promise.resolve(mocks.mockBrowser)),
+      connectOverCDP: mock(() => Promise.resolve(mocks.mockBrowser)),
+      launchPersistentContext: mock(() => {
         callCount++;
         if (callCount === 1) return Promise.reject(new Error("launch failed"));
-        return Promise.resolve(mocks.mockBrowser);
+        return Promise.resolve(mocks.mockContext);
       }),
-      connectOverCDP: mock(() => Promise.resolve(mocks.mockBrowser)),
     };
     const m = new BrowserManager(defaultConfig(), failThenSucceedLauncher);
 
@@ -590,7 +660,7 @@ describe("BrowserManager", () => {
     // Second call should retry (not stuck on failed promise)
     const session = await m.getSession(TEST_TASK);
     expect(session).toBeDefined();
-    expect(failThenSucceedLauncher.launch).toHaveBeenCalledTimes(2);
+    expect(failThenSucceedLauncher.launchPersistentContext).toHaveBeenCalledTimes(2);
   });
 
   // ── URL validation (SSRF protection) ────────────────────────────
@@ -770,10 +840,11 @@ describe("BrowserManager", () => {
 
   it("should throw friendly error when chromium executable is missing", async () => {
     const failLauncher: BrowserLauncher = {
-      launch: mock(() =>
+      launch: mock(() => Promise.resolve(mocks.mockBrowser)),
+      connectOverCDP: mock(() => Promise.resolve(mocks.mockBrowser)),
+      launchPersistentContext: mock(() =>
         Promise.reject(new Error("Executable doesn't exist at /path/to/chromium")),
       ),
-      connectOverCDP: mock(() => Promise.resolve(mocks.mockBrowser)),
     };
     const m = new BrowserManager(defaultConfig(), failLauncher);
 
@@ -784,10 +855,11 @@ describe("BrowserManager", () => {
 
   it("should throw generic launch error for unknown failures", async () => {
     const failLauncher: BrowserLauncher = {
-      launch: mock(() =>
+      launch: mock(() => Promise.resolve(mocks.mockBrowser)),
+      connectOverCDP: mock(() => Promise.resolve(mocks.mockBrowser)),
+      launchPersistentContext: mock(() =>
         Promise.reject(new Error("Unknown crash\nStack trace here")),
       ),
-      connectOverCDP: mock(() => Promise.resolve(mocks.mockBrowser)),
     };
     const m = new BrowserManager(defaultConfig(), failLauncher);
 
@@ -801,28 +873,30 @@ describe("BrowserManager", () => {
     }
   });
 
-  // ── Multi-task isolation ──────────────────────────────────────────
+  // ── Multi-agent isolation ──────────────────────────────────────────
 
-  it("should isolate refMaps between tasks", async () => {
-    // Task 1 navigates and gets refs
+  it("should isolate refMaps between agents", async () => {
+    // Agent 1 navigates and gets refs
     await manager.navigate(TEST_TASK, "https://example.com");
     const s1 = await manager.getSession(TEST_TASK);
 
-    // Task 2 has empty refs
+    // Agent 2 has empty refs
     const s2 = await manager.getSession(TEST_TASK_2);
 
     expect(s1.refMap.size).toBeGreaterThan(0);
     expect(s2.refMap.size).toBe(0);
   });
 
-  it("should close all sessions on close()", async () => {
-    await manager.getSession(TEST_TASK);
-    await manager.getSession(TEST_TASK_2);
+  it("should close all pages on close()", async () => {
+    const s1 = await manager.getSession(TEST_TASK);
+    const s2 = await manager.getSession(TEST_TASK_2);
 
     await manager.close();
 
-    // Both sessions' contexts should have been closed
-    expect(mocks.mockContext.close).toHaveBeenCalledTimes(2);
-    expect(mocks.mockBrowser.close).toHaveBeenCalledTimes(1);
+    // Both pages should have been closed
+    expect(s1.page.close).toHaveBeenCalledTimes(1);
+    expect(s2.page.close).toHaveBeenCalledTimes(1);
+    // Persistent context also closed
+    expect(mocks.mockContext.close).toHaveBeenCalledTimes(1);
   });
 });

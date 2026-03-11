@@ -8,6 +8,8 @@ export interface BrowserConfig {
   viewport: { width: number; height: number };
   timeout: number;
   cdpUrl?: string;
+  /** Directory for persistent browser profile (login sessions, cookies, etc.). */
+  userDataDir: string;
 }
 
 /** Result of processing an ARIA snapshot */
