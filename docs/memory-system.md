@@ -368,12 +368,7 @@ The only changes are:
 
 ## 9. Configuration
 
-```yaml
-memory:
-  dataDir: data/memory    # Root directory for memory files
-```
-
-Replace the current `dbPath` / `vectorDbPath` config with a single `dataDir`.
+Memory storage directory is configured within the agent's data directory (e.g., `data/agents/main/memory/`). There is no separate memory config section — the path is derived internally.
 
 ## 10. Acceptance Criteria
 

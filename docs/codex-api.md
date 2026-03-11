@@ -75,7 +75,7 @@ Authorization: Bearer <access_token>
 chatgpt-account-id: <account_id>
 ```
 
-OAuth runs at startup if the codex provider is configured. Tokens are persisted to `~/.pegasus/auth/codex.json`.
+OAuth runs at startup if the codex provider is configured. Tokens are persisted to `{homeDir}/auth/codex.json` (default `~/.pegasus/auth/codex.json`).
 
 ## Configuration
 
@@ -88,7 +88,7 @@ llm:
     subAgent: codex/gpt-5.3-codex   # use Codex for tasks
 ```
 
-No API key or OAuth config needed — everything is built-in. When `llm.codex.enabled: true`, Pegasus runs OAuth login at startup (opens browser for ChatGPT authorization). Tokens are stored in `~/.pegasus/auth/codex.json` and auto-refreshed.
+No API key or OAuth config needed — everything is built-in. When `llm.codex.enabled: true`, Pegasus runs OAuth login at startup (opens browser for ChatGPT authorization). Tokens are stored in `{homeDir}/auth/codex.json` and auto-refreshed.
 
 The `llm.codex` config also supports optional overrides:
 - `baseURL`: defaults to `https://chatgpt.com/backend-api`

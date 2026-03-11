@@ -234,7 +234,7 @@ llm:
 | Key | Default | Description |
 |-----|---------|-------------|
 | `system.logLevel` | `info` | Log level: `debug`, `info`, `warn`, `error`, `silent` |
-| `system.dataDir` | `data` | Data directory for logs, sessions, and personas |
+| `system.homeDir` | `~/.pegasus` | Home directory for auth, logs, browser profile, etc. |
 | `system.logFormat` | `json` | Log format: `json` (structured) or `line` (human-readable) |
 
 ### Custom Persona

@@ -187,8 +187,8 @@ Memory tools operate on markdown files stored under the agent's memory directory
 
 | Tool | Description | Parameters | Return |
 |------|-------------|------------|--------|
-| `task_list` | List historical tasks for a date | `{ date?, dataDir? }` | task index entries |
-| `task_replay` | Replay a task's conversation | `{ taskId, dataDir? }` | replayed messages |
+| `task_list` | List historical tasks for a date | `{ date?, homeDir? }` | task index entries |
+| `task_replay` | Replay a task's conversation | `{ taskId, homeDir? }` | replayed messages |
 
 ### Session Tools (SYSTEM)
 

@@ -42,7 +42,7 @@ Both grant types run eagerly at startup. Device Code Flow may block while waitin
 ```
 src/mcp/auth/
 ├── types.ts              # Zod schemas for config + runtime types
-├── token-store.ts        # File-based token persistence (data/mcp-auth/)
+├── token-store.ts        # File-based token persistence ({homeDir}/auth/mcp/)
 ├── device-code.ts        # RFC 8628 Device Code Flow implementation
 ├── refresh-monitor.ts    # Proactive token refresh + expiry events
 ├── provider-factory.ts   # Config → transport auth options
@@ -299,7 +299,7 @@ On next startup, `TokenStore` has a cached token. If still valid (not expired), 
 
 ### Storage Location
 
-`data/mcp-auth/{server-name}.json`
+`{homeDir}/auth/mcp/{server-name}.json`
 
 Server names sanitized for filesystem: `name.replace(/[^a-zA-Z0-9_-]/g, "_")`. After sanitization, uniqueness is verified across all configured servers — if two server names collide (e.g., `my-server` and `my_server` both become `my_server`), startup fails with a clear error message listing the conflicting names.
 
@@ -327,7 +327,7 @@ Token files are plaintext JSON — a deliberate tradeoff. Encryption adds key ma
 
 Mitigations:
 - Token files are written with `0600` permissions (owner-only read/write)
-- `data/mcp-auth/` directory is created with `0700` permissions
+- `{homeDir}/auth/mcp/` directory is created with `0700` permissions
 - Config loader MUST NOT log the full config object — `clientSecret` and token values are redacted in all log output
 - `data/` is gitignored to prevent accidental commits
 
@@ -389,8 +389,8 @@ Caught at startup before any auth attempt:
 | `src/mcp/auth/provider-factory.ts` | **New**: Config → transport auth options |
 | `src/mcp/auth/index.ts` | **New**: Barrel export |
 | `src/infra/config-schema.ts` | Add `auth` field to mcpServers schema |
-| `src/mcp/manager.ts` | Constructor takes `dataDir`, `connect()` uses auth, `connectAll()` parallel |
+| `src/mcp/manager.ts` | Constructor takes `homeDir`, `connect()` uses auth, `connectAll()` parallel |
 | `src/mcp/index.ts` | Re-export auth types |
-| `src/agents/main-agent.ts` | Pass `dataDir` to MCPManager, start `TokenRefreshMonitor` |
+| `src/agents/main-agent.ts` | Pass `homeDir` to MCPManager, start `TokenRefreshMonitor` |
 | `config.yml` | Add OAuth config examples (commented) |
 | `docs/todos.md` | Update |

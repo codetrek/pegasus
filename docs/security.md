@@ -21,12 +21,12 @@ Internal channels (`cli`, `project`, `subagent`) share this trust level because 
 
 ## Owner Identity Storage
 
-Owner identity is stored at `~/.pegasus/owner.json` — deliberately **outside** the LLM's memory directory (`data/agents/main/memory/`).
+Owner identity is stored at `~/.pegasus/owner.json` (under `homeDir`) — deliberately **outside** the LLM's memory directory (`data/agents/main/memory/`).
 
 **Why this location?**
 - The `memory_write` tool is scoped to the `data/` directory. Even if prompt injection tricks the LLM into calling `memory_write`, it cannot modify `owner.json`.
 - File permissions are locked down: directory `0o700`, file `0o600` (owner-only read/write at the OS level).
-- The file lives alongside other auth credentials (`~/.pegasus/auth/`), following the established convention for user config.
+- The file lives alongside other auth credentials (`{homeDir}/auth/`), following the established convention for user config.
 
 **File format:**
 

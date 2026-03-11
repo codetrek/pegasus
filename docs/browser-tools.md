@@ -20,11 +20,11 @@ Agent into a user that can see and interact with any web page.
 | Decision | Choice | Alternatives Considered | Rationale |
 |----------|--------|------------------------|-----------|
 | **Browser library** | Playwright | Puppeteer, Selenium | Built-in ARIA tree snapshot API, first-class cross-browser support, validated by OpenClaw and Playwright MCP projects |
-| **Runtime mode** | Host-native first | Docker sandbox | MVP priority is delivery speed; sandboxing can be layered on later without changing the tool interface |
+| **Runtime mode** | Host-native first, headless off by default | Docker sandbox | MVP priority is delivery speed; headless defaults to `false` so operators can observe browser actions; sandboxing can be layered on later without changing the tool interface |
 | **Tool granularity** | Multiple fine-grained tools | Single `browser` tool with an `action` parameter | Consistent with existing patterns (`memory_read`/`memory_write`, `bg_run`/`bg_stop`); each tool has a clear Zod schema and description |
 | **Page understanding** | ARIA snapshot (text) | Raw DOM/HTML, screenshot + multimodal vision | Token-efficient (~10-50× smaller than DOM); no changes needed to `Message` types; proven effective in OpenClaw and Playwright MCP |
 | **Element reference** | `ref` numbering (`e1`, `e2`, …) | CSS selector, XPath | 2 tokens vs 20+; LLM-friendly — the model says "click e3" instead of writing a fragile selector |
-| **Lifecycle** | Agent-level singleton, lazy launch | Per-task instance, global eager launch | Shares browser session across tool calls (cookies, login state persist); avoids launching a browser that may never be used |
+| **Lifecycle** | Agent-level singleton, lazy launch, persistent profile at `{homeDir}/browser/` | Per-task instance, global eager launch | Shares browser session across tool calls (cookies, login state persist); avoids launching a browser that may never be used; persistent profile survives restarts |
 | **Large page handling** | `maxNodes` truncation + compact mode | Unlimited output, viewport-only clipping | Prevents token explosion while preserving page structure; the Agent can request a deeper snapshot of a specific subtree if needed |
 | **Security** | URL scheme allowlist (`http`, `https`) | Full SSRF prevention (IP range checks, DNS rebinding protection) | V1 baseline protection; stronger defenses planned for later without breaking the tool contract |
 

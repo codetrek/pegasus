@@ -8,7 +8,7 @@ Pegasus has a built-in logging system with automatic file output, log rotation, 
 
 ### 1. Automatic File Logging
 
-- **Always Enabled**: Logs are always written to `{dataDir}/logs/pegasus.log`
+- **Always Enabled**: Logs are always written to `{homeDir}/logs/pegasus.log`
 - **Cannot be Disabled**: File logging is a core feature and always active
 
 ### 2. Configurable Log Format
@@ -64,9 +64,6 @@ system:
   # Log level: debug | info | warn | error | silent
   logLevel: info
 
-  # Data directory (logs saved to {dataDir}/logs/pegasus.log)
-  dataDir: data
-
   # Log output format: json | line (default: json)
   logFormat: json
 ```
@@ -76,11 +73,11 @@ system:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `PEGASUS_LOG_LEVEL` | Log level | `info` |
-| `PEGASUS_DATA_DIR` | Data directory | `data` |
+| `PEGASUS_HOME_DIR` | Home directory (logs at `{homeDir}/logs/`) | `~/.pegasus` |
 | `PEGASUS_LOG_FORMAT` | Log output format: `json` or `line` | `json` |
 
 **Note**:
-- Log file path is always `{PEGASUS_DATA_DIR}/logs/pegasus.log`
+- Log file path is always `{PEGASUS_HOME_DIR}/logs/pegasus.log`
 - File logging cannot be disabled
 - `logFormat` controls **how** logs are formatted (format)
 
@@ -91,8 +88,7 @@ system:
 ```yaml
 system:
   logLevel: debug
-  dataDir: data
-  # Logs written to data/logs/pegasus.log
+  # Logs written to {homeDir}/logs/pegasus.log
   # No console output
 ```
 
@@ -101,7 +97,6 @@ system:
 ```yaml
 system:
   logLevel: debug
-  dataDir: data
   logFormat: line  # Human-readable single-line format
 ```
 
@@ -110,7 +105,7 @@ system:
 ```yaml
 system:
   logLevel: info
-  dataDir: /var/lib/pegasus
+  homeDir: /var/lib/pegasus
   logFormat: json           # Structured JSON for log aggregation
   # Logs written to /var/lib/pegasus/logs/pegasus.log
 ```
@@ -120,7 +115,6 @@ system:
 ```yaml
 system:
   logLevel: silent  # Minimize logging overhead
-  dataDir: data
   # Still writes to file, but only critical errors
 ```
 

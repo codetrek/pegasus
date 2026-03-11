@@ -63,7 +63,7 @@ const MODEL_LIMITS: Record<string, ModelLimits> = {
 
 ## §2. Disk Cache
 
-Location: `~/.pegasus/model-limits/` (alongside `~/.pegasus/auth/`)
+Location: `{homeDir}/model-limits/` (default `~/.pegasus/model-limits/`, alongside `{homeDir}/auth/`)
 
 Per-provider files:
 
@@ -258,7 +258,7 @@ MainAgent.start()
   ├── _initCodexAuth()
   ├── _initCopilotAuth()
   ├── Create ModelLimitsCache
-  │     ├── Read disk cache ~/.pegasus/model-limits/*.json (instant)
+  │     ├── Read disk cache {homeDir}/model-limits/*.json (instant)
   │     └── Merge with static registry MODEL_LIMITS
   ├── Await model limits fetch (if enabled providers have no disk cache):
   │     ├── Copilot enabled + no copilot.json?  → await fetch → write cache
@@ -310,7 +310,7 @@ llm:
     apiKey: ${OPENROUTER_API_KEY:-}
 ```
 
-Cache path hardcoded to `~/.pegasus/model-limits/`. No config needed.
+Cache path derived from `homeDir` setting (default `~/.pegasus/model-limits/`). No additional config needed.
 
 ---
 

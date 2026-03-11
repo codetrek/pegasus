@@ -95,7 +95,7 @@ session:
 
 system:
   logLevel: info          # debug | info | warn | error | silent
-  dataDir: data           # root directory for all runtime data
+  homeDir: ~/.pegasus     # home directory for auth, logs, browser profile, etc.
   logFormat: json         # json | line
 ```
 
@@ -334,16 +334,16 @@ For the full design, see [Tier-Based Model Selection](./multi-model.md).
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `system.logLevel` | string | `"info"` | Log level: `debug`, `info`, `warn`, `error`, `silent` |
-| `system.dataDir` | string | **required** | Root directory for all runtime data (logs, memory, sessions, etc.) |
+| `system.homeDir` | string | `"~/.pegasus"` | Home directory for auth, logs, browser profile, and other runtime data |
 | `system.logFormat` | string | `"json"` | Log output format: `json` (structured) or `line` (human-readable) |
 
-> **Note on `dataDir`**: Memory storage is derived from `dataDir` (at `{dataDir}/memory/`). There is no separate `memory.dataDir` setting.
+> **Note on `homeDir`**: Auth credentials are stored at `{homeDir}/auth/`, logs at `{homeDir}/logs/`, and browser profile at `{homeDir}/browser/`. All paths are derived from `homeDir`.
 
 ## Logging
 
 Pegasus writes logs exclusively to files — there is no console output.
 
-- **Log file**: `{dataDir}/logs/pegasus.log`
+- **Log file**: `{homeDir}/logs/pegasus.log`
 - **Daily rotation**: new file each day (`pegasus.log.YYYY-MM-DD`)
 - **Size rotation**: rotated when file exceeds 10 MB
 - **Auto-cleanup**: logs older than 30 days are deleted
@@ -390,7 +390,7 @@ llm:
 
 system:
   logLevel: info
-  dataDir: data
+  homeDir: ${PEGASUS_HOME_DIR:-~/.pegasus}
 ```
 
 **config.local.yml** (personal, not committed):
@@ -417,7 +417,7 @@ agent:
 
 system:
   logLevel: warn
-  dataDir: /var/lib/pegasus
+  homeDir: ${PEGASUS_HOME_DIR:-~/.pegasus}
   logFormat: json
 ```
 
@@ -435,7 +435,7 @@ llm:
 
 system:
   logLevel: debug
-  dataDir: data
+  homeDir: ${PEGASUS_HOME_DIR:-~/.pegasus}
   logFormat: line
 ```
 
@@ -456,9 +456,6 @@ llm:
     powerful: anthropic/claude-sonnet-4-20250514 # strong model for complex tasks
 
   contextWindow: 200000  # explicit override
-
-system:
-  dataDir: data
 ```
 
 ## Security Best Practices
@@ -474,9 +471,6 @@ llm:
     openai:
       apiKey: ${OPENAI_API_KEY}  # reference, not a value
   default: openai/gpt-4o-mini
-
-system:
-  dataDir: data
 ```
 
 **.env** (gitignored — contains secrets):
