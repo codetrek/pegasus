@@ -605,15 +605,49 @@ describe("BrowserManager", () => {
     );
   });
 
-  it("should pass headless=false when configured", async () => {
-    const config = defaultConfig({ headless: false });
-    const m = new BrowserManager(config, mocks.mockLauncher);
-    await m.getSession(TEST_TASK);
+  it("should pass headless=false when configured and display is available", async () => {
+    const origDisplay = process.env.DISPLAY;
+    process.env.DISPLAY = ":0";
 
-    expect(mocks.mockLauncher.launchPersistentContext).toHaveBeenCalledWith(
-      "/tmp/test-browser-profile",
-      { headless: false, viewport: { width: 1280, height: 720 } },
-    );
+    try {
+      const config = defaultConfig({ headless: false });
+      const m = new BrowserManager(config, mocks.mockLauncher);
+      await m.getSession(TEST_TASK);
+
+      expect(mocks.mockLauncher.launchPersistentContext).toHaveBeenCalledWith(
+        "/tmp/test-browser-profile",
+        { headless: false, viewport: { width: 1280, height: 720 } },
+      );
+    } finally {
+      if (origDisplay !== undefined) process.env.DISPLAY = origDisplay;
+      else delete process.env.DISPLAY;
+    }
+  });
+
+  it("should fall back to headless=true when headless=false but no DISPLAY is set", async () => {
+    // Save and clear display env vars
+    const origDisplay = process.env.DISPLAY;
+    const origWayland = process.env.WAYLAND_DISPLAY;
+    delete process.env.DISPLAY;
+    delete process.env.WAYLAND_DISPLAY;
+
+    try {
+      const config = defaultConfig({ headless: false });
+      const m = new BrowserManager(config, mocks.mockLauncher);
+      await m.getSession(TEST_TASK);
+
+      // Should have been called with headless: true (fallback)
+      expect(mocks.mockLauncher.launchPersistentContext).toHaveBeenCalledWith(
+        "/tmp/test-browser-profile",
+        { headless: true, viewport: { width: 1280, height: 720 } },
+      );
+    } finally {
+      // Restore env vars
+      if (origDisplay !== undefined) process.env.DISPLAY = origDisplay;
+      else delete process.env.DISPLAY;
+      if (origWayland !== undefined) process.env.WAYLAND_DISPLAY = origWayland;
+      else delete process.env.WAYLAND_DISPLAY;
+    }
   });
 
   // ── Concurrent launch guard ─────────────────────────────────────
