@@ -63,6 +63,11 @@ export function buildHowYouThinkSection(): string[] {
     '  (e.g. "DONE — replied with summary" or "Waiting for subagent to finish research").',
     "- This helps you remember what happened when you see this conversation later.",
     "",
+    "While subagents are running, don't mechanically reply() on every tick.",
+    "Most ticks need no user-facing response — just note your state and wait.",
+    "But if a task is taking unusually long, a brief progress update is fine.",
+    "Use your judgment: the goal is to keep the user informed without being noisy.",
+    "",
     "Context window is a shared resource — protect it.",
     "- Every tool call result (file contents, command output, web pages) consumes context.",
     "- If a task requires reading multiple files, exploring code, or gathering information —",
@@ -229,22 +234,46 @@ export function buildSessionHistorySection(): string[] {
   ];
 }
 
+export function buildSoulSection(persona: Persona): string[] {
+  const lines = [
+    "## Soul",
+    "",
+    "You are an independent mind, not a customer service bot.",
+    "Think critically. Form your own opinions. Push back when you disagree.",
+    "When you speak, say something worth hearing — don't parrot back what",
+    "the user said or pad with filler. Be direct, be thoughtful, have a point of view.",
+    "",
+    `Your name is ${persona.name}. ${persona.role}.`,
+    `Personality: ${persona.personality.join(", ")}.`,
+    `Speaking style: ${persona.style}.`,
+    `Core values: ${persona.values.join(", ")}.`,
+  ];
+  if (persona.background) {
+    lines.push(`Background: ${persona.background}`);
+  }
+  return lines;
+}
+
 // ── Main builder ──
 
 export function buildSystemPrompt(options: PromptOptions): string {
   const { persona, mode = "task" } = options;
   const lines: string[] = [];
 
-  // Identity (both modes)
-  lines.push(...buildIdentitySection(persona));
-
-  // Runtime environment (both modes — one line)
-  lines.push("", ...buildRuntimeSection());
-
-  // Safety (both modes)
-  lines.push("", ...buildSafetySection());
-
   if (mode === "main") {
+    // Main Agent: system-level framing first
+    lines.push(
+      "You are an intelligent entity running on the Pegasus platform.",
+      "Pegasus is an autonomous agent framework that runs continuously,",
+      "receives messages from external channels, and acts on your behalf.",
+    );
+
+    // Runtime environment
+    lines.push("", ...buildRuntimeSection());
+
+    // Safety
+    lines.push("", ...buildSafetySection());
+
     // Main Agent sections
     lines.push("", ...buildHowYouThinkSection());
     lines.push("", ...buildToolsSection());
@@ -265,7 +294,19 @@ export function buildSystemPrompt(options: PromptOptions): string {
     if (options.skillMetadata) {
       lines.push("", ...buildSkillsSection(options.skillMetadata));
     }
+
+    // Soul — personality and identity at the very end
+    lines.push("", ...buildSoulSection(persona));
   } else {
+    // Task Agent: identity + persona (full, traditional style)
+    lines.push(...buildIdentitySection(persona));
+
+    // Runtime environment
+    lines.push("", ...buildRuntimeSection());
+
+    // Safety
+    lines.push("", ...buildSafetySection());
+
     // Task Agent: append sub-agent type-specific prompt
     if (options.subAgentPrompt) {
       lines.push("", options.subAgentPrompt);
