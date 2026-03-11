@@ -6,7 +6,7 @@
 
 Not every background task needs the same tools or instructions. A web search should not have write_file. A planning task should not be calling web_search. AITask Types let the MainAgent spawn **specialized tasks** with per-type tool sets and system prompts.
 
-AITask types are defined as **files** (SUBAGENT.md), not hardcoded. Users can add custom task types by creating files in `data/subagents/`.
+AITask types are defined as **files** (SUBAGENT.md), not hardcoded. Users can add custom task types by creating files in `~/.pegasus/subagents/`.
 
 ## File Format
 
@@ -17,7 +17,7 @@ subagents/
   general/SUBAGENT.md    # builtin, git tracked
   explore/SUBAGENT.md
   plan/SUBAGENT.md
-data/subagents/           # user-created, runtime (overrides builtin)
+~/.pegasus/subagents/           # user-created, runtime (overrides builtin)
   deepresearch/SUBAGENT.md
 ```
 
@@ -143,24 +143,21 @@ Your results will be returned to a main agent. You do NOT interact with the user
 
 ## Design Decisions
 
-### 1. `spawn_task` gets a `type` parameter
+### 1. `spawn_subagent` gets a `type` parameter
 
-MainAgent's LLM uses `spawn_task(type, description, input)` to specify the task type. The type defaults to `"general"` for backward compatibility.
+MainAgent's LLM uses `spawn_subagent(type, description, input)` to specify the subagent type. The type defaults to `"general"` for backward compatibility.
 
 The MainAgent system prompt explains when to use each type:
 ```
-- spawn_task(type: "explore"): research, web search, code reading, information gathering (read-only)
-- spawn_task(type: "plan"): analyze a problem, produce a structured plan (read + write plans)
-- spawn_task(type: "general"): full capabilities — file I/O, code changes, multi-step work
+- spawn_subagent(type: "explore"): research, web search, code reading, information gathering (read-only)
+- spawn_subagent(type: "plan"): analyze a problem, produce a structured plan (read + write plans)
+- spawn_subagent(type: "general"): full capabilities — file I/O, code changes, multi-step work
 ```
 
-### 2. Type stored in TaskContext, flows through events
+### 2. Type flows through agent creation
 
-`TaskContext` gets a `taskType` field. The type flows:
-- `spawn_task(type)` → `Agent.submit(text, source, type)` → `MESSAGE_RECEIVED` event payload → `TaskFSM.fromEvent()` → `context.taskType`
-- Agent reads `context.taskType` to select tools and system prompt at each cognitive iteration
-
-On resume, `taskType` is preserved (not cleared by `prepareContextForResume`).
+The subagent type determines which tools and system prompt the agent receives.
+Agent reads the type to select tools and system prompt at each cognitive iteration.
 
 ### 3. Tool restriction is two-layer defense
 
@@ -191,22 +188,16 @@ Thinker's `run()` method accepts an optional `toolRegistry` parameter that overr
 ```
 User: "search for the latest AI papers"
   ↓
-MainAgent LLM decides: spawn_task(type="explore", input="...")
+MainAgent LLM decides: spawn_subagent(type="explore", input="...")
   ↓
-MainAgent extracts type, calls agent.submit(input, source, type="explore")
+MainAgent creates a new Agent with type="explore"
   ↓
-Agent emits MESSAGE_RECEIVED with payload.taskType = "explore"
-  ↓
-TaskFSM.fromEvent() → context.taskType = "explore"
-  ↓
-Agent._runReason(task)
-  → selects exploreToolRegistry from per-type map
-  → builds system prompt with taskType="explore"
+Agent configured with:
+  → explore-specific ToolRegistry (read-only tools)
+  → explore-specific system prompt from SUBAGENT.md
   → LLM sees explore-specific tools + explore-specific prompt
   ↓
-Task executes with restricted tools and specialized instructions
-  ↓
-Agent._runAct(task)
+Agent executes with restricted tools and specialized instructions
   → validates tool calls against explore allowed list
   → executes approved tools, rejects disallowed ones
 ```

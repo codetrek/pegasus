@@ -122,7 +122,7 @@ Environment Variables > config.local.yml > config.yml > Schema Defaults
 | `${VAR:?error}` | Error if VAR is unset or empty |
 | `${VAR:+alternate}` | Use `alternate` only if VAR is set |
 
-### Multi-Model Architecture (Providers & Roles)
+### Multi-Model Architecture (Providers & Tiers)
 
 Pegasus supports multiple LLM providers simultaneously. The configuration uses two concepts:
 
@@ -150,24 +150,26 @@ Each provider has:
 - `apiKey` — API key (use `dummy` for local models).
 - `baseURL` — Optional custom endpoint.
 
-**Roles** — Map agent responsibilities to specific models, using `"provider/model"` format:
+**Tiers** — Map agent responsibilities to specific models, using `"provider/model"` format:
 
 ```yaml
 llm:
-  roles:
-    default: openai/gpt-4o         # Main model for all tasks
-    subAgent: anthropic/claude-sonnet-4-20250514  # Sub-agent tasks
-    compact:                         # Context compaction (falls back to default)
-    reflection:                      # Self-reflection (falls back to default)
+  # Default model — used for MainAgent and as fallback
+  default: openai/gpt-4o
+
+  tiers:
+    fast: openai/gpt-4o-mini       # explore subagent, compact, reflection
+    balanced:                       # general subagent (falls back to default)
+    powerful:                       # plan subagent, complex reasoning (falls back to default)
 ```
 
-Roles without a value fall back to `default`. Override via environment variables:
+Tiers without a value fall back to `default`. Override via environment variables:
 
 ```bash
 LLM_DEFAULT_MODEL=anthropic/claude-sonnet-4-20250514
-LLM_SUB_AGENT_MODEL=openai/gpt-4o-mini
-LLM_COMPACT_MODEL=openai/gpt-4o-mini
-LLM_REFLECTION_MODEL=openai/gpt-4o-mini
+LLM_FAST_MODEL=openai/gpt-4o-mini
+LLM_BALANCED_MODEL=openai/gpt-4o
+LLM_POWERFUL_MODEL=anthropic/claude-sonnet-4-20250514
 ```
 
 ### Adding a Custom Provider
@@ -182,8 +184,8 @@ llm:
       apiKey: ${TOGETHER_API_KEY}
       baseURL: https://api.together.xyz/v1
 
-  roles:
-    default: together/meta-llama/Llama-3-70b-chat-hf
+  tiers:
+    fast: together/meta-llama/Llama-3-70b-chat-hf
 ```
 
 ### Full Configuration Reference
@@ -192,7 +194,7 @@ llm:
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `llm.roles.default` | `openai/gpt-4o` | Default model in `provider/model` format |
+| `llm.default` | `openai/gpt-4o-mini` | Default model in `provider/model` format |
 | `llm.maxConcurrentCalls` | `3` | Max parallel LLM requests |
 | `llm.timeout` | `120` | LLM call timeout in seconds |
 | `llm.contextWindow` | Auto-detected | Override context window size (tokens) |
@@ -234,7 +236,7 @@ llm:
 | Key | Default | Description |
 |-----|---------|-------------|
 | `system.logLevel` | `info` | Log level: `debug`, `info`, `warn`, `error`, `silent` |
-| `system.dataDir` | `data` | Data directory for logs, sessions, and personas |
+| `system.homeDir` | `~/.pegasus` | Home directory for logs, sessions, and runtime data |
 | `system.logFormat` | `json` | Log format: `json` (structured) or `line` (human-readable) |
 
 ### Custom Persona
@@ -255,7 +257,7 @@ Create a persona file:
 Then reference it in `.env`:
 
 ```bash
-IDENTITY_PERSONA_PATH=data/personas/my-assistant.json
+IDENTITY_PERSONA_PATH=./data/personas/my-assistant.json
 ```
 
 ## Available Scripts
@@ -346,9 +348,9 @@ startCLI()
 5. Create MainAgent       (new MainAgent({ models, persona, settings }))
 6. Start agent            (mainAgent.start())
   ↓
-User input → mainAgent.send(text) → TaskFSM cognitive loop
+User input → mainAgent.send(text) → Agent processStep loop
   ↓
-REASONING → ACTING → COMPLETED (or loop back to REASONING)
+processStep loop (LLM call → tool execution → repeat)
   ↓
 mainAgent.onReply(callback) → display response to user
 ```

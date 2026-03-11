@@ -95,7 +95,7 @@ session:
 
 system:
   logLevel: info          # debug | info | warn | error | silent
-  dataDir: data           # root directory for all runtime data
+  homeDir: ~/.pegasus     # root directory for all runtime data
   logFormat: json         # json | line
 ```
 
@@ -334,16 +334,16 @@ For the full design, see [Tier-Based Model Selection](./multi-model.md).
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `system.logLevel` | string | `"info"` | Log level: `debug`, `info`, `warn`, `error`, `silent` |
-| `system.dataDir` | string | **required** | Root directory for all runtime data (logs, memory, sessions, etc.) |
+| `system.homeDir` | string | `"~/.pegasus"` | Root directory for all runtime data (logs, memory, sessions, etc.) |
 | `system.logFormat` | string | `"json"` | Log output format: `json` (structured) or `line` (human-readable) |
 
-> **Note on `dataDir`**: Memory storage is derived from `dataDir` (at `{dataDir}/memory/`). There is no separate `memory.dataDir` setting.
+> **Note on `homeDir`**: Memory storage is derived from `homeDir` (at `{homeDir}/agents/main/memory/`). There is no separate `memory.dataDir` setting.
 
 ## Logging
 
 Pegasus writes logs exclusively to files — there is no console output.
 
-- **Log file**: `{dataDir}/logs/pegasus.log`
+- **Log file**: `{homeDir}/logs/pegasus.log`
 - **Daily rotation**: new file each day (`pegasus.log.YYYY-MM-DD`)
 - **Size rotation**: rotated when file exceeds 10 MB
 - **Auto-cleanup**: logs older than 30 days are deleted
@@ -360,7 +360,7 @@ Pegasus writes logs exclusively to files — there is no console output.
 
 ```bash
 # Follow log output in real time
-tail -f data/logs/pegasus.log
+tail -f ~/.pegasus/logs/pegasus.log
 
 # For human-readable output, set logFormat: line in config.yml
 ```
@@ -390,7 +390,7 @@ llm:
 
 system:
   logLevel: info
-  dataDir: data
+  homeDir: ~/.pegasus
 ```
 
 **config.local.yml** (personal, not committed):
@@ -417,7 +417,7 @@ agent:
 
 system:
   logLevel: warn
-  dataDir: /var/lib/pegasus
+  homeDir: /var/lib/pegasus
   logFormat: json
 ```
 
@@ -435,7 +435,7 @@ llm:
 
 system:
   logLevel: debug
-  dataDir: data
+  homeDir: ~/.pegasus
   logFormat: line
 ```
 
@@ -458,7 +458,7 @@ llm:
   contextWindow: 200000  # explicit override
 
 system:
-  dataDir: data
+  homeDir: ~/.pegasus
 ```
 
 ## Security Best Practices
@@ -476,7 +476,7 @@ llm:
   default: openai/gpt-4o-mini
 
 system:
-  dataDir: data
+  homeDir: ~/.pegasus
 ```
 
 **.env** (gitignored — contains secrets):

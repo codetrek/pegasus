@@ -21,7 +21,7 @@ Internal channels (`cli`, `project`, `subagent`) share this trust level because 
 
 ## Owner Identity Storage
 
-Owner identity is stored at `~/.pegasus/owner.json` — deliberately **outside** the LLM's memory directory (`data/agents/main/memory/`).
+Owner identity is stored at `~/.pegasus/owner.json` — deliberately **outside** the LLM's memory directory (`~/.pegasus/agents/main/memory/`).
 
 **Why this location?**
 - The `memory_write` tool is scoped to the `data/` directory. Even if prompt injection tricks the LLM into calling `memory_write`, it cannot modify `owner.json`.
@@ -162,7 +162,7 @@ This separation ensures normal Project notifications continue working unchanged,
 - **One per channel type**: all non-owner Telegram users share `channel:telegram`
 - **Auto-created**: on first untrusted message for a channel type
 - **Persistent**: survives restarts, accumulates its own memory and conversation history
-- **Isolated data**: own session, memory, and task logs under `data/agents/projects/channel:<type>/`
+- **Isolated data**: own session, memory, and task logs under `~/.pegasus/agents/projects/channel:<type>/`
 - **Full channel info**: receives the sender's channel metadata (channelId, userId, replyTo) with each message, enabling reply routing
 
 ### Why Per-Channel-Type?
@@ -190,7 +190,7 @@ This separation ensures normal Project notifications continue working unchanged,
 
 ### Layer 4: Data Level
 - `owner.json` outside `data/` directory — unreachable by `memory_write`
-- Channel Project memory isolated in `data/agents/projects/channel:<type>/memory/`
+- Channel Project memory isolated in `~/.pegasus/agents/projects/channel:<type>/memory/`
 - No shared state between MainAgent memory and Channel Project memory
 
 ### Prompt Injection Resistance

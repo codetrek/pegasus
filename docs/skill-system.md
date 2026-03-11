@@ -66,10 +66,10 @@ Review the code changes focusing on...
 
 ```
 skills/              ← builtin (git tracked, ships with project)
-data/skills/         ← user-installed + LLM-created (runtime, gitignored)
+~/.pegasus/skills/         ← user-installed + LLM-created (runtime, gitignored)
 ```
 
-Priority: `data/skills/` > `skills/` (user overrides builtin).
+Priority: `~/.pegasus/skills/` > `skills/` (user overrides builtin).
 
 When skills share the same name, the higher-priority location wins.
 
@@ -270,7 +270,7 @@ const use_skill: Tool = {
 
 | Component | Why |
 |-----------|-----|
-| TaskFSM | Tasks from skills use the same FSM |
+| AgentState | Skill-triggered agents use the same state model |
 | EventBus | No new events needed |
 | TaskPersister | Skill tasks are normal tasks |
 | Memory system | Skills don't interact with memory directly |

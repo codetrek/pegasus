@@ -37,7 +37,7 @@ Two complementary types of memory, combined:
 ### Directory Layout
 
 ```
-data/agents/main/memory/
+~/.pegasus/agents/main/memory/
 ├── facts/
 │   ├── user.md      # User: identity, preferences, social relationships, important dates
 │   └── memory.md    # Experience: accumulated insights, patterns, non-obvious knowledge
@@ -241,7 +241,7 @@ Memory is accessed through the existing tool system (M3 infrastructure), requiri
 
 ### Path Sandboxing
 
-All paths are relative to the agent's memory directory (e.g., `data/agents/main/memory/`) and **must not escape** that directory. The tools validate paths to prevent directory traversal attacks.
+All paths are relative to the agent's memory directory (e.g., `~/.pegasus/agents/main/memory/`) and **must not escape** that directory. The tools validate paths to prevent directory traversal attacks.
 
 ## 7. Write Timing: When Memories Are Created
 
@@ -355,7 +355,7 @@ Reflector ── tool-use loop ┤── LLM directly calls memory_write (new fa
 The memory system integrates **entirely through the tool mechanism**. No modifications needed to:
 
 - EventBus
-- TaskFSM state machine
+- Agent state machine
 - Cognitive loop (reason → act)
 - Agent event dispatch
 
@@ -368,12 +368,7 @@ The only changes are:
 
 ## 9. Configuration
 
-```yaml
-memory:
-  dataDir: data/memory    # Root directory for memory files
-```
-
-Replace the current `dbPath` / `vectorDbPath` config with a single `dataDir`.
+Memory files are stored under `{homeDir}/agents/main/memory/` (default: `~/.pegasus/agents/main/memory/`). No separate memory config needed.
 
 ## 10. Acceptance Criteria
 
@@ -381,7 +376,7 @@ Replace the current `dbPath` / `vectorDbPath` config with a single `dataDir`.
 |---|-----------|---------------|
 | 1 | **Remembers user info across restarts** | User says "I'm Zhang San" → restart → ask "what's my name?" → correct answer |
 | 2 | **Remembers past work** | Ask "what bug did we fix last time?" → accurate summary |
-| 3 | **Human-readable files** | Open `data/agents/main/memory/facts/user.md` in an editor → makes sense |
+| 3 | **Human-readable files** | Open `~/.pegasus/agents/main/memory/facts/user.md` in an editor → makes sense |
 | 4 | **Human-editable** | Manually edit a memory file → agent uses updated content |
 | 5 | **Zero new dependencies** | No new entries in `package.json` |
 | 6 | **Test coverage >= 95%** | `make coverage` passes |

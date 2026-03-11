@@ -13,7 +13,7 @@ Persist task execution as incremental event logs. Each state change appends one 
 ## Storage Layout
 
 ```
-data/agents/main/tasks/
+~/.pegasus/agents/main/tasks/
 ├── index.jsonl                      ← taskId → date lookup
 ├── 2026-02-25/
 │   ├── a1b2c3d4e5f6.jsonl
@@ -28,7 +28,7 @@ data/agents/main/tasks/
 
 ## Index
 
-Two control files at `data/agents/main/tasks/`:
+Two control files at `~/.pegasus/agents/main/tasks/`:
 
 **`index.jsonl`** — taskId → date folder mapping. Append-only, one line per task, written on creation.
 
@@ -54,11 +54,11 @@ A task is added on creation and removed on completion or failure. On startup, an
 Each line captures a single state transition with its incremental data:
 
 ```jsonl
-{"ts":1740000000,"event":"TASK_CREATED","taskId":"abc123","data":{...}}
-{"ts":1740000001,"event":"REASON_DONE","taskId":"abc123","data":{...}}
-{"ts":1740000002,"event":"TOOL_CALL_COMPLETED","taskId":"abc123","data":{...}}
-{"ts":1740000003,"event":"TASK_COMPLETED","taskId":"abc123","data":{...}}
-{"ts":1740000004,"event":"REFLECTION_COMPLETE","taskId":"abc123","data":{...}}
+{"ts":1740000000,"event":"TASK_CREATED","agentId":"abc123","data":{...}}
+{"ts":1740000001,"event":"REASON_DONE","agentId":"abc123","data":{...}}
+{"ts":1740000002,"event":"TOOL_CALL_COMPLETED","agentId":"abc123","data":{...}}
+{"ts":1740000003,"event":"TASK_COMPLETED","agentId":"abc123","data":{...}}
+{"ts":1740000004,"event":"REFLECTION_COMPLETE","agentId":"abc123","data":{...}}
 ```
 
 Only new/changed data is written per event — messages are tracked by index to avoid duplication.
@@ -90,7 +90,7 @@ EventBus events
     ↓ (subscribe)
 TaskPersister
     ↓ (append)
-data/agents/main/tasks/YYYY-MM-DD/{taskId}.jsonl
+~/.pegasus/agents/main/tasks/YYYY-MM-DD/{taskId}.jsonl
     ↓ (replay)
 TaskContext / Message[]
     ↓ (via tools)

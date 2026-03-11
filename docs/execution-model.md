@@ -67,7 +67,7 @@ MainAgent (conversation brain, always running)
 | **Persistent memory** | Yes (global) | No | No | Yes (project-scoped) |
 | **Session persistence** | Yes | Yes (for debugging + resume) | No (task logs only) | Yes |
 | **User communication** | `reply()` tool | Via `notify` → MainAgent | Via `notify` → caller | Via `notify` → MainAgent |
-| **Data directory** | `data/agents/main/` | `data/agents/subagents/<id>/` | `data/agents/main/tasks/` | `data/agents/projects/<name>/` |
+| **Data directory** | `~/.pegasus/agents/main/` | `~/.pegasus/agents/subagents/<id>/` | `~/.pegasus/agents/main/tasks/` | `~/.pegasus/agents/projects/<name>/` |
 
 ### When to Use What
 
@@ -316,7 +316,7 @@ self.onmessage = async (event) => {
   config: {
     input: string;           // the task description from MainAgent
     systemPrompt?: string;   // optional custom system prompt
-    subagentDir: string;      // e.g. "data/agents/subagents/abc123"
+    subagentDir: string;      // e.g. "~/.pegasus/agents/subagents/abc123"
     memorySnapshot?: string; // MainAgent memory index (read-only, injected once)
     contextWindow?: number;  // optional override
   }
@@ -327,7 +327,7 @@ self.onmessage = async (event) => {
   type: "init",
   mode: "project",
   config: {
-    projectPath: string;     // e.g. "data/agents/projects/frontend-redesign"
+    projectPath: string;     // e.g. "~/.pegasus/agents/projects/frontend-redesign"
     contextWindow?: number;
   }
 }
@@ -377,7 +377,7 @@ SubAgent persists its session to disk for two purposes:
 2. **Resume**: MainAgent can resume a completed SubAgent with new input
 
 ```
-data/agents/subagents/
+~/.pegasus/agents/subagents/
 ├── abc123/
 │   ├── session/
 │   │   └── current.jsonl    ← SubAgent conversation history
@@ -480,7 +480,7 @@ interface WorkerEntry {
 ### Manager Responsibilities
 
 **ProjectManager** (unchanged from current design):
-- Scan `data/agents/projects/*/PROJECT.md` on startup
+- Scan `~/.pegasus/agents/projects/*/PROJECT.md` on startup
 - CRUD operations (create, disable, enable, archive)
 - Status transitions and PROJECT.md updates
 - Calls `WorkerAdapter.startWorker()` / `stopWorker()` for lifecycle
@@ -489,7 +489,7 @@ interface WorkerEntry {
 - Spawn SubAgent Workers on demand (from `spawn_subagent` tool)
 - Track active SubAgents
 - Auto-destroy Worker when SubAgent completes
-- Manage session persistence path (`data/agents/subagents/<id>/`)
+- Manage session persistence path (`~/.pegasus/agents/subagents/<id>/`)
 - Handle `resume_subagent` (load session, spawn new Worker)
 
 ## Communication Model
@@ -701,8 +701,8 @@ Only starts after Phase 1 is merged to main.
 |-----------|-------------|
 | `src/workers/worker-adapter.ts` | Unified Worker transport (extracted from ProjectAdapter) |
 | `src/workers/agent-worker.ts` | Unified Worker bootstrap (replaces project-worker.ts) |
-| `src/subagent/manager.ts` | SubAgentManager — spawn, track, destroy Workers |
-| `src/subagent/types.ts` | SubAgent type definitions |
+| `src/agents/subagents/manager.ts` | SubAgentManager — spawn, track, destroy Workers |
+| `src/agents/subagents/types.ts` | SubAgent type definitions |
 | `src/tools/builtins/spawn-subagent-tool.ts` | New `spawn_subagent` tool for MainAgent |
 | `src/tools/builtins/resume-subagent-tool.ts` | New `resume_subagent` tool for MainAgent |
 
@@ -720,8 +720,8 @@ Only starts after Phase 1 is merged to main.
 
 ```
 src/workers/          ← unified Worker management
-src/subagent/         ← SubAgent lifecycle (NOT src/subagents/ — that's gone in Phase 1)
-data/agents/subagents/       ← runtime SubAgent sessions (created at runtime)
+src/agents/subagents/         ← SubAgent lifecycle (NOT src/subagents/ — that's gone in Phase 1)
+~/.pegasus/agents/subagents/       ← runtime SubAgent sessions (created at runtime)
 ```
 
 **Documentation updates**:

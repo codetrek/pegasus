@@ -42,7 +42,7 @@ Both grant types run eagerly at startup. Device Code Flow may block while waitin
 ```
 src/mcp/auth/
 ├── types.ts              # Zod schemas for config + runtime types
-├── token-store.ts        # File-based token persistence (data/mcp-auth/)
+├── token-store.ts        # File-based token persistence (~/.pegasus/mcp-auth/)
 ├── device-code.ts        # RFC 8628 Device Code Flow implementation
 ├── refresh-monitor.ts    # Proactive token refresh + expiry events
 ├── provider-factory.ts   # Config → transport auth options
@@ -299,7 +299,7 @@ On next startup, `TokenStore` has a cached token. If still valid (not expired), 
 
 ### Storage Location
 
-`data/mcp-auth/{server-name}.json`
+`~/.pegasus/mcp-auth/{server-name}.json`
 
 Server names sanitized for filesystem: `name.replace(/[^a-zA-Z0-9_-]/g, "_")`. After sanitization, uniqueness is verified across all configured servers — if two server names collide (e.g., `my-server` and `my_server` both become `my_server`), startup fails with a clear error message listing the conflicting names.
 
@@ -327,7 +327,7 @@ Token files are plaintext JSON — a deliberate tradeoff. Encryption adds key ma
 
 Mitigations:
 - Token files are written with `0600` permissions (owner-only read/write)
-- `data/mcp-auth/` directory is created with `0700` permissions
+- `~/.pegasus/mcp-auth/` directory is created with `0700` permissions
 - Config loader MUST NOT log the full config object — `clientSecret` and token values are redacted in all log output
 - `data/` is gitignored to prevent accidental commits
 

@@ -41,7 +41,7 @@ MainAgent (brain, main thread)
 │   │   └── ProjectAgent instance
 │   │       ├── Proxy LanguageModel (LLM calls → main thread)
 │   │       ├── Local ToolRegistry + ToolExecutor
-│   │       ├── Local EventBus + TaskFSM
+│   │       ├── Local EventBus + AgentState
 │   │       ├── Local SessionStore + Memory
 │   │       └── spawn_task (can delegate sub-tasks)
 │   ├── Worker "social-media"
@@ -55,9 +55,9 @@ MainAgent (brain, main thread)
 | # | Question | Decision | Rationale |
 |---|----------|----------|-----------|
 | 1 | Naming | **Project** | Distinct from OpenClaw's Workspace; intuitive |
-| 2 | Core directory | `data/agents/projects/<name>/` | Unified plain directory for session, memory, skills, tasks |
+| 2 | Core directory | `~/.pegasus/agents/projects/<name>/` | Unified plain directory for session, memory, skills, tasks |
 | 3 | Working data | Separate from core directory | Code/work files live in independent git repos; Project directory stores only the agent's brain |
-| 4 | Agent instance | **Independent Agent per Project** | Own EventBus, TaskFSM, cognitive pipeline in Worker thread |
+| 4 | Agent instance | **Independent Agent per Project** | Own EventBus, AgentState, cognitive pipeline in Worker thread |
 | 5 | Lifecycle | **Three states**: active ⇄ disabled, active/disabled → archived | Simple, no transient states |
 | 6 | Concurrency | **Multiple Projects can be active in parallel** | MainAgent is a project manager overseeing many efforts |
 | 7 | Communication | **Channel Adapter pattern** | Single ProjectAdapter manages all Workers, routes by channelId |
@@ -73,7 +73,7 @@ MainAgent (brain, main thread)
 ## Project Directory Structure
 
 ```
-data/agents/projects/
+~/.pegasus/agents/projects/
 ├── frontend-redesign/
 │   ├── PROJECT.md              ← definition file (system prompt + metadata)
 │   ├── session/
@@ -314,7 +314,7 @@ Each active Project runs in a **Bun Worker thread** — a separate JavaScript ru
 |---------------|-------|-----|
 | **LLM API calls** | Main thread | Unified credentials, single semaphore for concurrency control, centralized cost tracking |
 | **Tool execution** | Worker thread | Parallel I/O, crash isolation, no main thread blocking |
-| **EventBus + TaskFSM** | Worker thread | Independent state management per Project |
+| **EventBus + AgentState** | Worker thread | Independent state management per Project |
 | **Session persistence** | Worker thread | Scoped to project directory |
 | **Memory read/write** | Worker thread | Scoped to project directory |
 | **PROJECT.md updates** | Main thread | Only MainAgent modifies status; avoids concurrency |
@@ -353,11 +353,11 @@ Main Thread (MainAgent)
 ├── ProjectAdapter (single instance, manages all Workers)
 │   ├── Worker Thread 1 (Project "frontend-redesign")
 │   │   ├── Own EventBus
-│   │   ├── Own Agent (TaskRegistry, TaskFSM, cognitive pipeline)
+│   │   ├── Own Agent (AgentState, cognitive pipeline)
 │   │   ├── Proxy LanguageModel (→ main thread)
 │   │   ├── Own ToolRegistry + ToolExecutor
-│   │   ├── Own SessionStore (data/agents/projects/frontend-redesign/session/)
-│   │   └── Own memory tools (data/agents/projects/frontend-redesign/memory/)
+│   │   ├── Own SessionStore (~/.pegasus/agents/projects/frontend-redesign/session/)
+│   │   └── Own memory tools (~/.pegasus/agents/projects/frontend-redesign/memory/)
 │   │
 │   └── Worker Thread 2 (Project "social-media")
 │       └── ... (same structure)
@@ -477,7 +477,7 @@ A Project Agent has a similar tool set to a `general` AITask, plus:
 
 On MainAgent startup:
 
-1. Scan `data/agents/projects/*/PROJECT.md`
+1. Scan `~/.pegasus/agents/projects/*/PROJECT.md`
 2. Parse frontmatter to get status
 3. For each `active` Project → spawn Worker thread via ProjectAdapter
 4. For `disabled`/`archived` → register metadata only (no Worker)
@@ -488,7 +488,7 @@ This mirrors how tasks and skills are discovered — file scanning, no index fil
 
 ## Session Management Within Projects
 
-Each Project has its own SessionStore (`data/agents/projects/<name>/session/`):
+Each Project has its own SessionStore (`~/.pegasus/agents/projects/<name>/session/`):
 
 - **Same format as MainAgent**: JSONL files, append-only
 - **Same compaction logic**: auto-compact when context window fills up
@@ -499,12 +499,12 @@ Each Project has its own SessionStore (`data/agents/projects/<name>/session/`):
 ## Memory Isolation
 
 ```
-data/agents/main/memory/                 ← MainAgent memory (global)
+~/.pegasus/agents/main/memory/                 ← MainAgent memory (global)
 ├── facts/user.md
 ├── facts/project.md
 └── episodes/2026-02.md
 
-data/agents/projects/frontend-redesign/  ← Project memory (scoped)
+~/.pegasus/agents/projects/frontend-redesign/  ← Project memory (scoped)
 ├── memory/facts/context.md
 ├── memory/facts/decisions.md
 └── memory/episodes/2026-02.md
@@ -512,7 +512,7 @@ data/agents/projects/frontend-redesign/  ← Project memory (scoped)
 
 - MainAgent memory = global knowledge (user preferences, system facts)
 - Project memory = project-specific knowledge (decisions made, patterns found, progress notes)
-- Project Agent's `memory_*` tools are scoped to `data/agents/projects/<name>/memory/`
+- Project Agent's `memory_*` tools are scoped to `~/.pegasus/agents/projects/<name>/memory/`
 - MainAgent can read Project memory if needed (via `memory_read` with explicit path)
 - Cross-pollination happens through MainAgent ↔ Project messages, not shared memory
 
@@ -520,12 +520,12 @@ data/agents/projects/frontend-redesign/  ← Project memory (scoped)
 
 ### AITasks (unchanged)
 
-The existing AITask system (`spawn_task`, TaskFSM, etc.) is unchanged. Both MainAgent and Project Agents can spawn tasks for one-off work.
+The existing subagent system (`spawn_subagent`, AgentState, etc.) is unchanged. Both MainAgent and Project Agents can spawn tasks for one-off work.
 
 ### Skills
 
-- **Global skills** (`skills/`, `data/skills/`): available to MainAgent and all Projects
-- **Project skills** (`data/agents/projects/<name>/skills/`): only available to that Project
+- **Global skills** (`skills/`, `~/.pegasus/skills/`): available to MainAgent and all Projects
+- **Project skills** (`~/.pegasus/agents/projects/<name>/skills/`): only available to that Project
 - Project Agent's SkillRegistry loads both global and project-specific skills
 
 ### Channel Adapters

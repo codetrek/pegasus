@@ -1,6 +1,6 @@
 # Browser Tools
 
-> Source: `src/tools/browser/`
+> Source: `src/agents/tools/browser/`
 
 ## 1. Positioning
 

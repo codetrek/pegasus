@@ -2,7 +2,7 @@
 
 Main Agent is Pegasus's **inner voice** — its continuous mental activity. Like a human's inner monologue when thinking through a problem, Main Agent's LLM output is self-talk: reasoning, weighing options, planning next steps. The user never sees this internal dialogue directly.
 
-All outward behavior is through explicit tool calls. When Main Agent wants to speak to the user, it calls the `reply` tool. When it needs complex work done, it calls `spawn_task`. The LLM's text output is purely internal cognition.
+All outward behavior is through explicit tool calls. When Main Agent wants to speak to the user, it calls the `reply` tool. When it needs complex work done, it calls `spawn_subagent`. The LLM's text output is purely internal cognition.
 
 ## Core Concept: Inner Monologue
 
@@ -282,7 +282,7 @@ Main Agent maintains a session-level message history. This is the record of its 
 ### Persistence
 
 ```
-data/agents/main/session/
+~/.pegasus/agents/main/session/
 ├── current.jsonl              ← active session
 ├── 2026-02-25-143000.jsonl    ← compacted previous session
 └── 2026-02-24-180000.jsonl    ← older
@@ -312,13 +312,9 @@ SessionStore injects cancellation results to close them:
 
 This is purely a session data integrity concern — SessionStore doesn't know or care about tasks. It just ensures every tool call has a matching tool result so the message history is well-formed for the next LLM call.
 
-**Task recovery** (Task System's responsibility):
+**Subagent recovery** (handled during Agent startup):
 
-Handled by Agent during its own `start()`, completely independent of Main Agent:
-
-1. TaskPersister scans `data/agents/main/tasks/pending.json` for unfinished tasks
-2. For each: append `TASK_FAILED` to its JSONL log, remove from `pending.json`
-3. Push failure notification through the `onNotify` callback → enters Main Agent queue
+Pending subagents from a previous crash are marked as failed and their results are pushed through the notification callback to Main Agent's queue.
 
 Main Agent receives these as normal `task_notify` events. It doesn't know or care that they came from recovery vs normal execution.
 
@@ -350,7 +346,7 @@ The system prompt is built **once** at startup and cached for all LLM calls. Thi
 
 ### Prompt Modes
 
-The prompt builder (`src/prompts/main-agent.ts`) supports two modes via `buildSystemPrompt(options)`:
+The prompt builder (`src/agents/prompts/main-agent.ts`) supports two modes via `buildSystemPrompt(options)`:
 
 **Main Agent (mode: "main")** — full prompt with all sections:
 
@@ -377,7 +373,7 @@ The prompt builder (`src/prompts/main-agent.ts`) supports two modes via `buildSy
 
 Task Agents skip How You Think, Tools, Thinking Style, Reply vs Spawn, Channels, Session History, and Skills — saving ~100 lines of irrelevant tokens per LLM call.
 
-> **Source of truth:** The actual prompt text lives in `src/prompts/` — see `main-agent.ts` (MainAgent sections), `shared.ts` (identity/runtime/safety), `subagent.ts` (SubAgent prompt), and `internal.ts` (reflection/compact/extract).
+> **Source of truth:** The actual prompt text lives in `src/agents/prompts/` — see `main-agent.ts` (MainAgent sections), `shared.ts` (identity/runtime/safety), `subagent.ts` (SubAgent prompt), and `internal.ts` (reflection/compact/extract).
 
 ### Input Sanitization
 
@@ -448,9 +444,9 @@ Main Agent and the Task System are separate layers:
 | User interaction | Via `reply` tool | None (internal only) |
 | State | Session history (cross-task) | TaskContext (per-task) |
 | Tools | reply + spawn_task + simple tools | Full tool suite |
-| Persistence | data/agents/main/session/ (session JSONL) | data/agents/main/tasks/ (task JSONL) |
+| Persistence | ~/.pegasus/agents/main/session/ (session JSONL) | ~/.pegasus/agents/main/tasks/ (task JSONL) |
 | Lifetime | Entire session | Single task |
 | Communication | Receives notifications via callback | Pushes results to Main Agent queue |
 | Recovery | Repairs unclosed tool calls in session | Marks pending tasks as failed |
 
-The Task System (Agent, TaskFSM, cognitive pipeline, EventBus) is unchanged internally. Main Agent creates tasks through `spawn_task`, and receives results via the `onNotify` callback pushed directly into its message queue.
+The Task System (Agent, cognitive pipeline, EventBus) is unchanged internally. Main Agent creates tasks through `spawn_task`, and receives results via the `onNotify` callback pushed directly into its message queue.

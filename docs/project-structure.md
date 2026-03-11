@@ -10,127 +10,158 @@ pegasus/
 ├── config.yml                      # Default configuration
 │
 ├── docs/                           # System design documents
-│   ├── architecture.md             # Layered architecture overview
-│   ├── main-agent.md               # Main Agent: inner monologue, reply tool
-│   ├── cognitive.md                # Cognitive pipeline: Reason → Act (2-stage)
-│   ├── task-fsm.md                 # Task state machine (6 states)
-│   ├── events.md                   # Event system (EventType, EventBus)
-│   ├── agent.md                    # Agent (Task System): event processing
-│   ├── tools.md                    # Tool system: registration, execution
-│   ├── memory-system.md            # Long-term memory: facts + episodes
-│   ├── task-persistence.md         # JSONL event logs, replay
-│   ├── multi-model.md              # Per-role model config with ModelRegistry
-│   ├── session-compact.md          # Auto-compact with context window awareness
-│   ├── configuration.md            # YAML config + env var interpolation
-│   ├── logging.md                  # Log format, output, rotation
-│   ├── running.md                  # Setup and usage guide
-│   └── progress.md                 # Milestones, test coverage
 │
 ├── src/
-│   ├── cli.ts                      # CLI channel adapter (entry point)
+│   ├── cli.ts                      # CLI entry point
+│   ├── tui.ts                      # TUI entry point
+│   ├── pegasus.ts                  # PegasusApp (application orchestrator)
+│   ├── index.ts                    # Module exports
 │   │
 │   ├── agents/                     # Agent layer
-│   │   ├── agent.ts                # Task execution engine (event processor)
-│   │   └── main-agent.ts           # Main Agent (inner monologue + task dispatch)
+│   │   ├── agent.ts                # Agent (event processor, LLM loop)
+│   │   ├── main-agent.ts           # MainAgent (inner monologue + delegation)
+│   │   ├── auth-manager.ts         # OAuth/auth management
+│   │   ├── reflection.ts           # Reflection utilities
+│   │   ├── base/                   # Base abstractions
+│   │   │   ├── agent-state.ts      # AgentState (3 states: IDLE/BUSY/WAITING)
+│   │   │   ├── execution-state.ts  # Per-agent execution tracking
+│   │   │   └── tool-call-collector.ts  # Concurrent tool call collection
+│   │   ├── cognitive/              # Cognitive processors
+│   │   │   └── reflect.ts          # PostTaskReflector (async memory learning)
+│   │   ├── events/                 # Event system
+│   │   │   ├── types.ts            # Event, EventType definitions
+│   │   │   └── bus.ts              # EventBus (priority queue + dispatch)
+│   │   ├── prompts/                # System prompt builders
+│   │   │   ├── main-agent.ts       # MainAgent prompt sections
+│   │   │   ├── shared.ts           # Identity, runtime, safety sections
+│   │   │   ├── subagent.ts         # SubAgent prompt builder
+│   │   │   ├── internal.ts         # Reflection/compact/extract prompts
+│   │   │   └── skills.ts           # Skill section builder
+│   │   ├── subagents/              # SubAgent type system
+│   │   │   ├── types.ts            # SubAgentTypeDefinition
+│   │   │   ├── loader.ts           # Parse SUBAGENT.md files
+│   │   │   ├── registry.ts         # SubAgentTypeRegistry
+│   │   │   └── index.ts            # Re-exports
+│   │   └── tools/                  # Tool system
+│   │       ├── registry.ts         # ToolRegistry (registration + LLM format)
+│   │       ├── executor.ts         # ToolExecutor (validation + timeout + events)
+│   │       ├── builtins/           # Built-in tools
+│   │       │   ├── index.ts        # Tool collections
+│   │       │   └── *.ts            # Individual tool implementations
+│   │       └── browser/            # Browser automation (Playwright)
+│   │           ├── browser-manager.ts  # Persistent browser context
+│   │           ├── tools.ts        # Browser tool definitions
+│   │           └── types.ts        # Browser types
 │   │
 │   ├── channels/                   # Channel adapter types
 │   │   └── types.ts                # InboundMessage, OutboundMessage, ChannelInfo
 │   │
-│   ├── session/                    # Session management
-│   │   ├── store.ts                # Session persistence (JSONL) + repair
-│   │   └── context-windows.ts      # Model → context window size mapping
-│   │
-│   ├── events/                     # Event system
-│   │   ├── types.ts                # Event, EventType definitions
-│   │   └── bus.ts                  # EventBus (priority queue + dispatch)
-│   │
-│   ├── task/                       # Task state machine
-│   │   ├── states.ts               # TaskState (6 states) + terminal/suspendable sets
-│   │   ├── fsm.ts                  # TaskFSM (transitions + dynamic resolution)
-│   │   ├── context.ts              # TaskContext, Plan, PlanStep, ActionResult, PostTaskReflection
-│   │   ├── registry.ts             # TaskRegistry (active task management)
-│   │   └── persister.ts            # TaskPersister (JSONL event logs, replay, recovery)
-│   │
-│   ├── cognitive/                  # Cognitive processors (stateless)
-│   │   ├── think.ts                # Thinker — reasoning (LLM call)
-│   │   ├── plan.ts                 # Planner — task planning (pure code)
-│   │   ├── act.ts                  # Actor — action execution
-│   │   └── reflect.ts              # PostTaskReflector — async memory learning (tool-use loop)
-│   │
-│   ├── tools/                      # Tool system
-│   │   ├── types.ts                # Tool, ToolResult, ToolContext, ToolCategory
-│   │   ├── registry.ts             # ToolRegistry (registration + LLM format)
-│   │   ├── executor.ts             # ToolExecutor (validation + timeout + events)
-│   │   └── builtins/               # Built-in tools
-│   │       ├── index.ts            # Tool collections (allTaskTools, mainAgentTools, reflectionTools)
-│   │       ├── system-tools.ts     # current_time, sleep
-│   │       ├── file-tools.ts       # read_file, write_file, edit_file, grep_files, list_files, etc.
-│   │       ├── network-tools.ts    # web_search, web_fetch
-│   │       ├── data-tools.ts       # base64_encode/decode
-│   │       ├── memory-tools.ts     # memory_list, memory_read, memory_write, memory_patch, memory_append
-│   │       ├── task-tools.ts       # task_list, task_replay
-│   │       ├── reply-tool.ts       # reply (Main Agent only)
-│   │       └── spawn-task-tool.ts      # spawn_task (Main Agent only)
-│   │
-│   ├── subagents/                  # SubAgent type system
-│   │   ├── types.ts               # SubAgentTypeDefinition, SubAgentTypeFrontmatter
-│   │   ├── loader.ts              # Parse SUBAGENT.md files, scan directories
-│   │   ├── registry.ts            # SubAgentTypeRegistry (priority resolution, metadata)
-│   │   └── index.ts               # Re-exports
+│   ├── context/                    # Context window management
+│   │   ├── budget.ts               # Token budget calculation
+│   │   ├── model-limits.ts         # Model limit discovery
+│   │   ├── model-limits-cache.ts   # Disk cache for model limits
+│   │   └── providers/              # Per-provider limit adapters
 │   │
 │   ├── identity/                   # Identity layer
-│   │   ├── persona.ts              # Persona type + validation
-│   │   └── prompt.ts               # System prompt builder
+│   │   └── persona.ts              # Persona type + validation
+│   │
+│   ├── infra/                      # Infrastructure
+│   │   ├── config-schema.ts        # Zod schema for configuration
+│   │   ├── config-loader.ts        # YAML + env var loading
+│   │   ├── config.ts               # Config singleton
+│   │   ├── model-registry.ts       # ModelRegistry (per-tier model resolution)
+│   │   ├── logger.ts               # pino (lazy init, file-only)
+│   │   ├── llm-types.ts            # LLM type definitions (Message, LanguageModel)
+│   │   ├── llm-utils.ts            # LLM call utilities
+│   │   ├── token-counter.ts        # Token counting
+│   │   ├── errors.ts               # Error hierarchy
+│   │   ├── id.ts                   # Short ID generation
+│   │   ├── sanitize.ts             # Input sanitization
+│   │   ├── format.ts               # Formatting utilities
+│   │   └── time.ts                 # Time utilities
+│   │
+│   ├── mcp/                        # MCP server integration
+│   │   ├── auth/                   # OAuth for MCP servers
+│   │   └── *.ts                    # MCP manager + transport
+│   │
+│   ├── media/                      # Image/media handling
+│   │   ├── image-manager.ts        # Image storage + retrieval
+│   │   ├── image-resize.ts         # Image resize utilities
+│   │   └── types.ts                # ImageAttachment types
 │   │
 │   ├── models/                     # Data models
 │   │   └── tool.ts                 # ToolDefinition, ToolCall types
 │   │
-│   └── infra/                      # Infrastructure
-│       ├── config-schema.ts        # Zod schema for configuration
-│       ├── config-loader.ts        # YAML + env var loading
-│       ├── model-registry.ts       # ModelRegistry (per-role model resolution)
-│       ├── logger.ts               # pino (lazy init, file-only)
-│       ├── errors.ts               # Error hierarchy (PegasusError → ...)
-│       ├── id.ts                   # Short ID generation
-│       ├── llm-types.ts            # LLM type definitions (Message, LanguageModel)
-│       ├── llm-utils.ts            # LLM call utilities
-│       ├── openai-client.ts        # OpenAI-compatible model client
-│       ├── anthropic-client.ts     # Anthropic model client
-│       └── token-counter.ts        # Token counting (tiktoken / Anthropic API / estimate)
+│   ├── projects/                   # Project system
+│   │   └── *.ts                    # Project manager, discovery, lifecycle
+│   │
+│   ├── security/                   # Security layer
+│   │   └── *.ts                    # Message classification, owner tracking
+│   │
+│   ├── session/                    # Session management
+│   │   └── store.ts                # Session persistence (JSONL) + repair
+│   │
+│   ├── skills/                     # Skill system
+│   │   ├── loader.ts               # Parse SKILL.md files
+│   │   └── registry.ts             # SkillRegistry
+│   │
+│   ├── stats/                      # Runtime statistics
+│   │   ├── app-stats.ts            # AppStats interface + helpers
+│   │   ├── stats-persistence.ts    # Stats save/load to disk
+│   │   └── index.ts                # Re-exports
+│   │
+│   ├── storage/                    # Storage utilities
+│   │   └── *.ts                    # Paths, store helpers
+│   │
+│   ├── tui/                        # Terminal UI dashboard
+│   │   ├── app.tsx                  # TUI application root
+│   │   ├── components/             # Reusable UI components
+│   │   ├── hooks/                  # Solid.js hooks
+│   │   └── panels/                 # Dashboard panels
+│   │
+│   └── workers/                    # Worker transport
+│       └── worker-adapter.ts       # WorkerAdapter for Project Workers
+│
+├── subagents/                      # Built-in SubAgent type definitions
+│   ├── explore/SUBAGENT.md         # Read-only exploration
+│   ├── general/SUBAGENT.md         # Full-access general tasks
+│   └── plan/SUBAGENT.md            # Planning + memory write
+│
+├── skills/                         # Built-in skill definitions
+│   └── */SKILL.md                  # Skill definitions
 │
 ├── tests/
 │   ├── unit/                       # Unit tests
 │   └── integration/                # Integration tests
 │
-└── data/                           # Runtime data (.gitignored)
-    ├── main/                       # Main Agent session (current.jsonl)
-    ├── tasks/                      # Task execution logs (JSONL per task)
-    ├── memory/                     # Long-term memory (facts/, episodes/)
-    ├── personas/                   # Persona config files
-    └── logs/                       # Application logs
+└── data/                           # Local data (personas, etc.)
+    └── personas/                   # Persona config files
 ```
+
+Runtime data (sessions, memory, logs, stats) is stored in `~/.pegasus/` (configurable via `system.homeDir`).
 
 ## Module Dependencies
 
 ```
-CLI ──▶ MainAgent ──▶ Agent ──▶ cognitive (Thinker, Planner, Actor, PostTaskReflector)
-           │            │          │
-           │            ├──▶ task  │  (TaskFSM + TaskContext + TaskPersister)
-           │            │          │
-           │            ├──▶ events│  (EventBus + Event)
-           │            │
-           │            ├──▶ tools (ToolRegistry + ToolExecutor + builtins)
-           │            │
-           │            └──▶ identity (Persona + prompt)
-           │
-           └──▶ session (SessionStore + context-windows)
+CLI / TUI ──▶ PegasusApp ──▶ MainAgent ──▶ Agent
+                  │               │            │
+                  │               │            ├── base (AgentState, ExecutionState)
+                  │               │            ├── events (EventBus + Event)
+                  │               │            ├── cognitive (PostTaskReflector)
+                  │               │            └── tools (ToolRegistry + ToolExecutor + builtins + browser)
+                  │               │
+                  │               ├── prompts (system prompt builders)
+                  │               └── session (SessionStore)
+                  │
+                  ├── stats (AppStats)
+                  ├── context (budget, model limits)
+                  └── channels (adapters)
 
 All modules ──▶ infra (config, logger, errors, ModelRegistry)
 ```
 
 **Key constraints:**
-- `cognitive` processors are pure functions — receive TaskContext, return results
-- `task` FSM does not know about cognitive implementation details
+- `cognitive` contains only PostTaskReflector — the LLM loop is in Agent itself
 - `events` is pure infrastructure — no business logic dependencies
-- `Agent` is the thin orchestrator that connects everything
+- `Agent` drives the LLM tool-use loop directly via `processStep()`
 - `MainAgent` sits above Agent, managing user-facing conversation

@@ -33,11 +33,11 @@ llm:
     openai:
       apiKey: sk-proj-your-key
 
-  roles:
-    default: openai/gpt-4o                    # shorthand string
-    subAgent: openai/gpt-4o-mini
-    # Extended form with per-role options:
-    # subAgent:
+  tiers:
+    fast: openai/gpt-4o-mini
+    balanced: openai/gpt-4o
+    # Extended form with per-tier options:
+    # powerful:
     #   model: myhost/claude-sonnet-4
     #   contextWindow: 200000
     #   apiType: anthropic
@@ -54,7 +54,7 @@ See [Configuration](./configuration.md) for full reference.
 │  Main Agent (inner monologue +      │
 │              reply tool)            │
 ├─────────────────────────────────────┤
-│  EventBus → Agent → TaskFSM        │
+│  EventBus → Agent → AgentState     │
 │  Reason → Act (+ async Reflection) │
 ├─────────────────────────────────────┤
 │  Tools │ Memory │ Identity │ LLM   │
@@ -66,29 +66,35 @@ See [Configuration](./configuration.md) for full reference.
 ```
 pegasus/
 ├── src/
-│   ├── agents/          # MainAgent + Task Agent
-│   ├── cognitive/       # Reason → Act + PostTaskReflector
+│   ├── agents/          # MainAgent, Agent, SubAgent
+│   │   ├── base/        # AgentState, ExecutionState
+│   │   ├── cognitive/   # Reason → Act + PostTaskReflector
+│   │   ├── events/      # EventType, EventBus
+│   │   ├── prompts/     # System prompt builders
+│   │   ├── subagents/   # SubAgent type registry + loader
+│   │   └── tools/       # Tool registry, executor, builtins, browser
 │   ├── channels/        # Channel adapter types
-│   ├── events/          # EventType, EventBus
+│   ├── context/         # Context window budget + model limits
 │   ├── identity/        # Persona + system prompt builder
 │   ├── infra/           # Config, Logger, LLM clients, ModelRegistry
 │   ├── mcp/             # MCP server integration + OAuth
+│   ├── media/           # Image handling (resize, store, prune)
 │   ├── models/          # ToolCall, ToolDefinition types
 │   ├── projects/        # Project system (Worker threads)
-│   ├── workers/         # Unified Worker transport (WorkerAdapter)
-│   ├── subagent/        # SubAgent lifecycle (SubAgentManager)
+│   ├── security/        # Trust-based routing, owner identity
 │   ├── session/         # Session persistence + compaction
 │   ├── skills/          # Skill loader + registry
-│   ├── subagents/   # Sub-agent type specialization (SUBAGENT.md)
-│   ├── task/            # TaskFSM + TaskContext + TaskPersister
-│   ├── tools/           # Tool registry, executor, builtins
+│   ├── stats/           # AppStats (runtime statistics for TUI)
+│   ├── storage/         # Storage utilities
+│   ├── tui/             # Terminal UI dashboard
+│   ├── workers/         # Worker transport (WorkerAdapter)
 │   └── cli.ts           # CLI entry point
+├── subagents/           # Built-in SubAgent type definitions (SUBAGENT.md)
 ├── tests/
 │   ├── unit/
 │   └── integration/
 ├── docs/                # Design documents (this directory)
 ├── skills/              # Built-in skill definitions
-├── data/                # Runtime data (sessions, tasks, memory)
 └── config.yml           # Default configuration
 ```
 
@@ -97,18 +103,18 @@ pegasus/
 ### Core
 - [Architecture](./architecture.md) — layered design, core abstractions, data flow
 - [Main Agent](./main-agent.md) — inner monologue, session, system prompt
-- [Agent Core](./agent.md) — event processing, cognitive dispatch, concurrency
+- [Agent Core](./agent.md) — event processing, agent state, concurrency
 - [Cognitive Processors](./cognitive.md) — Reason → Act (2-stage) + async PostTaskReflector
 
 ### Task & Event System
 - [Event System](./events.md) — EventType, EventBus, priority queue
-- [Task FSM](./task-fsm.md) — states, transitions, suspend/resume
+- [Task FSM](./task-fsm.md) — agent states, transitions (IDLE/BUSY/WAITING)
 - [Task Persistence](./task-persistence.md) — JSONL event logs, replay
 - [SubAgent Types](./subagent-types.md) — sub-agent type specialization (SUBAGENT.md)
 
 ### LLM & Model
-- [Multi-Model](./multi-model.md) — per-role model config, ModelRegistry
-- [Configuration](./configuration.md) — YAML config, env var interpolation, role options
+- [Multi-Model](./multi-model.md) — per-tier model config, ModelRegistry
+- [Configuration](./configuration.md) — YAML config, env var interpolation, tier options
 - [Codex API](./codex-api.md) — OpenAI Codex integration, Responses API, OAuth
 
 ### Features
@@ -124,6 +130,7 @@ pegasus/
 
 ### Observability
 - [AppStats](./app-stats.md) — runtime statistics for TUI dashboard (counters, snapshots, polling)
+- [TUI Dashboard](./tui.md) — real-time terminal dashboard (planned doc)
 
 ### Operations
 - [Running Guide](./running.md) — setup, usage, deployment
