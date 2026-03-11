@@ -652,6 +652,16 @@ export class Agent {
       this._llmUsageCallback?.(result);
       this._overflowRetryCount = 0; // Reset on successful LLM call
 
+      // Guard: detect extreme repetition loops (e.g. same phrase repeated 50+ times)
+      // Only check long outputs (>5K chars) to avoid false positives on normal text.
+      const text = result.text ?? "";
+      if (text.length > 5000 && /(.{4,20})\1{49,}/s.test(text)) {
+        logger.warn({ agentId, textLength: text.length }, "llm_repetition_loop_detected — discarding output");
+        // Don't store this garbage — just skip this iteration
+        // Next iteration will get a fresh LLM call with clean context
+        return;
+      }
+
       // No tool calls → agent complete
       if (!result.toolCalls?.length) {
         const assistantMsg: Message = { role: "assistant", content: result.text ?? "" };
