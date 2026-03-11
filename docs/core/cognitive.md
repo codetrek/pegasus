@@ -59,4 +59,4 @@ On the first iteration, the memory index is fetched and injected as a user messa
 ## Related
 
 - [Agent Core](./agent.md) — the execution engine that implements this pipeline
-- [Memory System](./memory-system.md) — what reflection writes to
+- [Memory System](../features/memory-system.md) — what reflection writes to

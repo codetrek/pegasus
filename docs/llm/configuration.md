@@ -292,7 +292,7 @@ llm:
     powerful: anthropic/claude-opus-4            # complex reasoning
 ```
 
-If a tier is not set, it falls back to `default`. Subagents declare their preferred tier in their SUBAGENT.md `model` field (see [Task Types](./task-types.md)).
+If a tier is not set, it falls back to `default`. Subagents declare their preferred tier in their SUBAGENT.md `model` field (see [Subagent Types](../features/subagent-types.md)).
 
 For the full design, see [Tier-Based Model Selection](./multi-model.md).
 
@@ -365,7 +365,7 @@ tail -f ~/.pegasus/logs/pegasus.log
 # For human-readable output, set logFormat: line in config.yml
 ```
 
-For more details, see the [Logging documentation](./logging.md).
+For more details, see the [Logging documentation](../ops/logging.md).
 
 ## Configuration Examples
 

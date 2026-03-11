@@ -357,8 +357,8 @@ mainAgent.onReply(callback) → display response to user
 
 ## Related Documentation
 
-- [Architecture](./architecture.md) — System architecture overview
-- [Configuration](./configuration.md) — YAML config and env var interpolation
-- [Cognitive Processors](./cognitive.md) — Cognitive pipeline: Reason → Act (2-stage)
-- [Memory System](./memory-system.md) — Long-term memory design
+- [Architecture](../core/architecture.md) — System architecture overview
+- [Configuration](../llm/configuration.md) — YAML config and env var interpolation
+- [Cognitive Processors](../core/cognitive.md) — Cognitive pipeline: Reason → Act (2-stage)
+- [Memory System](../features/memory-system.md) — Long-term memory design
 - [Logging](./logging.md) — Log format, output, and rotation

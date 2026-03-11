@@ -185,7 +185,7 @@ Each subsystem's detailed design is split into its own document:
 | [task-fsm.md](./task-fsm.md) | Task state machine: AgentState (3 states), AgentStateManager, ExecutionState |
 | [agent.md](./agent.md) | Agent core: event processing, cognitive stage dispatch, concurrency control, lifecycle |
 | [cognitive.md](./cognitive.md) | Cognitive pipeline: Reason → Act (2-stage), PostTaskReflector (async memory learning) |
-| [task-persistence.md](./task-persistence.md) | Task persistence: incremental JSONL event logs, replay, index |
-| [memory-system.md](./memory-system.md) | Long-term memory: facts + episodes, Markdown file storage |
-| [tools.md](./tools.md) | Tool system: registration, execution, timeout, LLM function calling |
-| [project-structure.md](./project-structure.md) | Code directory structure and module dependency graph |
+| [task-persistence.md](../features/task-persistence.md) | Task persistence: incremental JSONL event logs, replay, index |
+| [memory-system.md](../features/memory-system.md) | Long-term memory: facts + episodes, Markdown file storage |
+| [tools.md](../features/tools.md) | Tool system: registration, execution, timeout, LLM function calling |
+| [project-structure.md](../project-structure.md) | Code directory structure and module dependency graph |

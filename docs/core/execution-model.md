@@ -1,7 +1,7 @@
 # Execution Model: MainAgent, SubAgent, AITask, Project
 
 > **Status**: Implemented
-> **Supersedes**: Parts of [SubAgent Types](./subagent-types.md) (renames "subagent" → "AITask") and extends [Project System](./project-system.md)
+> **Supersedes**: Parts of [SubAgent Types](../features/subagent-types.md) (renames "subagent" → "AITask") and extends [Project System](../features/project-system.md)
 
 ## Problem Statement
 
@@ -86,7 +86,7 @@ These guidelines are injected into MainAgent's system prompt to help the LLM cho
 
 The delegation guide and tool descriptions are part of MainAgent's system prompt. The prompt is source code — see `src/agents/prompts/main-agent.ts` for the actual content.
 
-SubAgents receive their own system prompt via SUBAGENT.md definitions (see [SubAgent Types](./subagent-types.md)).
+SubAgents receive their own system prompt via SUBAGENT.md definitions (see [SubAgent Types](../features/subagent-types.md)).
 
 ## SubAgent Architecture
 
@@ -588,7 +588,7 @@ src/agents/subagents/         ← SubAgent lifecycle (NOT src/subagents/ — tha
 |----------|-------------|
 | [Architecture](./architecture.md) | Updated to show four execution tiers |
 | [Main Agent](./main-agent.md) | Updated tool set (spawn_task + spawn_subagent) |
-| [SubAgent Types](./subagent-types.md) | Renamed to "AITask Types"; content mostly unchanged |
-| [Project System](./project-system.md) | Worker threading model shared; ProjectAdapter → WorkerAdapter |
+| [SubAgent Types](../features/subagent-types.md) | Renamed to "AITask Types"; content mostly unchanged |
+| [Project System](../features/project-system.md) | Worker threading model shared; ProjectAdapter → WorkerAdapter |
 | [Agent Core](./agent.md) | Unchanged — Agent class used by MainAgent, SubAgent, and Project |
 | [Cognitive Processors](./cognitive.md) | Unchanged — same pipeline for all tiers |

@@ -43,7 +43,7 @@ llm:
     #   apiType: anthropic
 ```
 
-See [Configuration](./configuration.md) for full reference.
+See [Configuration](./llm/configuration.md) for full reference.
 
 ## Architecture
 
@@ -100,41 +100,41 @@ pegasus/
 
 ## Design Documents
 
-### Core
-- [Architecture](./architecture.md) — layered design, core abstractions, data flow
-- [Main Agent](./main-agent.md) — inner monologue, session, system prompt
-- [Agent Core](./agent.md) — event processing, agent state, concurrency
-- [Cognitive Processors](./cognitive.md) — Reason → Act (2-stage) + async PostTaskReflector
+### `core/` — Core Architecture
+- [Architecture](./core/architecture.md) — layered design, core abstractions, data flow
+- [Main Agent](./core/main-agent.md) — inner monologue, session, system prompt
+- [Agent Core](./core/agent.md) — event processing, agent state, concurrency
+- [Cognitive Processors](./core/cognitive.md) — Reason → Act (2-stage) + async PostTaskReflector
+- [Event System](./core/events.md) — EventType, EventBus, priority queue
+- [Task FSM](./core/task-fsm.md) — agent states, transitions (IDLE/BUSY/WAITING)
+- [Execution Model](./core/execution-model.md) — four execution tiers: MainAgent, SubAgent, Task, Project
 
-### Task & Event System
-- [Event System](./events.md) — EventType, EventBus, priority queue
-- [Task FSM](./task-fsm.md) — agent states, transitions (IDLE/BUSY/WAITING)
-- [Task Persistence](./task-persistence.md) — JSONL event logs, replay
-- [SubAgent Types](./subagent-types.md) — sub-agent type specialization (SUBAGENT.md)
+### `llm/` — LLM & Model
+- [Configuration](./llm/configuration.md) — YAML config, env var interpolation, tier options
+- [Multi-Model](./llm/multi-model.md) — per-tier model config, ModelRegistry
+- [Model Input Limits](./llm/model-input-limits.md) — context window budgets, token limits
+- [Codex API](./llm/codex-api.md) — OpenAI Codex integration, Responses API, OAuth
 
-### LLM & Model
-- [Multi-Model](./multi-model.md) — per-tier model config, ModelRegistry
-- [Configuration](./configuration.md) — YAML config, env var interpolation, tier options
-- [Codex API](./codex-api.md) — OpenAI Codex integration, Responses API, OAuth
+### `features/` — Features
+- [Tool System](./features/tools.md) — registration, execution, timeout, LLM function calling
+- [Memory System](./features/memory-system.md) — long-term memory (facts + episodes)
+- [Session Compact](./features/session-compact.md) — auto-compact with context window awareness
+- [Skill System](./features/skill-system.md) — SKILL.md format, loader, registry, triggering
+- [Vision Support](./features/vision.md) — image input, storage, hydration, pruning
+- [Browser Tools](./features/browser-tools.md) — browser automation tools
+- [Security](./features/security.md) — trust-based channel routing, owner identity, prompt injection resistance
+- [MCP Auth](./features/mcp-auth.md) — MCP server authentication
+- [Project System](./features/project-system.md) — long-lived task spaces, Worker threads
+- [SubAgent Types](./features/subagent-types.md) — sub-agent type specialization (SUBAGENT.md)
+- [Task Persistence](./features/task-persistence.md) — JSONL event logs, replay
 
-### Features
-- [Tool System](./tools.md) — registration, execution, timeout, LLM function calling
-- [Memory System](./memory-system.md) — long-term memory (facts + episodes)
-- [Session Compact](./session-compact.md) — auto-compact with context window awareness
-- [Skill System](./skill-system.md) — SKILL.md format, loader, registry, triggering
-- [Vision Support](./vision.md) — image input, storage, hydration, pruning
-- [Project System](./project-system.md) — long-lived task spaces, Worker threads
-- [Execution Model](./execution-model.md) — four execution tiers: MainAgent, SubAgent, Task, Project
-- [Security](./security.md) — trust-based channel routing, owner identity, prompt injection resistance
-- [MCP Auth](./mcp-auth.md) — MCP server authentication
+### `ops/` — Operations & Observability
+- [Running Guide](./ops/running.md) — setup, usage, deployment
+- [Logging](./ops/logging.md) — log format, output, rotation
+- [AppStats](./ops/app-stats.md) — runtime statistics for TUI dashboard (counters, snapshots, polling)
 
-### Observability
-- [AppStats](./app-stats.md) — runtime statistics for TUI dashboard (counters, snapshots, polling)
-- [TUI Dashboard](./tui.md) — real-time terminal dashboard (planned doc)
-
-### Operations
-- [Running Guide](./running.md) — setup, usage, deployment
-- [Logging](./logging.md) — log format, output, rotation
+### Root
+- [Project Structure](./project-structure.md) — source tree overview
 - [TODOs](./todos.md) — completed and planned features
 
 ## Development

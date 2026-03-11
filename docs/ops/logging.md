@@ -286,4 +286,4 @@ The `logFormat` setting provides flexibility for different environments:
 
 - [Pino Documentation](https://getpino.io/)
 - [Pino-roll Documentation](https://github.com/feugy/pino-roll)
-- [Configuration Guide](./configuration.md)
+- [Configuration Guide](../llm/configuration.md)
