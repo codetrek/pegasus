@@ -23,6 +23,9 @@ describe("config-loader", () => {
     testDir = mkdtempSync(join(tmpdir(), "pegasus-test-"));
     process.chdir(testDir);
 
+    // Isolate from real user config (~/.pegasus/config.yml) by pointing HOME to testDir
+    process.env.HOME = testDir;
+
     // homeDir is required by SettingsSchema — set via env var for all loadSettings() calls
     process.env.PEGASUS_HOME_DIR = "/tmp/pegasus-test-home";
 
@@ -631,6 +634,49 @@ system:
       const settings = loadSettings();
 
       expect(settings.homeDir).toBe("/tmp/pegasus-test-home");
+    });
+
+    test("user-level config (~/.pegasus/config.yml) merges between base and local", () => {
+      resetSettings();
+      const path = require("path");
+      const fs = require("fs");
+
+      // HOME is already set to testDir by beforeEach, so ~/.pegasus/ is testDir/.pegasus/
+      const userConfigDir = path.join(testDir, ".pegasus");
+      const userConfigPath = path.join(userConfigDir, "config.yml");
+
+      // Base config: sets model and timeout
+      writeFileSync("config.yml", `
+llm:
+  default: openai/gpt-4o-mini
+  timeout: 100
+system:
+  homeDir: /tmp/pegasus-test-home
+`);
+
+      // User config: overrides model, adds provider
+      fs.mkdirSync(userConfigDir, { recursive: true });
+      fs.writeFileSync(userConfigPath, `
+llm:
+  default: anthropic/claude-sonnet-4
+  providers:
+    anthropic:
+      apiKey: user-key
+`);
+
+      // Local config: overrides timeout
+      writeFileSync("config.local.yml", `
+llm:
+  timeout: 200
+`);
+
+      const settings = loadSettings();
+
+      // User config overrides base
+      expect(settings.llm.default).toBe("anthropic/claude-sonnet-4");
+      expect(settings.llm.providers.anthropic?.apiKey).toBe("user-key");
+      // Local config overrides user
+      expect(settings.llm.timeout).toBe(200);
     });
 
     test("tiers env var interpolation", () => {
