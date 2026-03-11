@@ -31,6 +31,10 @@ export interface GenerateTextOptions {
   topP?: number;
   tools?: ToolDefinition[];
   toolChoice?: "auto" | "none";
+  /** Agent that initiated this LLM call (for log correlation). */
+  agentId?: string;
+  /** Unique request ID to correlate start/done/error log lines. */
+  requestId?: string;
 }
 
 /**
@@ -66,5 +70,7 @@ export interface LanguageModel {
     topP?: number;
     tools?: ToolDefinition[];
     toolChoice?: "auto" | "none";
+    agentId?: string;
+    requestId?: string;
   }): Promise<GenerateTextResult>;
 }

@@ -682,6 +682,8 @@ export class Agent {
         messages: state.messages,
         tools: tools.length ? tools : undefined,
         toolChoice: tools.length ? "auto" : undefined,
+        agentId,
+        requestId: shortId(),
       });
 
       state.iteration++;
