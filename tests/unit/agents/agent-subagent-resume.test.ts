@@ -218,6 +218,10 @@ describe("Agent.resume", () => {
           success: true,
           result: "resumed result",
           llmCallCount: 1,
+          totalPromptTokens: 0,
+          totalCacheReadTokens: 0,
+          totalOutputTokens: 0,
+          toolStats: new Map(),
         };
       };
 

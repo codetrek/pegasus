@@ -33,3 +33,16 @@ export function formatToolTimestamp(
   }
   return `[${ts}]`;
 }
+
+/**
+ * Format milliseconds to human-readable duration.
+ * Examples: 0 → "0ms", 42 → "42ms", 1234 → "1.2s", 65432 → "1m 5.4s"
+ */
+export function formatDuration(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const totalSecs = ms / 1000;
+  if (totalSecs < 60) return `${totalSecs.toFixed(1)}s`;
+  const mins = Math.floor(totalSecs / 60);
+  const secs = totalSecs - mins * 60;
+  return `${mins}m ${secs.toFixed(1)}s`;
+}

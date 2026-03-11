@@ -831,4 +831,56 @@ describe("Agent subagent management", () => {
       expect(usedParentModel).toBe(true);
     }, 5000);
   });
+
+  describe("subagent completion with tool use (wiring test)", () => {
+    test("subagent with tool calls completes and fires notification", async () => {
+      const onNotification = mock((_n: SubagentNotification) => {});
+      let callCount = 0;
+      const model = createMockModel(
+        mock(async () => {
+          callCount++;
+          if (callCount === 1) {
+            return {
+              text: "calling tool",
+              finishReason: "tool_calls",
+              toolCalls: [{ id: "tc1", name: "mock_tool", arguments: {} }],
+              usage: { promptTokens: 100, completionTokens: 20, cacheReadTokens: 50 },
+            };
+          }
+          return {
+            text: "task done",
+            finishReason: "stop",
+            usage: { promptTokens: 200, completionTokens: 30, cacheReadTokens: 80 },
+          };
+        }),
+      );
+
+      const mockTool: Tool = {
+        name: "mock_tool",
+        description: "test tool",
+        category: ToolCategory.SYSTEM,
+        parameters: z.object({}),
+        execute: async (): Promise<ToolResult> => ({
+          success: true,
+          result: "ok",
+          startedAt: Date.now(),
+          completedAt: Date.now(),
+          durationMs: 5,
+        }),
+      };
+
+      const agent = createAgentWithSubagents({ model, onNotification });
+      agent.setAdditionalTools([mockTool]);
+
+      agent.submit("compute", "user", "general", "Compute task");
+      await waitForNotifications(200);
+
+      expect(onNotification).toHaveBeenCalled();
+      const calls = (onNotification as any).mock.calls as SubagentNotification[][];
+      const completedCall = calls.find((c) => c[0]!.type === "completed");
+      expect(completedCall).toBeDefined();
+      // Verifies the enriched log line didn't crash — if formatToolStats or
+      // formatNumber received wrong types, the subagent would fail instead of complete
+    }, 10_000);
+  });
 });
