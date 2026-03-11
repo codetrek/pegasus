@@ -1742,7 +1742,7 @@ export class Agent {
           {
             subagentId,
             agentType,
-            err: errorMsg,
+            err,
             duration,
             inputTokens: formatNumber(stats.totalPromptTokens),
             cacheReadTokens: formatNumber(stats.totalCacheReadTokens),
