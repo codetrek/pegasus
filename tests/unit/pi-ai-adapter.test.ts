@@ -655,3 +655,184 @@ describe("createPiAiLanguageModel", () => {
     expect(callArgs[2].headers).toEqual({ "X-Custom": "header-val" });
   }, 5000);
 });
+
+// ── countTokens ──────────────────────────────────
+
+describe("countTokens", () => {
+  it("should call Anthropic count_tokens API for anthropic provider", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: any, init: any) => {
+      expect(String(url)).toContain("/v1/messages/count_tokens");
+      const body = JSON.parse(init.body);
+      expect(body.model).toBe("claude-sonnet-4-20250514");
+      expect(body.messages[0].content).toBe("hello world");
+      expect(init.headers["x-api-key"]).toBe("sk-ant-test");
+      expect(init.headers["anthropic-version"]).toBe("2023-06-01");
+      return new Response(JSON.stringify({ input_tokens: 3 }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    try {
+      mockGetModel.mockImplementation(() => {
+        throw new Error("not found");
+      });
+
+      const model = createPiAiLanguageModel({
+        provider: "anthropic",
+        model: "claude-sonnet-4-20250514",
+        apiKey: "sk-ant-test",
+        baseURL: "https://api.anthropic.com",
+      });
+
+      expect(model.countTokens).toBeDefined();
+      const tokens = await model.countTokens!("hello world");
+      expect(tokens).toBe(3);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }, 5000);
+
+  it("should use same baseURL for Anthropic count_tokens", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: any) => {
+      expect(String(url)).toContain("https://custom-proxy.example.com/v1/messages/count_tokens");
+      return new Response(JSON.stringify({ input_tokens: 5 }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    try {
+      mockGetModel.mockImplementation(() => {
+        throw new Error("not found");
+      });
+
+      const model = createPiAiLanguageModel({
+        provider: "anthropic",
+        model: "claude-sonnet-4-20250514",
+        apiKey: "sk-ant-test",
+        baseURL: "https://custom-proxy.example.com",
+      });
+
+      const tokens = await model.countTokens!("test");
+      expect(tokens).toBe(5);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }, 5000);
+
+  it("should fall back to estimate when Anthropic API fails", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      return new Response("Unauthorized", {
+        status: 401,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+
+    try {
+      mockGetModel.mockImplementation(() => {
+        throw new Error("not found");
+      });
+
+      const model = createPiAiLanguageModel({
+        provider: "anthropic",
+        model: "claude-sonnet-4-20250514",
+        apiKey: "bad-key",
+      });
+
+      // Should not throw, should return character estimation
+      const text = "hello world"; // 11 chars → ceil(11/3.5) = 4
+      const tokens = await model.countTokens!(text);
+      expect(tokens).toBe(Math.ceil(text.length / 3.5));
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }, 5000);
+
+  it("should use tiktoken for OpenAI provider", async () => {
+    mockGetModel.mockImplementation(() => {
+      throw new Error("not found");
+    });
+
+    const model = createPiAiLanguageModel({
+      provider: "openai",
+      model: "gpt-4o",
+      apiKey: "sk-test",
+    });
+
+    expect(model.countTokens).toBeDefined();
+    const tokens = await model.countTokens!("Hello, world!");
+    expect(tokens).toBeGreaterThan(0);
+    expect(typeof tokens).toBe("number");
+  }, 5000);
+
+  it("should use Anthropic count_tokens for claude model on non-anthropic provider via model prefix", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: any, init: any) => {
+      expect(String(url)).toContain("/v1/messages/count_tokens");
+      expect(init.headers["x-api-key"]).toBe("sk-test");
+      return new Response(JSON.stringify({ input_tokens: 7 }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    try {
+      mockGetModel.mockImplementation(() => {
+        throw new Error("not found");
+      });
+
+      // Provider is NOT "anthropic", but model starts with "claude-"
+      // → buildCountTokens detects via model prefix and uses Anthropic API
+      const model = createPiAiLanguageModel({
+        provider: "custom-proxy",
+        model: "claude-sonnet-4-20250514",
+        apiKey: "sk-test",
+      });
+
+      expect(model.countTokens).toBeDefined();
+      const tokens = await model.countTokens!("hello");
+      expect(tokens).toBe(7);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }, 5000);
+
+  it("should use character estimation for unknown provider", async () => {
+    mockGetModel.mockImplementation(() => {
+      throw new Error("not found");
+    });
+
+    const model = createPiAiLanguageModel({
+      provider: "ollama",
+      model: "llama3",
+    });
+
+    expect(model.countTokens).toBeDefined();
+    const text = "Hello, world!"; // 13 chars → ceil(13/3.5) = 4
+    const tokens = await model.countTokens!(text);
+    expect(tokens).toBe(Math.ceil(text.length / 3.5));
+  }, 5000);
+
+  it("should handle getModel returning undefined (falls through to manual model)", async () => {
+    mockGetModel.mockReturnValue(undefined);
+
+    const model = createPiAiLanguageModel({
+      provider: "some-provider",
+      model: "some-model",
+    });
+
+    // Should not throw — falls through to manual model creation
+    expect(model.provider).toBe("some-provider");
+    expect(model.modelId).toBe("some-model");
+    expect(model.countTokens).toBeDefined();
+
+    // countTokens should use EstimateCounter for unknown provider
+    const text = "test text"; // 9 chars → ceil(9/3.5) = 3
+    const tokens = await model.countTokens!(text);
+    expect(tokens).toBe(Math.ceil(text.length / 3.5));
+  }, 5000);
+});

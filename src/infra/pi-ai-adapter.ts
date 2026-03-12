@@ -29,6 +29,7 @@ import type {
 } from "./llm-types.ts";
 import type { ToolDefinition, ToolCall } from "../models/tool.ts";
 import { getLogger } from "./logger.ts";
+import { TiktokenCounter, EstimateCounter } from "./token-counter.ts";
 
 const logger = getLogger("llm.pi_ai");
 
@@ -204,6 +205,72 @@ export function fromPiAiResult(msg: AssistantMessage): GenerateTextResult {
   };
 }
 
+// ── Token counting ──
+
+/** Known model prefixes that use OpenAI-compatible tokenization (tiktoken). */
+const TIKTOKEN_PREFIXES = ["gpt-", "o1-", "o3-", "o4-"];
+
+/** Known provider strings that use OpenAI-compatible tokenization. */
+const OPENAI_PROVIDERS = ["openai", "openai-compatible", "openai-codex", "github-copilot"];
+
+/**
+ * Build a countTokens function for the given provider/model.
+ *
+ * - Anthropic: calls /v1/messages/count_tokens API (uses same apiKey & baseURL)
+ * - OpenAI-like: tiktoken local counting
+ * - Others: character-based estimation (ceil(chars / 3.5))
+ */
+function buildCountTokens(
+  provider: string,
+  model: string,
+  apiKey: string,
+  baseUrl: string,
+): (text: string) => Promise<number> {
+  // Anthropic — remote API count
+  if (provider === "anthropic" || model.startsWith("claude-")) {
+    const anthropicBase = baseUrl || "https://api.anthropic.com";
+    return async (text: string) => {
+      const url = `${anthropicBase}/v1/messages/count_tokens`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "content-type": "application/json",
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: text }],
+        }),
+      });
+
+      if (!response.ok) {
+        logger.warn(
+          { status: response.status, provider, model },
+          "count_tokens_api_failed_falling_back_to_estimate",
+        );
+        return Math.ceil(text.length / 3.5);
+      }
+
+      const data = (await response.json()) as { input_tokens: number };
+      return data.input_tokens;
+    };
+  }
+
+  // OpenAI-like — local tiktoken
+  if (
+    OPENAI_PROVIDERS.some((p) => provider === p || provider.startsWith(`${p}-`)) ||
+    TIKTOKEN_PREFIXES.some((pfx) => model.startsWith(pfx))
+  ) {
+    const counter = new TiktokenCounter(model);
+    return (text: string) => counter.count(text);
+  }
+
+  // Fallback — character estimation
+  const counter = new EstimateCounter();
+  return (text: string) => counter.count(text);
+}
+
 // ── Main factory ──
 
 export interface PiAiAdapterConfig {
@@ -227,6 +294,7 @@ export function createPiAiLanguageModel(config: PiAiAdapterConfig): LanguageMode
 
   try {
     piModel = getModel(config.provider as any, config.model as any);
+    if (!piModel) throw new Error("model not found");
     // If a custom baseURL is provided, override the built-in one
     if (config.baseURL) {
       piModel = { ...piModel, baseUrl: config.baseURL };
@@ -258,9 +326,16 @@ export function createPiAiLanguageModel(config: PiAiAdapterConfig): LanguageMode
   // Resolve API key: explicit > env
   const apiKey = config.apiKey || getEnvApiKey(config.provider) || "";
 
+  // Build countTokens implementation based on provider/model.
+  // Uses the same apiKey and baseURL from closure — no credential leaking.
+  // Resolve base URL for countTokens: prefer piModel.baseUrl, then config.baseURL, then provider default.
+  const resolvedBaseUrl = piModel.baseUrl || config.baseURL || "";
+  const countTokens = buildCountTokens(config.provider, config.model, apiKey, resolvedBaseUrl);
+
   return {
     provider: config.provider,
     modelId: config.model,
+    countTokens,
 
     async generate(options) {
       const context = toPiAiContext(

@@ -73,4 +73,16 @@ export interface LanguageModel {
     agentId?: string;
     requestId?: string;
   }): Promise<GenerateTextResult>;
+
+  /**
+   * Count tokens for the given text.
+   *
+   * Implementation varies by provider:
+   * - Anthropic: calls the /v1/messages/count_tokens API
+   * - OpenAI: uses tiktoken locally
+   * - Others: character-based estimation
+   *
+   * Optional — callers should fall back to character estimation when absent.
+   */
+  countTokens?(text: string): Promise<number>;
 }
