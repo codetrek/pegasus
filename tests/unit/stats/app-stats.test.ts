@@ -27,7 +27,7 @@ describe("AppStats", () => {
 });
 
 describe("recordLLMUsage", () => {
-  it("updates lastCall, byModel, and budget.used", () => {
+  it("updates lastCall and byModel (budget.used is owned by MainAgent, not recordLLMUsage)", () => {
     const stats = createAppStats({ persona: "Atlas", modelId: "gpt-4o", provider: "openai", contextWindow: 128000 });
     recordLLMUsage(stats, {
       model: "gpt-4o", promptTokens: 1000, cacheReadTokens: 500, cacheWriteTokens: 200, outputTokens: 100, latencyMs: 1500,
@@ -36,7 +36,7 @@ describe("recordLLMUsage", () => {
     expect(stats.llm.byModel["gpt-4o"]!.calls).toBe(1);
     expect(stats.llm.byModel["gpt-4o"]!.totalPromptTokens).toBe(1000);
     expect(stats.llm.byModel["gpt-4o"]!.totalOutputTokens).toBe(100);
-    expect(stats.budget.used).toBe(1500);
+    expect(stats.budget.used).toBe(0); // budget.used NOT updated by recordLLMUsage
   });
 
   it("accumulates across multiple calls", () => {
@@ -46,7 +46,7 @@ describe("recordLLMUsage", () => {
     expect(stats.llm.byModel["gpt-4o"]!.calls).toBe(2);
     expect(stats.llm.byModel["gpt-4o"]!.totalPromptTokens).toBe(300);
     expect(stats.llm.byModel["gpt-4o"]!.totalOutputTokens).toBe(130);
-    expect(stats.budget.used).toBe(300);
+    expect(stats.budget.used).toBe(0); // budget.used NOT updated by recordLLMUsage
   });
 });
 
