@@ -47,7 +47,7 @@ import { buildTelegramCommands } from "./channels/telegram-commands.ts";
 import { OwnerStore } from "./security/owner-store.ts";
 import { classifyMessage } from "./security/message-classifier.ts";
 import { formatChannelMeta } from "./agents/agent.ts";
-import { createAppStats, recordLLMUsage, recordToolCall, loadPersistedStats, savePersistedStats } from "./stats/index.ts";
+import { createAppStats, loadPersistedStats, savePersistedStats } from "./stats/index.ts";
 import type { AppStats } from "./stats/index.ts";
 import { EventType } from "./agents/events/types.ts";
 import { BrowserManager } from "./agents/tools/browser/browser-manager.ts";
@@ -388,7 +388,26 @@ export class Pegasus {
     this.projectManager = new ProjectManager(projectsDir);
     this.projectAdapter = new ProjectAdapter();
 
-    // 10. Create MainAgent with injected deps (Agent owns subagent management + tick via subagentConfig)
+    // 10. Create AppStats before MainAgent (Agent owns stats tracking via injection)
+    const contextWindow = this.settings.llm.contextWindow ?? 128000;
+    this._appStats = createAppStats({
+      persona: this.persona.name,
+      provider: this.models.getDefaultProvider(),
+      modelId: this.models.getDefaultModelId(),
+      contextWindow,
+    });
+
+    // Restore cumulative stats from previous sessions
+    loadPersistedStats(this._appStats, this.settings.homeDir);
+
+    // Wire tool counts (builtin + mcp)
+    const builtinCount = mainAgentTools.length;
+    const mcpCount = wrappedMcpTools.length;
+    this._appStats.tools.builtin = builtinCount;
+    this._appStats.tools.mcp = mcpCount;
+    this._appStats.tools.total = builtinCount + mcpCount;
+
+    // 11. Create MainAgent with injected deps (Agent owns subagent management + tick via subagentConfig)
     const injected: InjectedSubsystems = {
       modelLimitsCache: this.modelLimitsCache,
       authManager: this.authManager,
@@ -404,6 +423,7 @@ export class Pegasus {
       mcpTools: wrappedMcpTools,
       ownerStore: this.ownerStore,
       browserManager: this._browserManager ?? undefined,
+      appStats: this._appStats,
     };
 
     this._mainAgent = new MainAgent({
@@ -437,50 +457,11 @@ export class Pegasus {
       });
     }
 
-    // 11. Start MainAgent (loads session + injects memory + builds prompt)
+    // 12. Start MainAgent (loads session + injects memory + builds prompt)
     await this._mainAgent.start();
 
-    // 11b. Wire AppStats — tracks LLM usage, tool calls, channels
-    const contextWindow = this.settings.llm.contextWindow ?? 128000;
-    this._appStats = createAppStats({
-      persona: this.persona.name,
-      provider: this.models.getDefaultProvider(),
-      modelId: this.models.getDefaultModelId(),
-      contextWindow,
-    });
-
-    // Restore cumulative stats from previous sessions
-    loadPersistedStats(this._appStats, this.settings.homeDir);
-
-    // Wire tool counts (builtin + mcp)
-    const builtinCount = mainAgentTools.length;
-    const mcpCount = wrappedMcpTools.length;
-    this._appStats.tools.builtin = builtinCount;
-    this._appStats.tools.mcp = mcpCount;
-    this._appStats.tools.total = builtinCount + mcpCount;
-
-    // Wire LLM usage callback on mainAgent
-    const appStats = this._appStats;
-    this._mainAgent.setLLMUsageCallback((result) => {
-      recordLLMUsage(appStats, {
-        model: this.models.getDefaultModelId(),
-        promptTokens: result.usage.promptTokens,
-        cacheReadTokens: result.usage.cacheReadTokens ?? 0,
-        cacheWriteTokens: result.usage.cacheWriteTokens ?? 0,
-        outputTokens: result.usage.completionTokens,
-        latencyMs: 0, // latency not available from GenerateTextResult
-      });
-    });
-
-    // Subscribe to tool call events for success/fail tracking
-    this._mainAgent.eventBus.subscribe(EventType.TOOL_CALL_COMPLETED, async () => {
-      recordToolCall(appStats, true);
-    });
-    this._mainAgent.eventBus.subscribe(EventType.TOOL_CALL_FAILED, async () => {
-      recordToolCall(appStats, false);
-    });
-
     // Wire channel info from adapters
+    const appStats = this._appStats;
     for (const adapter of this._adapters) {
       appStats.channels.push({
         type: adapter.type,
