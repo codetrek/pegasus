@@ -27,6 +27,7 @@
  */
 
 import type { LanguageModel, GenerateTextResult, Message } from "../infra/llm-types.ts";
+import { type AppStats, recordLLMUsage, recordToolCall } from "../stats/index.ts";
 import type { Event } from "./events/types.ts";
 import { EventType, createEvent } from "./events/types.ts";
 import { EventBus } from "./events/bus.ts";
@@ -160,6 +161,8 @@ export interface AgentDeps {
   reflectionOrchestrator?: Reflection;
   /** Subagent management config. When set, Agent implements SubagentRegistryLike. */
   subagentConfig?: SubagentConfig;
+  /** Optional shared AppStats for LLM/tool/subagent tracking. */
+  appStats?: AppStats;
 }
 
 // ── Helpers ──────────────────────────────────────────
@@ -329,8 +332,8 @@ export class Agent {
   // already tracks the subagent itself.
   private _pendingTracker?: PendingTracker;
 
-  /** Optional callback for LLM usage tracking (set by PegasusApp). */
-  private _llmUsageCallback: ((result: GenerateTextResult) => void) | null = null;
+  /** Optional shared AppStats for LLM/tool/subagent tracking. */
+  protected _appStats: AppStats | null = null;
 
   constructor(deps: AgentDeps) {
     this.agentId = deps.agentId;
@@ -370,6 +373,7 @@ export class Agent {
     this._memoryDir = deps.toolContext?.memoryDir;
     this._reflection = deps.reflectionOrchestrator;
     this._subagentConfig = deps.subagentConfig;
+    this._appStats = deps.appStats ?? null;
   }
 
   // ═══════════════════════════════════════════════════
@@ -404,11 +408,6 @@ export class Agent {
   /** Register callback for outbound replies. */
   onReply(callback: ReplyCallback): void {
     this._onReply = callback;
-  }
-
-  /** Register callback for LLM usage tracking (called after each LLM call). */
-  setLLMUsageCallback(cb: (result: GenerateTextResult) => void): void {
-    this._llmUsageCallback = cb;
   }
 
   /** Get accumulated token/tool stats. Used by parent to retrieve partial stats on error. */
@@ -610,6 +609,16 @@ export class Agent {
     this._totalPromptTokens += result.usage.promptTokens ?? 0;
     this._totalCacheReadTokens += result.usage.cacheReadTokens ?? 0;
     this._totalOutputTokens += result.usage.completionTokens ?? 0;
+    if (this._appStats) {
+      recordLLMUsage(this._appStats, {
+        model: this.model.modelId,
+        promptTokens: result.usage.promptTokens ?? 0,
+        cacheReadTokens: result.usage.cacheReadTokens ?? 0,
+        cacheWriteTokens: result.usage.cacheWriteTokens ?? 0,
+        outputTokens: result.usage.completionTokens ?? 0,
+        latencyMs: 0,
+      });
+    }
   }
 
   /** Called when pending work completes. Subclasses decide what to do with results. */
@@ -728,7 +737,6 @@ export class Agent {
       state.lastPromptTokens =
         (result.usage.promptTokens ?? 0) + (result.usage.cacheReadTokens ?? 0);
       await this.onLLMUsage(result);
-      this._llmUsageCallback?.(result);
       this._overflowRetryCount = 0; // Reset on successful LLM call
 
       // Guard: detect extreme repetition loops (e.g. same phrase repeated 50+ times)
@@ -864,6 +872,11 @@ export class Agent {
         ctx,
       );
       this.toolExecutor.emitCompletion(tc.name, result, ctx);
+
+      // Record AppStats tool call
+      if (this._appStats) {
+        recordToolCall(this._appStats, result.success);
+      }
 
       // Record per-tool-name stats
       const entry = this._toolStats.get(tc.name) ?? { ok: 0, fail: 0 };
@@ -1597,6 +1610,7 @@ export class Agent {
       sessionDir,
       storeImage: config.storeImage,
       contextWindow: this.contextWindow,
+      appStats: this._appStats ?? undefined,
       toolContext: {
         subagentRegistry: this,
         onNotify: (message: string) => {
@@ -1679,6 +1693,7 @@ export class Agent {
       ),
       sessionDir,
       storeImage: config.storeImage,
+      appStats: this._appStats ?? undefined,
       toolContext: {
         subagentRegistry: this,
         onNotify: (message: string) => {
@@ -1755,12 +1770,21 @@ export class Agent {
       input: info.input,
     });
     this._startTick();
+    if (this._appStats) this._appStats.subagents.active++;
 
     agent
       .run(input, { persistSession: true })
       .then((result: AgentResult) => {
         this._activeSubagents.delete(subagentId);
         this._pendingTracker?.remove(subagentId);
+        if (this._appStats) {
+          this._appStats.subagents.active = Math.max(0, this._appStats.subagents.active - 1);
+          if (result.success) {
+            this._appStats.subagents.completed++;
+          } else {
+            this._appStats.subagents.failed++;
+          }
+        }
         if (result.success) {
           const notifType = result.finishReason === "max_iterations" ? "paused" as const : "completed" as const;
           config.onNotification({
@@ -1795,6 +1819,10 @@ export class Agent {
       .catch((err: unknown) => {
         this._activeSubagents.delete(subagentId);
         this._pendingTracker?.remove(subagentId);
+        if (this._appStats) {
+          this._appStats.subagents.active = Math.max(0, this._appStats.subagents.active - 1);
+          this._appStats.subagents.failed++;
+        }
         const errorMsg = err instanceof Error ? err.message : String(err);
         config.onNotification({
           type: "failed",

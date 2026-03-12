@@ -859,11 +859,11 @@ describe("PegasusApp", () => {
   });
 
   // ═══════════════════════════════════════════════════
-  // Coverage: TOOL_CALL_FAILED event (line 451)
+  // Coverage: AppStats injection into Agent (agent-owned stats)
   // ═══════════════════════════════════════════════════
 
-  describe("TOOL_CALL_FAILED event (coverage)", () => {
-    it("should record failed tool call via eventBus", async () => {
+  describe("AppStats agent-owned tracking", () => {
+    it("should inject appStats into MainAgent and track tool calls directly", async () => {
       const model = createMonologueModel("thinking...");
       const app = new Pegasus({
         models: createMockModelRegistry(model),
@@ -873,22 +873,24 @@ describe("PegasusApp", () => {
 
       await app.start();
 
-      // Get initial stats
-      const failBefore = app.appStats!.tools.fail;
+      // Verify appStats is created and available
+      expect(app.appStats).not.toBeNull();
+      expect(app.appStats!.tools.calls).toBe(0);
+      expect(app.appStats!.tools.success).toBe(0);
+      expect(app.appStats!.tools.fail).toBe(0);
 
-      // Emit a TOOL_CALL_FAILED event on the mainAgent's eventBus
+      // EventBus TOOL_CALL_FAILED events should NOT update stats
+      // (old pattern removed — Agent tracks directly)
       await app.mainAgent.eventBus.emit(
         createEvent(EventType.TOOL_CALL_FAILED, {
           source: "test",
           payload: { toolName: "test_tool", error: "test error" },
         }),
       );
-
-      // Give the event bus time to process
       await Bun.sleep(50);
 
-      // Verify tool failure was recorded
-      expect(app.appStats!.tools.fail).toBe(failBefore + 1);
+      // Stats should NOT change from EventBus emission
+      expect(app.appStats!.tools.fail).toBe(0);
 
       await app.stop();
     }, 15_000);

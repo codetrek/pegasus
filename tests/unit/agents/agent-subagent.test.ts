@@ -883,4 +883,70 @@ describe("Agent subagent management", () => {
       // formatNumber received wrong types, the subagent would fail instead of complete
     }, 10_000);
   });
+
+  // ── AppStats subagent lifecycle tracking ──────────────────
+
+  describe("AppStats subagent lifecycle", () => {
+    test("completed subagent increments completed, decrements active", async () => {
+      const { createAppStats } = await import("../../../src/stats/app-stats.ts");
+      const appStats = createAppStats({ persona: "t", provider: "t", modelId: "t", contextWindow: 1000 });
+
+      const agent = new Agent({
+        agentId: "test-agent",
+        model: createMockModel(),
+        toolRegistry: new ToolRegistry(),
+        systemPrompt: "test",
+        sessionDir: path.join(tempDir, "session"),
+        appStats,
+        subagentConfig: {
+          subagentTypeRegistry: new SubAgentTypeRegistry(),
+          subagentsDir: path.join(tempDir, "tasks"),
+          onNotification: () => {},
+        },
+      });
+      await agent.start();
+
+      agent.submit("do something", "test", "general", "do something");
+      await waitForNotifications(200);
+
+      expect(appStats.subagents.active).toBe(0);
+      expect(appStats.subagents.completed).toBe(1);
+      expect(appStats.subagents.failed).toBe(0);
+
+      await agent.stop();
+    }, 10_000);
+
+    test("failed subagent increments failed, not completed", async () => {
+      const { createAppStats } = await import("../../../src/stats/app-stats.ts");
+      const appStats = createAppStats({ persona: "t", provider: "t", modelId: "t", contextWindow: 1000 });
+
+      const failModel = createMockModel(async () => {
+        throw new Error("LLM exploded");
+      });
+
+      const agent = new Agent({
+        agentId: "test-agent",
+        model: failModel,
+        toolRegistry: new ToolRegistry(),
+        systemPrompt: "test",
+        sessionDir: path.join(tempDir, "session"),
+        appStats,
+        subagentConfig: {
+          subagentTypeRegistry: new SubAgentTypeRegistry(),
+          subagentsDir: path.join(tempDir, "tasks"),
+          onNotification: () => {},
+        },
+      });
+      await agent.start();
+
+      agent.submit("do something", "test", "general", "do something");
+      await waitForNotifications(200);
+
+      expect(appStats.subagents.active).toBe(0);
+      expect(appStats.subagents.completed).toBe(0);
+      expect(appStats.subagents.failed).toBe(1);
+
+      await agent.stop();
+    }, 10_000);
+  });
 });

@@ -26,6 +26,7 @@
  */
 
 import type { Persona } from "../identity/persona.ts";
+import type { AppStats } from "../stats/index.ts";
 import { buildSystemPrompt } from "./prompts/index.ts";
 import type { Settings } from "../infra/config.ts";
 import { getSettings } from "../infra/config.ts";
@@ -92,6 +93,8 @@ export interface InjectedSubsystems {
   ownerStore: OwnerStore;
   /** BrowserManager — created by PegasusApp when browser tools are configured. */
   browserManager?: BrowserManagerLike;
+  /** Optional shared AppStats for LLM/tool/subagent tracking. */
+  appStats?: AppStats;
 }
 
 export interface MainAgentDeps {
@@ -159,6 +162,7 @@ export class MainAgent extends Agent {
         // Resolve SubAgentType model tier/spec to a LanguageModel
         resolveModel: (tierOrSpec: string) => deps.models.getForTier(tierOrSpec as import("../infra/model-registry.ts").ModelTier),
       },
+      appStats: deps.injected.appStats,
     });
 
     this.models = deps.models;
