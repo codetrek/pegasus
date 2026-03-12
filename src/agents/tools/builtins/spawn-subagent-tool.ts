@@ -64,13 +64,7 @@ export const spawn_subagent: Tool = {
 
       return {
         success: true,
-        result: {
-          subagentId,
-          status: "spawned",
-          type: type ?? "general",
-          description,
-          hint: `To follow up on this work later, use resume_subagent("${subagentId}", "your new instructions").`,
-        },
+        result: { subagentId, status: "spawned", type: type ?? "general", description },
         startedAt,
         completedAt: Date.now(),
         durationMs: Date.now() - startedAt,
