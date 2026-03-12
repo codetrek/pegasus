@@ -45,7 +45,6 @@ import {
 import { ToolCallCollector, type ToolCallResult } from "./base/tool-call-collector.ts";
 import { createTaskState, type AgentExecutionState as AgentExecutionState, type CreateAgentStateOptions } from "./base/execution-state.ts";
 import { getLogger } from "../infra/logger.ts";
-import { createTokenCounter, type TokenCounter } from "../infra/token-counter.ts";
 import { shortId } from "../infra/id.ts";
 import { SessionStore } from "../session/store.ts";
 import { formatToolTimestamp, formatTimestamp, formatDuration } from "../infra/time.ts";
@@ -53,6 +52,7 @@ import {
   computeTokenBudget,
   truncateToolResult,
   summarizeMessages,
+  estimateTokensFromChars,
   isContextOverflowError,
   TASK_COMPACT_THRESHOLD,
   MAX_OVERFLOW_COMPACT_RETRIES,
@@ -280,7 +280,6 @@ export class Agent {
   private _eventQueue: Event[] = [];
   private _running = false;
   private _overflowRetryCount = 0;
-  protected tokenCounter: TokenCounter;
 
   protected _onReply: ReplyCallback | null = null;
 
@@ -348,9 +347,6 @@ export class Agent {
     this.sessionStore = new SessionStore(deps.sessionDir);
     this.contextWindow = deps.contextWindow;
     this.modelLimitsCache = deps.modelLimitsCache;
-    this.tokenCounter = createTokenCounter(deps.model.provider, {
-      model: deps.model.modelId,
-    });
 
     this.toolExecutor = new ToolExecutor(
       this.toolRegistry,
@@ -1018,7 +1014,7 @@ export class Agent {
     if (!state || state.messages.length < 8) return;
 
     // Use actual token count from last API response when available;
-    // fall back to token counter for the first call.
+    // fall back to model.countTokens (provider-aware) or character estimation.
     let estimatedTokens: number;
     if (state.lastPromptTokens > 0) {
       estimatedTokens = state.lastPromptTokens;
@@ -1028,7 +1024,9 @@ export class Agent {
         if (m.toolCalls) text += JSON.stringify(m.toolCalls);
         return text;
       }).join("\n");
-      estimatedTokens = await this.tokenCounter.count(allText);
+      estimatedTokens = this.model.countTokens
+        ? await this.model.countTokens(allText)
+        : estimateTokensFromChars(allText.length);
     }
 
     const budget = computeTokenBudget(this.computeBudgetOptions());

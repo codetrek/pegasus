@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { SessionStore } from "../../src/session/store.ts";
-import { EstimateCounter } from "@pegasus/infra/token-counter.ts";
 import { rm } from "node:fs/promises";
 
 const testDir = "/tmp/pegasus-test-session";
@@ -91,40 +90,6 @@ describe("SessionStore", () => {
     const messages = await store.load();
     expect(messages).toHaveLength(1);
     expect(messages[0]!.content).toContain("with meta");
-  });
-
-  describe("SessionStore.estimateTokens", () => {
-    it("estimates tokens for messages using counter", async () => {
-      const counter = new EstimateCounter();
-      await store.append({ role: "user", content: "hello world" });
-      await store.append({ role: "assistant", content: "hi there" });
-
-      const messages = await store.load();
-      const tokens = await store.estimateTokens(messages, counter);
-      expect(tokens).toBeGreaterThan(0);
-    }, 5_000);
-
-    it("returns 0 for empty messages", async () => {
-      const counter = new EstimateCounter();
-      const tokens = await store.estimateTokens([], counter);
-      expect(tokens).toBe(0);
-    }, 5_000);
-
-    it("includes tool calls in estimation", async () => {
-      const counter = new EstimateCounter();
-      await store.append({
-        role: "assistant",
-        content: "thinking",
-        toolCalls: [{ id: "tc1", name: "current_time", arguments: {} }],
-      });
-
-      const messages = await store.load();
-      const tokensWithTools = await store.estimateTokens(messages, counter);
-
-      // Should be more than just the content "thinking"
-      const tokensContentOnly = await counter.count("thinking");
-      expect(tokensWithTools).toBeGreaterThan(tokensContentOnly);
-    }, 5_000);
   });
 
   describe("timestamp restoration on load", () => {
