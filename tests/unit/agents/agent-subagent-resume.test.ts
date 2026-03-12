@@ -216,6 +216,7 @@ describe("Agent.resume", () => {
         runCalled = true;
         return {
           success: true,
+          finishReason: "complete" as const,
           result: "resumed result",
           llmCallCount: 1,
           totalPromptTokens: 0,

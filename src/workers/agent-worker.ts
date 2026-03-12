@@ -293,7 +293,8 @@ export function splitModelSpec(
  */
 export function notificationToText(notification: SubagentNotification): string {
   switch (notification.type) {
-    case "completed": {
+    case "completed":
+    case "paused": {
       const result = notification.result;
       if (result && typeof result === "object") {
         // _compileResult returns { agentId, input, response, iterations }
@@ -302,12 +303,12 @@ export function notificationToText(notification: SubagentNotification): string {
         if (typeof response === "string") return response;
         return JSON.stringify(result);
       }
-      return String(result ?? "[Subagent completed]");
+      const label = notification.type === "paused" ? "[Subagent paused — iteration limit]" : "[Subagent completed]";
+      return String(result ?? label);
     }
     case "failed":
       return `[Subagent failed: ${notification.error}]`;
-    default:
-      // "notify"
+    case "notify":
       return notification.message ?? "";
   }
 }

@@ -81,6 +81,7 @@ const logger = getLogger("agent");
 
 export type SubagentNotification =
   | { type: "completed"; subagentId: string; result: unknown; imageRefs?: Array<{ id: string; mimeType: string }> }
+  | { type: "paused"; subagentId: string; result: unknown; imageRefs?: Array<{ id: string; mimeType: string }> }
   | { type: "failed"; subagentId: string; error: string }
   | { type: "notify"; subagentId: string; message: string; imageRefs?: Array<{ id: string; mimeType: string }> };
 
@@ -195,6 +196,8 @@ export interface AgentResult {
   success: boolean;
   result?: unknown;
   error?: string;
+  /** Why the agent stopped: natural completion, iteration limit, interruption, or error. */
+  finishReason: "complete" | "max_iterations" | "interrupted" | "error";
   /** Number of LLM calls made. */
   llmCallCount: number;
   /** Total prompt tokens consumed across all LLM calls. */
@@ -224,6 +227,7 @@ export interface CustomQueueItem {
  */
 export type SubagentNotificationPayload =
   | { type: "completed"; subagentId: string; result: unknown; imageRefs?: Array<{ id: string; mimeType: string }> }
+  | { type: "paused"; subagentId: string; result: unknown; imageRefs?: Array<{ id: string; mimeType: string }> }
   | { type: "failed"; subagentId: string; error: string }
   | { type: "notify"; subagentId: string; message: string; imageRefs?: Array<{ id: string; mimeType: string }> };
 
@@ -452,6 +456,7 @@ export class Agent {
     } catch (err) {
       return {
         success: false,
+        finishReason: "error",
         error: err instanceof Error ? err.message : String(err),
         llmCallCount: 0,
         totalPromptTokens: this._totalPromptTokens,
@@ -887,9 +892,11 @@ export class Agent {
     }
 
     // Build result (for run() callers)
-    const success = finishReason === "complete";
+    // max_iterations is a pause, not a failure — the work is incomplete but not broken.
+    const success = finishReason === "complete" || finishReason === "max_iterations";
     this._lastResult = {
       success,
+      finishReason,
       result: success ? text : undefined,
       error: !success
         ? finishReason === "error"
@@ -1190,7 +1197,10 @@ export class Agent {
    */
   protected async _handleSubagentNotify(notification: SubagentNotificationPayload): Promise<void> {
     let resultText: string;
-    if (notification.type === "failed") {
+    if (notification.type === "paused") {
+      const now = new Date().toISOString().replace("T", " ").slice(0, 19);
+      resultText = `[${now} | System: Subagent ${notification.subagentId} paused — reached iteration limit. Work so far is preserved. Call resume_subagent("${notification.subagentId}", "continue") to let it finish, or use the partial result below.]\n${notification.result ? JSON.stringify(notification.result) : "(no output yet)"}`;
+    } else if (notification.type === "failed") {
       resultText = `[Subagent ${notification.subagentId} failed]\nError: ${notification.error}`;
     } else if (notification.type === "notify") {
       resultText = `[Subagent ${notification.subagentId} update]\n${notification.message}`;
@@ -1201,7 +1211,7 @@ export class Agent {
     const systemMsg: Message = { role: "user", content: resultText };
 
     // Attach image refs from notification
-    const imageRefs = (notification.type === "completed" || notification.type === "notify")
+    const imageRefs = (notification.type === "completed" || notification.type === "paused" || notification.type === "notify")
       ? notification.imageRefs
       : undefined;
     if (imageRefs?.length) {
@@ -1711,8 +1721,9 @@ export class Agent {
       .then((result: AgentResult) => {
         this._activeSubagents.delete(subagentId);
         if (result.success) {
+          const notifType = result.finishReason === "max_iterations" ? "paused" as const : "completed" as const;
           config.onNotification({
-            type: "completed",
+            type: notifType,
             subagentId,
             result: result.result,
             ...(result.imageRefs?.length ? { imageRefs: result.imageRefs } : {}),
