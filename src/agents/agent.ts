@@ -1195,7 +1195,7 @@ export class Agent {
     } else if (notification.type === "notify") {
       resultText = `[Subagent ${notification.subagentId} update]\n${notification.message}`;
     } else {
-      resultText = `[Subagent ${notification.subagentId} completed]\nResult: ${JSON.stringify(notification.result)}\n(To follow up, use resume_subagent("${notification.subagentId}", "new instructions"))`;
+      resultText = `[Subagent ${notification.subagentId} completed]\nResult: ${JSON.stringify(notification.result)}\n<system-reminder>To follow up on this subagent's work, use resume_subagent("${notification.subagentId}", "new instructions") instead of spawning a new one.</system-reminder>`;
     }
 
     const systemMsg: Message = { role: "user", content: resultText };
