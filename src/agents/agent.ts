@@ -66,7 +66,7 @@ import type {
 } from "../channels/types.ts";
 import { sanitizeForPrompt } from "../infra/sanitize.ts";
 import { formatNumber, formatToolStats } from "../infra/format.ts";
-import { formatSize } from "./prompts/index.ts";
+import { formatSize, buildSystemPrompt } from "./prompts/index.ts";
 import type { Reflection } from "./reflection.ts";
 import type { SubAgentTypeRegistry } from "./subagents/registry.ts";
 import { BackgroundTaskManager, MAX_TOOL_TIMEOUT } from "./tools/background.ts";
@@ -122,6 +122,10 @@ export interface SubagentConfig {
    * Used to honor SubAgentType's `model` field. If omitted, subagents use parent's model.
    */
   resolveModel?: (tierOrSpec: string) => LanguageModel;
+  /** Skill metadata string to inject into subagent system prompts. */
+  skillMetadata?: string;
+  /** Dynamic skill metadata getter (called at subagent spawn time). Overrides static skillMetadata. */
+  getSkillMetadata?: () => string | undefined;
 }
 
 // ── Dependencies ─────────────────────────────────────
@@ -670,6 +674,10 @@ export class Agent {
     if (this._onReply) {
       const reply = this._onReply;
       ctx.onReply = (msg) => reply(msg as OutboundMessage);
+    }
+    // Auto-inject extractModel for web_fetch AI extraction
+    if (!ctx.extractModel) {
+      ctx.extractModel = this.model;
     }
     // Auto-inject getMemorySnapshot when memoryDir is set
     if (this._memoryDir && !ctx.getMemorySnapshot) {
@@ -1918,18 +1926,20 @@ export class Agent {
    * When depth === 0, the prompt mentions spawn_subagent capability.
    */
   private _buildSubagentPrompt(description: string, contextPrompt?: string, depth: number = 0): string {
-    const lines = [
-      "You are an execution agent working on a specific task.",
-      `Task: ${description}`,
+    // Build a full system prompt with identity, runtime, safety, and skills —
+    // same structure as MainAgent's task mode, not a bare-bones "you are an execution agent".
+    const subAgentPromptLines = [
+      `## Task`,
+      `${description}`,
       "",
       "Complete the task using your available tools. Be efficient and focused.",
       "When done, provide your final result as text output.",
       "",
-      "Use notify(message) only for critical updates during long-running work (>30s). Do NOT notify routine progress or final summaries — your result is returned automatically.",
+      "Use notify(message) only for critical updates during long-running work (>30s).",
     ];
 
     if (depth === 0) {
-      lines.push(
+      subAgentPromptLines.push(
         "",
         "## Sub-task Delegation",
         "You can delegate sub-tasks using spawn_subagent(description, input, type).",
@@ -1940,10 +1950,20 @@ export class Agent {
     }
 
     if (contextPrompt) {
-      lines.push("", "## Context", contextPrompt);
+      subAgentPromptLines.push("", contextPrompt);
     }
 
-    return lines.join("\n");
+    if (this.persona) {
+      return buildSystemPrompt({
+        persona: this.persona,
+        mode: "task",
+        subAgentPrompt: subAgentPromptLines.join("\n"),
+        skillMetadata: this._subagentConfig?.getSkillMetadata?.() ?? this._subagentConfig?.skillMetadata,
+      });
+    }
+
+    // Fallback: no persona available (e.g. tests) — return bare prompt
+    return subAgentPromptLines.join("\n");
   }
 
   /**
