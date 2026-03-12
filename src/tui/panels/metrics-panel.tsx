@@ -101,6 +101,35 @@ function BudgetSection() {
   )
 }
 
+function ActivitySection() {
+  const s = () => statsStore.stats
+
+  return (
+    <Show when={s()} fallback={null}>
+      {(stats: Accessor<AppStats>) => {
+        const sa = () => stats().subagents
+        const t = () => stats().tools
+        return (
+          <box flexDirection="column" paddingLeft={1} paddingRight={1} paddingBottom={1} border={["top"]} borderColor={THEME.border}>
+            <SectionHeader icon="⚡" title="Activity" />
+            <box flexDirection="column" paddingTop={1}>
+              <text fg={sa().active > 0 ? THEME.accent : THEME.text}>
+                {" "}subagents: <b>{sa().active}</b> active{sa().completed + sa().failed > 0 ? ` / ${sa().completed} done / ${sa().failed} fail` : ""}
+              </text>
+              <text fg={THEME.text}>
+                {" "}tools: {t().calls} calls ({t().success} ok / {t().fail} fail)
+              </text>
+              <text fg={THEME.textMuted}>
+                {" "}registered: {t().builtin} builtin + {t().mcp} mcp
+              </text>
+            </box>
+          </box>
+        )
+      }}
+    </Show>
+  )
+}
+
 function ChannelsSection() {
   const s = () => statsStore.stats
 
@@ -135,6 +164,7 @@ export function MetricsPanel() {
     <box flexDirection="column" flexGrow={1}>
       <ModelSection />
       <BudgetSection />
+      <ActivitySection />
       <ChannelsSection />
     </box>
   )
