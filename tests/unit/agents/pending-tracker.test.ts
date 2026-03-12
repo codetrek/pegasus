@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { PendingTracker } from "../../../src/agents/pending-tracker.ts";
-import { readFile, rm } from "node:fs/promises";
+import { readFile, rm, writeFile, mkdir, access } from "node:fs/promises";
 
 const testDir = "/tmp/pegasus-test-pending";
 
@@ -70,12 +70,14 @@ describe("PendingTracker", () => {
     expect(recovered).toEqual([]);
   });
 
-  it("recover() should handle corrupted JSON gracefully", async () => {
-    const { writeFile, mkdir } = await import("node:fs/promises");
+  it("recover() should handle corrupted JSON gracefully and delete file", async () => {
     await mkdir(testDir, { recursive: true });
     await writeFile(`${testDir}/pending.json`, "NOT VALID JSON", "utf-8");
     const recovered = await tracker.recover();
     expect(recovered).toEqual([]);
+    // Corrupted file should be deleted
+    const exists = await access(`${testDir}/pending.json`).then(() => true).catch(() => false);
+    expect(exists).toBe(false);
   });
 
   it("concurrent add/remove should serialize correctly", async () => {

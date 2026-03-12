@@ -9,7 +9,7 @@
  * to prevent concurrent read-modify-write corruption.
  */
 
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, unlink } from "node:fs/promises";
 import path from "node:path";
 import { getLogger } from "../infra/logger.ts";
 
@@ -71,14 +71,20 @@ export class PendingTracker {
   /**
    * Recover pending entries from a previous run.
    * Returns all remaining entries and clears the file.
+   * If the file contains corrupted JSON, deletes it and returns [].
    */
   async recover(): Promise<PendingEntry[]> {
-    const arr = await this._read();
-    if (arr.length === 0) return [];
+    const result = await this._readWithStatus();
+    if (result.corrupted) {
+      logger.warn("pending_json_corrupted_on_recover");
+      await unlink(this.filePath).catch(() => {});
+      return [];
+    }
+    if (result.entries.length === 0) return [];
 
-    logger.info({ count: arr.length, ids: arr.map((e) => e.id) }, "recovered_pending");
+    logger.info({ count: result.entries.length, ids: result.entries.map((e) => e.id) }, "recovered_pending");
     await this._write([]);
-    return arr;
+    return result.entries;
   }
 
   /**
@@ -98,11 +104,25 @@ export class PendingTracker {
   }
 
   private async _read(): Promise<PendingEntry[]> {
+    return (await this._readWithStatus()).entries;
+  }
+
+  /**
+   * Read pending.json with status info.
+   * Distinguishes file-not-found (normal) from parse error (corrupted).
+   */
+  private async _readWithStatus(): Promise<{ entries: PendingEntry[]; corrupted: boolean }> {
+    let content: string;
     try {
-      const content = await readFile(this.filePath, "utf-8");
-      return JSON.parse(content);
+      content = await readFile(this.filePath, "utf-8");
     } catch {
-      return [];
+      return { entries: [], corrupted: false }; // File doesn't exist yet — normal
+    }
+    try {
+      return { entries: JSON.parse(content), corrupted: false };
+    } catch {
+      logger.warn("pending_json_parse_error");
+      return { entries: [], corrupted: true };
     }
   }
 

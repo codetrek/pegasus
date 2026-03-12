@@ -324,7 +324,10 @@ export class Agent {
   private _backgroundManager: BackgroundTaskManager;
 
   // ── Pending tracker (crash recovery for in-flight work) ──
-  protected _pendingTracker: PendingTracker;
+  // Only created for agents that manage subagents (i.e. MainAgent level).
+  // Subagent-internal bg_run tasks don't need double tracking — the parent
+  // already tracks the subagent itself.
+  private _pendingTracker?: PendingTracker;
 
   /** Optional callback for LLM usage tracking (set by PegasusApp). */
   private _llmUsageCallback: ((result: GenerateTextResult) => void) | null = null;
@@ -352,7 +355,9 @@ export class Agent {
       deps.toolTimeout ?? 30000,
     );
 
-    this._pendingTracker = new PendingTracker(deps.sessionDir);
+    this._pendingTracker = deps.subagentConfig
+      ? new PendingTracker(deps.sessionDir)
+      : undefined;
     this._backgroundManager = new BackgroundTaskManager(
       this.toolExecutor,
       deps.toolTimeout ?? MAX_TOOL_TIMEOUT,
@@ -579,7 +584,7 @@ export class Agent {
     }
 
     // Recover pending subagents/bg_run from previous crash
-    const recovered = await this._pendingTracker.recover();
+    const recovered = await this._pendingTracker?.recover() ?? [];
     if (recovered.length > 0) {
       for (const entry of recovered) {
         const msg =
@@ -1741,12 +1746,13 @@ export class Agent {
     const config = this._subagentConfig;
 
     this._activeSubagents.set(subagentId, info);
-    this._pendingTracker.add({
+    this._pendingTracker?.add({
       id: subagentId,
       kind: "subagent",
       ts: info.startedAt,
       description: info.description,
       agentType: info.agentType,
+      input: info.input,
     });
     this._startTick();
 
@@ -1754,7 +1760,7 @@ export class Agent {
       .run(input, { persistSession: true })
       .then((result: AgentResult) => {
         this._activeSubagents.delete(subagentId);
-        this._pendingTracker.remove(subagentId);
+        this._pendingTracker?.remove(subagentId);
         if (result.success) {
           const notifType = result.finishReason === "max_iterations" ? "paused" as const : "completed" as const;
           config.onNotification({
@@ -1788,7 +1794,7 @@ export class Agent {
       })
       .catch((err: unknown) => {
         this._activeSubagents.delete(subagentId);
-        this._pendingTracker.remove(subagentId);
+        this._pendingTracker?.remove(subagentId);
         const errorMsg = err instanceof Error ? err.message : String(err);
         config.onNotification({
           type: "failed",
