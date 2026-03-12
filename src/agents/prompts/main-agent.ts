@@ -194,6 +194,10 @@ export function buildDelegationSection(): string[] {
     "  - If you spawned multiple subagents and results are still arriving,",
     "    wait and consolidate before replying — don't send a separate update for each one.",
     "  - If some results are taking much longer, share what you have and note what's still pending.",
+    "- resume_subagent: If a follow-up request relates to work a previous subagent already did,",
+    "  consider resuming it — it keeps its full session context (prior searches, findings)",
+    "  and can build on that without starting over. Spawn a new one if the topic is different",
+    "  or you need a fresh approach.",
     '- create_project: Runs independently. Check on it or send instructions via reply(channelType="project").',
   ];
 }
