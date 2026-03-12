@@ -27,6 +27,7 @@
 
 import type { Persona } from "../identity/persona.ts";
 import type { AppStats } from "../stats/index.ts";
+import type { GenerateTextResult } from "../infra/llm-types.ts";
 import { buildSystemPrompt } from "./prompts/index.ts";
 import type { Settings } from "../infra/config.ts";
 import { getSettings } from "../infra/config.ts";
@@ -216,6 +217,18 @@ export class MainAgent extends Agent {
     // PegasusApp owns infrastructure shutdown.
     // MainAgent only needs to drain queue (done above).
     logger.info("main_agent_stopped");
+  }
+
+  /**
+   * Override to update budget.used — only MainAgent's prompt size matters
+   * for context window tracking. Subagent calls update LLM totals but not budget.
+   */
+  protected override async onLLMUsage(result: GenerateTextResult): Promise<void> {
+    await super.onLLMUsage(result);
+    if (this._appStats) {
+      this._appStats.budget.used =
+        (result.usage.promptTokens ?? 0) + (result.usage.cacheReadTokens ?? 0);
+    }
   }
 
   /**

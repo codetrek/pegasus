@@ -23,6 +23,7 @@ import { ToolExecutor } from "@pegasus/agents/tools/executor";
 import { mainAgentTools } from "@pegasus/agents/tools/builtins";
 import { buildMainAgentPaths } from "@pegasus/storage/paths.ts";
 import { OwnerStore } from "@pegasus/security/owner-store.ts";
+import { createAppStats } from "@pegasus/stats/app-stats.ts";
 import path from "node:path";
 
 export interface CreateInjectedOpts {
@@ -119,5 +120,11 @@ export function createInjectedSubsystems(opts: CreateInjectedOpts): InjectedSubs
     reflectionOrchestrator,
     mcpTools: [],
     ownerStore: new OwnerStore(path.join(settings.homeDir, "auth")),
+    appStats: createAppStats({
+      persona: persona.name,
+      provider: models.getDefaultProvider(),
+      modelId: models.getDefaultModelId(),
+      contextWindow: models.getDefaultContextWindow() ?? 128000,
+    }),
   };
 }

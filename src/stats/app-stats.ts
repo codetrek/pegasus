@@ -118,7 +118,6 @@ export function recordLLMUsage(stats: AppStats, call: LLMCallSnapshot): void {
   m.totalCacheReadTokens += call.cacheReadTokens;
   m.totalCacheWriteTokens += call.cacheWriteTokens;
   m.totalLatencyMs += call.latencyMs;
-  stats.budget.used = call.promptTokens + call.cacheReadTokens;
 }
 
 export function recordToolCall(stats: AppStats, success: boolean): void {
