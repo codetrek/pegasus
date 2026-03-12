@@ -2,11 +2,13 @@
  * Unit tests for BackgroundTaskManager and background meta tools (bg_run, bg_output, bg_stop).
  */
 
-import { describe, it, expect, mock } from "bun:test";
+import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test";
 import { z } from "zod";
 import {
   BackgroundTaskManager,
 } from "../../../src/agents/tools/background.ts";
+import { PendingTracker } from "../../../src/agents/pending-tracker.ts";
+import { readFile, rm } from "node:fs/promises";
 import { ToolExecutor } from "../../../src/agents/tools/executor.ts";
 import { bg_run, bg_output, bg_stop } from "../../../src/agents/tools/builtins/background-tools.ts";
 import type { Tool, ToolContext, ToolCategory, ToolResult } from "../../../src/agents/tools/types.ts";
@@ -501,4 +503,66 @@ describe("bg_stop integration", () => {
       expect(status.error).toBe("Stopped by user");
     }
   }, 15_000);
+});
+
+// ── BackgroundTaskManager + PendingTracker ────────────
+
+const pendingTestDir = "/tmp/pegasus-test-bg-pending";
+
+describe("BackgroundTaskManager with PendingTracker", () => {
+  let tracker: PendingTracker;
+
+  beforeEach(async () => {
+    await rm(pendingTestDir, { recursive: true, force: true }).catch(() => {});
+    tracker = new PendingTracker(pendingTestDir);
+  });
+
+  afterEach(async () => {
+    await rm(pendingTestDir, { recursive: true, force: true }).catch(() => {});
+  });
+
+  it("should add entry to pending on run()", async () => {
+    const tool = makeMockTool("slow", 5000);
+    const executor = makeExecutor([tool]);
+    const mgr = new BackgroundTaskManager(executor, 10_000, tracker);
+    mgr.run("slow", {}, ctx());
+    await tracker.flush();
+    const content = JSON.parse(await readFile(`${pendingTestDir}/pending.json`, "utf-8"));
+    expect(content).toHaveLength(1);
+    expect(content[0].kind).toBe("bg_run");
+    expect(content[0].tool).toBe("slow");
+  }, 5000);
+
+  it("should remove entry from pending on completion", async () => {
+    const tool = makeMockTool("fast", 10);
+    const executor = makeExecutor([tool]);
+    const mgr = new BackgroundTaskManager(executor, 10_000, tracker);
+    const id = mgr.run("fast", {}, ctx());
+    // Wait for task to complete
+    await mgr.waitFor(id, 5000);
+    await tracker.flush();
+    const content = JSON.parse(await readFile(`${pendingTestDir}/pending.json`, "utf-8"));
+    expect(content).toHaveLength(0);
+  }, 5000);
+
+  it("should remove entry from pending on stop()", async () => {
+    const tool = makeMockTool("slow", 5000);
+    const executor = makeExecutor([tool]);
+    const mgr = new BackgroundTaskManager(executor, 10_000, tracker);
+    const id = mgr.run("slow", {}, ctx());
+    await tracker.flush();
+    mgr.stop(id);
+    await tracker.flush();
+    const content = JSON.parse(await readFile(`${pendingTestDir}/pending.json`, "utf-8"));
+    expect(content).toHaveLength(0);
+  }, 5000);
+
+  it("should work without tracker (backward compat)", () => {
+    const tool = makeMockTool("fast", 10);
+    const executor = makeExecutor([tool]);
+    const mgr = new BackgroundTaskManager(executor);
+    // Should not throw
+    const id = mgr.run("fast", {}, ctx());
+    expect(id).toMatch(/^bg-/);
+  }, 5000);
 });
