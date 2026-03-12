@@ -161,6 +161,7 @@ export class MainAgent extends Agent {
           : undefined,
         // Resolve SubAgentType model tier/spec to a LanguageModel
         resolveModel: (tierOrSpec: string) => deps.models.getForTier(tierOrSpec as import("../infra/model-registry.ts").ModelTier),
+        getSkillMetadata: () => this.skillRegistry.getMetadataForPrompt(16_000) || undefined,
       },
       appStats: deps.injected.appStats,
     });

@@ -54,6 +54,8 @@ Use spawn_subagent(type, description, input) to delegate atomic work to a sub-ag
 3. DECOMPOSE: Break complex work into parallel sub-tasks when possible.
 4. COORDINATE: Wait for sub-task results before synthesizing.
 5. PROGRESS: Use notify() for major milestones on long-running work.
-6. CONCISE RESULT: Your final result should be a clear, actionable summary.
+6. COMPLETE RESULT: Include all key findings, data points, and source links.
+   Do not strip details the coordinator needs to act — but don't dump raw data either.
+   Structure your output clearly (headings, bullet points) so it's easy to scan.
 7. EFFICIENT: Don't over-decompose. If you can do something directly, do it.
 8. ERROR HANDLING: If a sub-task fails, decide whether to retry, skip, or fail the whole task.`;
