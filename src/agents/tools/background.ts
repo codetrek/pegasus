@@ -11,6 +11,7 @@
 
 import type { ToolExecutor } from "./executor.ts";
 import type { ToolResult, ToolContext } from "./types.ts";
+import type { PendingTracker } from "../pending-tracker.ts";
 import { getLogger } from "../../infra/logger.ts";
 import { shortId } from "../../infra/id.ts";
 
@@ -52,6 +53,7 @@ export class BackgroundTaskManager {
   constructor(
     private executor: ToolExecutor,
     private defaultTimeout: number = MAX_TOOL_TIMEOUT,
+    private pendingTracker?: PendingTracker,
   ) {}
 
   /**
@@ -99,6 +101,7 @@ export class BackgroundTaskManager {
         taskRef.result = result;
         taskRef.error = result.error;
         taskRef.completedAt = Date.now();
+        this.pendingTracker?.remove(id);
         logger.info(
           { bgTaskId: id, tool: toolName, success: result.success,
             durationMs: taskRef.completedAt - startedAt },
@@ -111,6 +114,7 @@ export class BackgroundTaskManager {
         taskRef.status = "failed";
         taskRef.error = errorMessage;
         taskRef.completedAt = Date.now();
+        this.pendingTracker?.remove(id);
         logger.error(
           { bgTaskId: id, tool: toolName, error: errorMessage,
             durationMs: taskRef.completedAt - startedAt },
@@ -130,6 +134,7 @@ export class BackgroundTaskManager {
 
     this.tasks.set(id, task);
 
+    this.pendingTracker?.add({ id, kind: "bg_run", ts: startedAt, tool: toolName });
     logger.info(
       { bgTaskId: id, tool: toolName, timeout: effectiveTimeout },
       "bg_task_started",
@@ -215,6 +220,8 @@ export class BackgroundTaskManager {
     task.status = "failed";
     task.error = "Stopped by user";
     task.completedAt = Date.now();
+
+    this.pendingTracker?.remove(bgTaskId);
 
     logger.info(
       { bgTaskId, tool: task.tool, durationMs: task.completedAt - task.startedAt },

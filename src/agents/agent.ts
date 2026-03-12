@@ -68,7 +68,8 @@ import { formatNumber, formatToolStats } from "../infra/format.ts";
 import { formatSize } from "./prompts/index.ts";
 import type { Reflection } from "./reflection.ts";
 import type { SubAgentTypeRegistry } from "./subagents/registry.ts";
-import { BackgroundTaskManager } from "./tools/background.ts";
+import { BackgroundTaskManager, MAX_TOOL_TIMEOUT } from "./tools/background.ts";
+import { PendingTracker } from "./pending-tracker.ts";
 import { allSubagentTools } from "./tools/builtins/index.ts";
 import { spawn_subagent } from "./tools/builtins/spawn-subagent-tool.ts";
 import { resume_subagent } from "./tools/builtins/resume-subagent-tool.ts";
@@ -322,6 +323,12 @@ export class Agent {
   // ── Background task manager (bg_run/bg_output/bg_stop) ──
   private _backgroundManager: BackgroundTaskManager;
 
+  // ── Pending tracker (crash recovery for in-flight work) ──
+  // Only created for agents that manage subagents (i.e. MainAgent level).
+  // Subagent-internal bg_run tasks don't need double tracking — the parent
+  // already tracks the subagent itself.
+  private _pendingTracker?: PendingTracker;
+
   /** Optional callback for LLM usage tracking (set by PegasusApp). */
   private _llmUsageCallback: ((result: GenerateTextResult) => void) | null = null;
 
@@ -348,7 +355,14 @@ export class Agent {
       deps.toolTimeout ?? 30000,
     );
 
-    this._backgroundManager = new BackgroundTaskManager(this.toolExecutor);
+    this._pendingTracker = deps.subagentConfig
+      ? new PendingTracker(deps.sessionDir)
+      : undefined;
+    this._backgroundManager = new BackgroundTaskManager(
+      this.toolExecutor,
+      deps.toolTimeout ?? MAX_TOOL_TIMEOUT,
+      this._pendingTracker,
+    );
 
     this.persona = deps.persona;
     this._systemPromptSource = deps.systemPrompt;
@@ -567,6 +581,24 @@ export class Agent {
     // Auto-inject memory index for fresh sessions (empty = new conversation)
     if (this._memoryDir && this.sessionMessages.length === 0) {
       await this._injectMemoryIndex();
+    }
+
+    // Recover pending subagents/bg_run from previous crash
+    const recovered = await this._pendingTracker?.recover() ?? [];
+    if (recovered.length > 0) {
+      for (const entry of recovered) {
+        const msg =
+          entry.kind === "subagent"
+            ? `[Recovery] Subagent ${entry.id} (${entry.agentType ?? "unknown"}: "${entry.description}") was interrupted by process restart and has been marked as failed. You may resume it with resume_subagent if needed.`
+            : `[Recovery] Background task ${entry.id} (${entry.tool}) was interrupted by process restart. The process no longer exists.`;
+        const recoveryMessage = { role: "user" as const, content: msg };
+        this.sessionMessages.push(recoveryMessage);
+        await this.sessionStore.append(recoveryMessage);
+      }
+      logger.info(
+        { count: recovered.length, ids: recovered.map((e) => e.id) },
+        "pending_recovery_notified",
+      );
     }
   }
 
@@ -1714,12 +1746,21 @@ export class Agent {
     const config = this._subagentConfig;
 
     this._activeSubagents.set(subagentId, info);
+    this._pendingTracker?.add({
+      id: subagentId,
+      kind: "subagent",
+      ts: info.startedAt,
+      description: info.description,
+      agentType: info.agentType,
+      input: info.input,
+    });
     this._startTick();
 
     agent
       .run(input, { persistSession: true })
       .then((result: AgentResult) => {
         this._activeSubagents.delete(subagentId);
+        this._pendingTracker?.remove(subagentId);
         if (result.success) {
           const notifType = result.finishReason === "max_iterations" ? "paused" as const : "completed" as const;
           config.onNotification({
@@ -1753,6 +1794,7 @@ export class Agent {
       })
       .catch((err: unknown) => {
         this._activeSubagents.delete(subagentId);
+        this._pendingTracker?.remove(subagentId);
         const errorMsg = err instanceof Error ? err.message : String(err);
         config.onNotification({
           type: "failed",
