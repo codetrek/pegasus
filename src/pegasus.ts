@@ -17,7 +17,7 @@
 import path from "node:path";
 import type { Persona } from "./identity/persona.ts";
 import type { Settings } from "./infra/config.ts";
-import { getSettings } from "./infra/config.ts";
+import { getSettings, setSettings } from "./infra/config.ts";
 import { errorToString } from "./infra/errors.ts";
 import { getLogger } from "./infra/logger.ts";
 import type { ModelRegistry } from "./infra/model-registry.ts";
@@ -261,6 +261,12 @@ export class Pegasus {
     if (this._started) {
       throw new Error("PegasusApp already started");
     }
+
+    // Ensure the settings singleton is initialized so subsystems (e.g.
+    // ProjectAdapter.startProject) that call getSettings() can access it.
+    // In production, cli.ts calls setSettings() before creating Pegasus,
+    // but tests may pass settings directly via the constructor.
+    setSettings(this.settings);
 
     const mainStorePaths = buildMainAgentPaths(this.settings.homeDir);
 
