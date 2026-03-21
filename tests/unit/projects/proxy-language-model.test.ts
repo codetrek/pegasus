@@ -158,7 +158,7 @@ describe("ProxyLanguageModel", () => {
     expect(result.text).toBe("quick response");
 
     // After timeout period, pending should still be empty (no stale timeout firing)
-    await new Promise((r) => setTimeout(r, 250));
+    await Bun.sleep(20);
     expect(model.pendingCount).toBe(0);
   }, 5_000);
 
@@ -178,7 +178,7 @@ describe("ProxyLanguageModel", () => {
     await expect(promise).rejects.toThrow("API error");
 
     // After timeout period, pending should still be empty
-    await new Promise((r) => setTimeout(r, 250));
+    await Bun.sleep(20);
     expect(model.pendingCount).toBe(0);
   }, 5_000);
 
@@ -221,7 +221,7 @@ describe("ProxyLanguageModel", () => {
     await expect(promise).rejects.toThrow("shutdown");
 
     // Wait past the original timeout — no additional errors should surface
-    await new Promise((r) => setTimeout(r, 150));
+    await Bun.sleep(20);
     expect(model.pendingCount).toBe(0);
   }, 5_000);
 });

@@ -26,7 +26,7 @@ afterEach(async () => {
   await rm(tempDir, { recursive: true, force: true }).catch(() => {});
 });
 afterAll(async () => {
-  await Bun.sleep(100);
+  await Bun.sleep(20);
   await Promise.all(allTempDirs.map(d => rm(d, { recursive: true, force: true }).catch(() => {})));
 });
 

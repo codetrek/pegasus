@@ -8,14 +8,15 @@
  */
 import type { AppStats } from "../stats/app-stats.ts"
 
-const POLL_INTERVAL_MS = 500
+const DEFAULT_POLL_INTERVAL_MS = 500
 
 export function startStatsBridge(
   appStats: AppStats,
   setStats: (snapshot: AppStats) => void,
+  pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
 ): () => void {
   const timer = setInterval(() => {
     setStats(structuredClone(appStats))
-  }, POLL_INTERVAL_MS)
+  }, pollIntervalMs)
   return () => clearInterval(timer)
 }

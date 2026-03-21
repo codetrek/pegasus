@@ -25,6 +25,7 @@ import { OwnerStore } from "@pegasus/security/owner-store.ts";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { createInjectedSubsystems } from "../../helpers/create-injected-subsystems.ts";
+import { waitFor } from "../../helpers/wait-for.ts";
 
 let testSeq = 0;
 let testDataDir = "/tmp/pegasus-test-routing";
@@ -145,7 +146,7 @@ describe("Multi-channel routing", () => {
       text: "hello",
       channel: { type: "telegram", channelId: "tg-123", userId: "any" },
     });
-    await Bun.sleep(100);
+    await waitFor(() => cliMock.delivered.length >= 2);
 
     // Reply should route to telegram adapter (channel.type = "telegram")
     expect(telegramMock.delivered.length).toBeGreaterThanOrEqual(1);
@@ -196,7 +197,7 @@ describe("Multi-channel routing", () => {
       text: "hello",
       channel: { type: "sms", channelId: "unknown-123", userId: "any" },
     });
-    await Bun.sleep(100);
+    await waitFor(() => cliMock.delivered.length >= 2);
 
     // CLI should receive mirrored sms inbound + mirrored sms reply (console sees everything)
     expect(cliMock.delivered).toHaveLength(2);
@@ -268,14 +269,14 @@ describe("Multi-channel routing", () => {
       text: "hello from cli",
       channel: { type: "cli", channelId: "main" },
     });
-    await Bun.sleep(100);
+    await waitFor(() => cliMock.delivered.length >= 1);
 
     // Send from Telegram via routeMessage
     app.routeMessage({
       text: "hello from telegram",
       channel: { type: "telegram", channelId: "tg-456", userId: "any" },
     });
-    await Bun.sleep(100);
+    await waitFor(() => cliMock.delivered.length >= 3);
 
     // CLI receives its own reply + mirrored telegram inbound + mirrored telegram reply
     expect(cliMock.delivered).toHaveLength(3);
@@ -334,7 +335,7 @@ describe("Multi-channel routing", () => {
       text: "hello",
       channel: { type: "broken", channelId: "broken-123", userId: "any" },
     });
-    await Bun.sleep(100);
+    await waitFor(() => replied);
 
     // No crash occurred
     await app.stop();
@@ -378,7 +379,7 @@ describe("Multi-channel routing", () => {
       text: "hello",
       channel: { type: "cli", channelId: "test" },
     });
-    await Bun.sleep(100);
+    await waitFor(() => replies.length >= 1);
 
     expect(replies).toHaveLength(1);
     expect(replies[0]!.text).toBe("Direct callback");

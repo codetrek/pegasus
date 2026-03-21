@@ -26,6 +26,7 @@ import os from "node:os";
 import {
   MAX_OVERFLOW_COMPACT_RETRIES,
 } from "../../../../src/context/index.ts";
+import { waitFor } from "../../../helpers/wait-for.ts";
 
 // ── Helpers ──────────────────────────────────────────
 
@@ -246,8 +247,8 @@ describe("Agent", () => {
       // Agent is IDLE (canAcceptWork = true), so handleEvent should be called
       agent.testQueueEvent(event);
 
-      // Allow microtask to run (fire-and-forget)
-      await new Promise((r) => setTimeout(r, 50));
+      // Wait for async fire-and-forget handleEvent to complete
+      await waitFor(() => agent.handleEventMock.mock.calls.length >= 1);
 
       expect(agent.handleEventMock).toHaveBeenCalledTimes(1);
       expect(agent.handleEventMock).toHaveBeenCalledWith(event);
@@ -354,7 +355,7 @@ describe("Agent", () => {
       });
 
       // Wait for drain
-      await new Promise((r) => setTimeout(r, 50));
+      await waitFor(() => agent2.handleEventMock.mock.calls.length >= 2);
 
       expect(agent2.eventQueueLength).toBe(0);
       expect(agent2.handleEventMock).toHaveBeenCalledTimes(2);
@@ -378,7 +379,7 @@ describe("Agent", () => {
 
       // Should not throw — error is caught and logged
       agent.testQueueEvent(makeEvent());
-      await new Promise((r) => setTimeout(r, 50));
+      await Bun.sleep(20);
       // No assertion needed — just verify no uncaught exception
     });
   });
@@ -527,7 +528,7 @@ describe("Agent", () => {
       await agent.testProcessStep("task-1");
 
       // Wait for async tool execution and next processStep
-      await new Promise((r) => setTimeout(r, 50));
+      await waitFor(() => llmCallCount >= 2);
 
       // Should have called LLM twice: first with tool calls, second with final answer
       expect(llmCallCount).toBe(2);
@@ -640,7 +641,7 @@ describe("Agent", () => {
       agent.testCreateTaskState("task-1", [{ role: "user", content: "hi" }]);
 
       await agent.testProcessStep("task-1");
-      await new Promise((r) => setTimeout(r, 50));
+      await waitFor(() => emittedEvents.length >= 1);
 
       // First event should have hasToolCalls=true, toolCount=2
       expect(emittedEvents.length).toBeGreaterThanOrEqual(1);
@@ -762,7 +763,7 @@ describe("Agent", () => {
       ]);
 
       await agent.testProcessStep("task-1");
-      await new Promise((r) => setTimeout(r, 50));
+      await waitFor(() => llmCallCount >= 2);
 
       expect(llmCallCount).toBe(2);
       expect(agent.onTaskCompleteMock).toHaveBeenCalledTimes(1);
@@ -818,7 +819,7 @@ describe("Agent", () => {
       ]);
 
       await agent.testProcessStep("task-1");
-      await new Promise((r) => setTimeout(r, 50));
+      await waitFor(() => agent.onTaskCompleteMock.mock.calls.length >= 1);
 
       // LLM should only be called once (second processStep should not fire)
       expect(llmCallCount).toBe(1);
@@ -998,7 +999,7 @@ describe("Agent", () => {
       ]);
 
       await agent.testProcessStep("task-1");
-      await new Promise((r) => setTimeout(r, 50));
+      await waitFor(() => appendedCalls.length >= 3);
 
       // Should be called 3 times:
       // 1. assistant message with tool calls
@@ -1118,7 +1119,7 @@ describe("Agent", () => {
 
       await agent.testProcessStep("task-1");
       // Wait for async tool execution chains to complete
-      await new Promise((r) => setTimeout(r, 100));
+      await waitFor(() => llmCallCount >= 3);
 
       // Verify: LLM called 3 times
       expect(llmCallCount).toBe(3);
@@ -1194,7 +1195,7 @@ describe("Agent", () => {
 
       await agent.testProcessStep("task-1");
       // Wait for async tool execution and next processStep
-      await new Promise((r) => setTimeout(r, 100));
+      await waitFor(() => llmCallCount >= 2);
 
       // Collector should have completed despite the error
       expect(llmCallCount).toBe(2);

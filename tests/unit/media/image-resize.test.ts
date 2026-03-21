@@ -1,4 +1,4 @@
-import { describe, it, expect, setDefaultTimeout, afterEach } from "bun:test";
+import { describe, it, expect, setDefaultTimeout, afterEach, beforeAll } from "bun:test";
 import {
   resizeImage,
   isSharpAvailable,
@@ -11,17 +11,18 @@ import sharp from "sharp";
 // Sharp operations can be slow — set generous default timeout
 setDefaultTimeout(30_000);
 
-// Create minimal valid 1x1 PNG for basic tests
-function createTestPng(): Buffer {
-  return Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==",
-    "base64",
-  );
-}
+// Create minimal valid 1x1 PNG for basic tests (synchronous, cheap — no caching needed)
+const testPng = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==",
+  "base64",
+);
 
-// Create a LARGE test image (3000x2000 red) to exercise resize grid
-async function createLargeTestImage(): Promise<Buffer> {
-  return sharp({
+// Module-level cache for the large test image (created once in beforeAll)
+let largeTestImage: Buffer;
+
+// Create the large image ONCE — shared by all tests that need it
+beforeAll(async () => {
+  largeTestImage = await sharp({
     create: {
       width: 3000,
       height: 2000,
@@ -29,7 +30,7 @@ async function createLargeTestImage(): Promise<Buffer> {
       background: { r: 255, g: 0, b: 0 },
     },
   }).png().toBuffer();
-}
+});
 
 describe("isSharpAvailable", () => {
   afterEach(() => {
@@ -84,19 +85,17 @@ describe("resizeImage", () => {
   });
 
   it("should return original if already within limits", async () => {
-    const png = createTestPng();
-    const result = await resizeImage(png, "image/png", {
+    const result = await resizeImage(testPng, "image/png", {
       maxDimensionPx: 1200,
       maxBytes: 5 * 1024 * 1024,
     });
     expect(result.width).toBe(1);
     expect(result.height).toBe(1);
-    expect(result.buffer.length).toBe(png.length); // unchanged
+    expect(result.buffer.length).toBe(testPng.length); // unchanged
   });
 
   it("should resize a large image to fit maxDimensionPx", async () => {
-    const large = await createLargeTestImage();
-    const result = await resizeImage(large, "image/png", {
+    const result = await resizeImage(largeTestImage, "image/png", {
       maxDimensionPx: 1200,
       maxBytes: 5 * 1024 * 1024,
     });
@@ -108,8 +107,7 @@ describe("resizeImage", () => {
   });
 
   it("should resize to fit maxBytes when image is too large in bytes", async () => {
-    const large = await createLargeTestImage();
-    const result = await resizeImage(large, "image/png", {
+    const result = await resizeImage(largeTestImage, "image/png", {
       maxDimensionPx: 3000, // Don't constrain by dimension
       maxBytes: 10_000,     // Very small byte limit
     });
@@ -134,8 +132,7 @@ describe("resizeImage", () => {
   });
 
   it("should convert non-PNG to JPEG", async () => {
-    const large = await createLargeTestImage();
-    const result = await resizeImage(large, "image/bmp", {
+    const result = await resizeImage(largeTestImage, "image/bmp", {
       maxDimensionPx: 800,
       maxBytes: 5 * 1024 * 1024,
     });
@@ -143,8 +140,7 @@ describe("resizeImage", () => {
   });
 
   it("should return smallest candidate with warning when nothing fits", async () => {
-    const large = await createLargeTestImage();
-    const result = await resizeImage(large, "image/png", {
+    const result = await resizeImage(largeTestImage, "image/png", {
       maxDimensionPx: 1200,
       maxBytes: 100, // Impossibly small
     });
@@ -156,26 +152,24 @@ describe("resizeImage", () => {
   // --- Sharp-unavailable fallback paths ---
 
   it("should return original when sharp is unavailable and buffer fits", async () => {
-    const png = createTestPng();
     _setSharpUnavailableForTest();
 
-    const result = await resizeImage(png, "image/png", {
+    const result = await resizeImage(testPng, "image/png", {
       maxDimensionPx: 1200,
       maxBytes: 5 * 1024 * 1024,
     });
     // Fallback: returns original buffer as-is
-    expect(result.buffer).toBe(png);
+    expect(result.buffer).toBe(testPng);
     expect(result.mimeType).toBe("image/png");
     expect(result.width).toBe(0);
     expect(result.height).toBe(0);
   });
 
   it("should throw when sharp is unavailable and buffer exceeds maxBytes", async () => {
-    const png = createTestPng();
     _setSharpUnavailableForTest();
 
     await expect(
-      resizeImage(png, "image/png", {
+      resizeImage(testPng, "image/png", {
         maxDimensionPx: 1200,
         maxBytes: 10, // Way too small for even a tiny PNG
       }),
@@ -187,21 +181,19 @@ describe("resizeImage", () => {
   it("should return original when size grid is empty (maxDimensionPx=0)", async () => {
     // With maxDimensionPx = 0, buildSizeGrid returns [], so the loop body
     // never executes and smallest is null → falls through to line 162
-    const png = createTestPng();
-    const result = await resizeImage(png, "image/png", {
+    const result = await resizeImage(testPng, "image/png", {
       maxDimensionPx: 0,
       maxBytes: 5 * 1024 * 1024,
     });
     // Falls through to final return (line 162/164)
-    expect(result.buffer).toBe(png);
+    expect(result.buffer).toBe(testPng);
     expect(result.mimeType).toBe("image/png");
   });
 
   // --- Format detection: exercise webp/gif paths ---
 
   it("should handle image/webp mimeType (non-alpha, converts to jpeg)", async () => {
-    const large = await createLargeTestImage();
-    const result = await resizeImage(large, "image/webp", {
+    const result = await resizeImage(largeTestImage, "image/webp", {
       maxDimensionPx: 800,
       maxBytes: 5 * 1024 * 1024,
     });
@@ -209,8 +201,7 @@ describe("resizeImage", () => {
   });
 
   it("should handle image/gif mimeType (non-alpha, converts to jpeg)", async () => {
-    const large = await createLargeTestImage();
-    const result = await resizeImage(large, "image/gif", {
+    const result = await resizeImage(largeTestImage, "image/gif", {
       maxDimensionPx: 800,
       maxBytes: 5 * 1024 * 1024,
     });

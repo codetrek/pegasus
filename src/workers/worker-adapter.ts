@@ -32,6 +32,7 @@ export type WorkerOutbound =
   | { type: "notify"; message: InboundMessage }
   | { type: "reply"; message: OutboundMessage }
   | { type: "error"; message: string }
+  | { type: "ready" }
   | LLMProxyRequest;
 
 /** Messages sent from Main thread -> Worker. */
@@ -58,6 +59,8 @@ export class WorkerAdapter {
 
   private readonly workerUrl: string;
   private readonly workers = new Map<WorkerKey, Worker>();
+  /** Resolve callbacks for Workers that haven't sent "ready" yet. */
+  private readonly readyResolvers = new Map<WorkerKey, () => void>();
   private models: ModelRegistry | null = null;
   private onNotify: OnNotifyCallback | null = null;
   private onReply: OnReplyCallback | null = null;
@@ -155,6 +158,15 @@ export class WorkerAdapter {
       const data = event.data;
 
       switch (data.type) {
+        case "ready": {
+          logger.info({ key }, "worker_ready");
+          const resolve = this.readyResolvers.get(key);
+          if (resolve) {
+            resolve();
+            this.readyResolvers.delete(key);
+          }
+          break;
+        }
         case "notify":
           if (this.onNotify) {
             this.onNotify(data.message);
@@ -193,6 +205,8 @@ export class WorkerAdapter {
     // Handle Worker close — cleanup and notify via callback
     worker.addEventListener("close", () => {
       this.workers.delete(key);
+      // Clear any pending ready resolver — Worker closed before becoming ready
+      this.readyResolvers.delete(key);
       logger.info({ key }, "worker_closed");
 
       if (this.onWorkerClose) {
@@ -201,6 +215,10 @@ export class WorkerAdapter {
     });
 
     this.workers.set(key, worker);
+
+    // Set up a ready resolver so waitForReady() can await the Worker's "ready" signal.
+    // This must be set before postMessage(init) to avoid a race condition.
+    this.readyResolvers.set(key, () => {});
 
     // Send init message to the Worker
     // Pass the full "provider/model" spec so Workers can set up ProxyLanguageModel
@@ -285,6 +303,46 @@ export class WorkerAdapter {
       }),
     );
     logger.info("all_workers_stopped");
+  }
+
+  /**
+   * Wait for a Worker to send its "ready" signal.
+   *
+   * Returns a Promise that resolves when the Worker posts `{ type: "ready" }`.
+   * If the Worker already sent "ready" before this call, the resolver was already
+   * consumed and this returns a resolved Promise (caller should call waitForReady
+   * immediately after startWorker to avoid the race).
+   *
+   * @param timeout — max ms to wait (default 5000). Rejects on timeout.
+   */
+  waitForReady(channelType: string, channelId: string, timeout = 5000): Promise<void> {
+    const key = makeWorkerKey(channelType, channelId);
+    if (!this.workers.has(key)) {
+      return Promise.reject(new Error(`No Worker found for "${key}"`));
+    }
+
+    // If there's already a resolver pending, return a promise for it
+    // Otherwise the ready message may have already arrived — return resolved
+    return new Promise<void>((resolve, reject) => {
+      // Check if a resolver is already set (startWorker sets one)
+      const existingResolver = this.readyResolvers.get(key);
+      if (!existingResolver) {
+        // Ready already fired or no resolver set — resolve immediately
+        resolve();
+        return;
+      }
+
+      // Replace the resolver with one that resolves this promise
+      const timer = setTimeout(() => {
+        this.readyResolvers.delete(key);
+        reject(new Error(`waitForReady timed out after ${timeout}ms for "${key}"`));
+      }, timeout);
+
+      this.readyResolvers.set(key, () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
   }
 
   /** Send a message to all Workers of a given channelType. */

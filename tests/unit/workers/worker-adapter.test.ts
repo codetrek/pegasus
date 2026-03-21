@@ -10,6 +10,7 @@ import { describe, it, expect } from "bun:test";
 import { WorkerAdapter, makeWorkerKey } from "@pegasus/workers/worker-adapter.ts";
 import type { ModelRegistry } from "@pegasus/infra/model-registry.ts";
 import type { LanguageModel, GenerateTextResult } from "@pegasus/infra/llm-types.ts";
+import { waitFor } from "../../helpers/wait-for.ts";
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -566,7 +567,7 @@ describe("WorkerAdapter — Worker lifecycle (mocked Worker)", () => {
       }));
 
       // Allow the async _handleLLMRequest to complete
-      await Bun.sleep(50);
+      await waitFor(() => fakeWorker.posted.some((msg: any) => msg.type === "llm_response"));
 
       const llmResponse = fakeWorker.posted.find(
         (msg: any) => msg.type === "llm_response",

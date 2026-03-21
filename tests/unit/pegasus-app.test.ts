@@ -13,6 +13,7 @@ import { ModelRegistry } from "@pegasus/infra/model-registry.ts";
 import type { LLMConfig } from "@pegasus/infra/config-schema.ts";
 import { OwnerStore } from "@pegasus/security/owner-store.ts";
 import { EventType, createEvent } from "@pegasus/agents/events/types.ts";
+import { waitFor } from "../helpers/wait-for.ts";
 
 let testSeq = 0;
 let testDataDir = "/tmp/pegasus-test-app";
@@ -187,7 +188,7 @@ describe("PegasusApp", () => {
     app.mainAgent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
 
     // Wait for async processing
-    await Bun.sleep(30);
+    await waitFor(() => replies.length >= 1);
 
     expect(replies.length).toBeGreaterThanOrEqual(1);
     expect(replies[0]!.text).toBe("Hello from PegasusApp!");
@@ -271,7 +272,7 @@ describe("PegasusApp", () => {
     app.registerAdapter(mockAdapter);
 
     app.mainAgent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(30);
+    await waitFor(() => replies.length >= 1);
 
     expect(replies.length).toBeGreaterThanOrEqual(1);
     expect(replies[0]!.text).toBe("Reply via late adapter");
@@ -295,7 +296,7 @@ describe("PegasusApp", () => {
     mainAgent.onReply((msg) => replies.push(msg));
 
     mainAgent.send({ text: "test", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(30);
+    await waitFor(() => replies.length >= 1);
 
     expect(replies.length).toBeGreaterThanOrEqual(1);
     expect(replies[0]!.text).toBe("Injected mode works!");
@@ -343,7 +344,7 @@ describe("PegasusApp", () => {
     await app.start();
 
     app.mainAgent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
-    await Bun.sleep(30);
+    await waitFor(() => cliReplies.length >= 1);
 
     // Reply should go to CLI adapter only
     expect(cliReplies.length).toBeGreaterThanOrEqual(1);
@@ -392,7 +393,12 @@ describe("PegasusApp", () => {
         channel: { type: "telegram", channelId: "chat456", userId: "stranger" },
       });
 
-      await Bun.sleep(50);
+      await waitFor(async () => {
+        const f = Bun.file(`${testDataDir}/agents/main/session/current.jsonl`);
+        if (!(await f.exists())) return false;
+        const c = await f.text();
+        return c.includes("No trusted owner configured for telegram channel");
+      });
 
       // The message text should NOT appear in session (discarded for security)
       const sessionFile = Bun.file(
@@ -429,7 +435,13 @@ describe("PegasusApp", () => {
         text: "msg2",
         channel: { type: "telegram", channelId: "chat1", userId: "user1" },
       });
-      await Bun.sleep(50);
+
+      await waitFor(async () => {
+        const f = Bun.file(`${testDataDir}/agents/main/session/current.jsonl`);
+        if (!(await f.exists())) return false;
+        const c = await f.text();
+        return c.includes("No trusted owner configured for telegram channel");
+      });
 
       const sessionFile = Bun.file(
         `${testDataDir}/agents/main/session/current.jsonl`,
@@ -464,7 +476,10 @@ describe("PegasusApp", () => {
         channel: { type: "telegram", channelId: "chat789", userId: "stranger" },
       });
 
-      await Bun.sleep(50);
+      await waitFor(async () => {
+        const f = Bun.file(`${testDataDir}/agents/main/session/current.jsonl`);
+        return f.exists();
+      });
 
       // Message should NOT appear in MainAgent's session
       const sessionFile = Bun.file(
@@ -503,7 +518,12 @@ describe("PegasusApp", () => {
         channel: { type: "telegram", channelId: "chat123", userId: "owner-user" },
       });
 
-      await Bun.sleep(50);
+      await waitFor(async () => {
+        const f = Bun.file(`${testDataDir}/agents/main/session/current.jsonl`);
+        if (!(await f.exists())) return false;
+        const c = await f.text();
+        return c.includes("hello from owner");
+      });
 
       // Owner message SHOULD appear in session
       const sessionFile = Bun.file(
@@ -531,7 +551,12 @@ describe("PegasusApp", () => {
         channel: { type: "cli", channelId: "main" },
       });
 
-      await Bun.sleep(50);
+      await waitFor(async () => {
+        const f = Bun.file(`${testDataDir}/agents/main/session/current.jsonl`);
+        if (!(await f.exists())) return false;
+        const c = await f.text();
+        return c.includes("hello from cli");
+      });
 
       const sessionFile = Bun.file(
         `${testDataDir}/agents/main/session/current.jsonl`,
@@ -599,7 +624,13 @@ describe("PegasusApp", () => {
       app.mainAgent.onReply(() => {});
 
       app.mainAgent.send({ text: "spawn a task", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(100);
+
+      await waitFor(async () => {
+        const f = Bun.file(`${testDataDir}/agents/main/session/current.jsonl`);
+        if (!(await f.exists())) return false;
+        const c = await f.text();
+        return c.includes("spawn_subagent");
+      });
 
       // Verify task notification was routed — session should contain task completion
       const sessionFile = Bun.file(
@@ -632,13 +663,18 @@ describe("PegasusApp", () => {
 
       // Set lastChannel by sending a message first
       app.mainAgent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(30);
+      await waitFor(async () => {
+        const f = Bun.file(`${testDataDir}/agents/main/session/current.jsonl`);
+        if (!(await f.exists())) return false;
+        const c = await f.text();
+        return c.includes("hello");
+      });
 
       // Fire tick through the MainAgent tick accessor
       const tickAccessor = app.mainAgent._tick;
       tickAccessor.fire();
 
-      await Bun.sleep(50);
+      await Bun.sleep(10);
 
       // Verify agent processed the message (tick fires but auto-stops with no active subagents)
       const sessionFile = Bun.file(
@@ -723,7 +759,7 @@ describe("PegasusApp", () => {
         metadata: { subagentDone: "completed" },
       });
 
-      await Bun.sleep(30);
+      await Bun.sleep(10);
 
       // Verify no crash — markDone might not find the subagent (no active subagent registered)
       // but it should handle gracefully
@@ -849,7 +885,7 @@ describe("PegasusApp", () => {
       await app.start();
 
       app.mainAgent.send({ text: "hello", channel: { type: "telegram", channelId: "chat123" } });
-      await Bun.sleep(50);
+      await waitFor(() => telegramReplies.length >= 1);
 
       // Telegram adapter should still receive the reply despite CLI mirror failure
       expect(telegramReplies.length).toBeGreaterThanOrEqual(1);
@@ -887,7 +923,7 @@ describe("PegasusApp", () => {
           payload: { toolName: "test_tool", error: "test error" },
         }),
       );
-      await Bun.sleep(50);
+      await Bun.sleep(10);
 
       // Stats should NOT change from EventBus emission
       expect(app.appStats!.tools.fail).toBe(0);
@@ -937,7 +973,7 @@ describe("PegasusApp", () => {
       expect(onReplyCallback).toBeDefined();
       onReplyCallback(projectReply);
 
-      await Bun.sleep(30);
+      await waitFor(() => cliReplies.some((r) => r.text === "Hello from project!"));
 
       // The reply should have been forwarded to the CLI adapter
       expect(cliReplies.some((r) => r.text === "Hello from project!")).toBe(true);
@@ -974,7 +1010,10 @@ describe("PegasusApp", () => {
         channel: { type: "telegram", channelId: "chat999", userId: "stranger-id" },
       });
 
-      await Bun.sleep(100);
+      await waitFor(() => {
+        const projectAdapter = (app as any).projectAdapter;
+        return projectAdapter.has("channel:telegram");
+      });
 
       // Channel project should have been auto-created (line 605)
       // Access via Pegasus private field since mainAgent.projects returns ProjectManager
@@ -1010,7 +1049,11 @@ describe("PegasusApp", () => {
         text: "msg 1",
         channel: { type: "telegram", channelId: "chat1", userId: "stranger1" },
       });
-      await Bun.sleep(50);
+
+      await waitFor(() => {
+        const pa = (app as any).projectAdapter;
+        return pa.has("channel:telegram");
+      });
 
       const projectAdapter = (app as any).projectAdapter;
       expect(projectAdapter.has("channel:telegram")).toBe(true);
@@ -1020,7 +1063,7 @@ describe("PegasusApp", () => {
         text: "msg 2",
         channel: { type: "telegram", channelId: "chat2", userId: "stranger2" },
       });
-      await Bun.sleep(50);
+      await Bun.sleep(10);
 
       // Should still be 1 project, not 2
       expect(projectAdapter.has("channel:telegram")).toBe(true);

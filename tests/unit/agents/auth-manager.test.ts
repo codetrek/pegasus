@@ -518,7 +518,7 @@ describe("AuthManager", () => {
       await mgr.initialize();
 
       // Background refresh fires and fails (no network), exercising catch on line 236
-      await Bun.sleep(100); // let background promise settle
+      await Bun.sleep(20); // let background promise settle
     }, 15_000);
 
     it("does background refresh when openrouter cache exists", async () => {
@@ -532,7 +532,7 @@ describe("AuthManager", () => {
       await mgr.initialize();
 
       // Background refresh fires and fails (no network), exercising catch on line 252
-      await Bun.sleep(100); // let background promise settle
+      await Bun.sleep(20); // let background promise settle
     }, 15_000);
   });
 });

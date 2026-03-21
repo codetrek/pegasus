@@ -18,6 +18,7 @@ import { mock } from "bun:test";
 import { OwnerStore } from "@pegasus/security/owner-store.ts";
 import path from "node:path";
 import { createInjectedSubsystems } from "../helpers/create-injected-subsystems.ts";
+import { waitFor } from "../helpers/wait-for.ts";
 
 let testSeq = 0;
 let testDataDir = "/tmp/pegasus-test-main-agent-features";
@@ -143,7 +144,7 @@ describe("MainAgent", () => {
       try { await a.stop(); } catch {}
     }
     activeAgents = [];
-    await Bun.sleep(50);
+    await Bun.sleep(10);
     await rm(testDataDir, { recursive: true, force: true }).catch(() => {});
   });
 
@@ -274,7 +275,7 @@ describe("MainAgent", () => {
       agent.onReply((msg) => replies.push(msg));
 
       agent.send({ text: "reload please", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(50);
+      await waitFor(() => replies.length >= 1);
 
       // After reload_skills tool was processed:
       // 1. new-skill should now be in registry
@@ -341,7 +342,7 @@ describe("MainAgent", () => {
       agent.onReply((msg) => replies.push(msg));
 
       agent.send({ text: "reload", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(50);
+      await waitFor(() => broadcastCalls.length >= 1);
 
       // Verify broadcast was called with skills_reload
       expect(broadcastCalls.length).toBeGreaterThanOrEqual(1);
@@ -392,7 +393,7 @@ describe("MainAgent", () => {
       agent.onReply((msg) => replies.push(msg));
 
       agent.send({ text: "reload", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(50);
+      await waitFor(() => replies.length >= 1);
 
       // Should not crash, tool result should show skillCount
       const toolResults = capturedMessages.filter((m) => m.role === "tool");
@@ -444,7 +445,7 @@ describe("MainAgent", () => {
       agent.onReply((msg) => replies.push(msg));
 
       agent.send({ text: "hello", channel: { type: "cli", channelId: "main" } });
-      await Bun.sleep(50);
+      await waitFor(() => replies.length >= 1);
 
       expect(replies.length).toBeGreaterThanOrEqual(1);
       expect(replies[0]!.text).toBe("Hello from CLI!");
@@ -466,7 +467,7 @@ describe("MainAgent", () => {
         text: "project progress update",
         channel: { type: "project", channelId: "my-project" },
       });
-      await Bun.sleep(50);
+      await waitFor(() => replies.length >= 1);
 
       expect(replies.length).toBeGreaterThanOrEqual(1);
 
@@ -490,7 +491,7 @@ describe("MainAgent", () => {
         text: "hello from telegram",
         channel: { type: "telegram", channelId: "chat123", userId: "user123" },
       });
-      await Bun.sleep(50);
+      await waitFor(() => replies.length >= 1);
 
       expect(replies.length).toBeGreaterThanOrEqual(1);
       expect(replies[0]!.text).toBe("Hello, owner!");
@@ -597,7 +598,7 @@ describe("MainAgent", () => {
       agent.onReply(() => {});
 
       agent.send({ text: "hi", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(50);
+      await waitFor(() => capturedSystem.includes("trust()"));
 
       expect(capturedSystem).toContain("trust()");
       expect(capturedSystem).toContain("Security");
@@ -745,18 +746,22 @@ describe("MainAgent", () => {
       });
 
       // Wait for spawn_subagent to be processed (processStep is non-blocking)
-      await Bun.sleep(200);
+      const sessionPath = `${testDataDir}/agents/main/session/current.jsonl`;
+      await waitFor(async () => {
+        try {
+          const content = await Bun.file(sessionPath).text();
+          return content.includes("spawn_subagent");
+        } catch { return false; }
+      });
 
       // Verify spawn tool result includes description in session messages
       // Note: the description appears unescaped in the assistant's toolCalls arguments
-      const sessionContent = await Bun.file(
-        `${testDataDir}/agents/main/session/current.jsonl`,
-      ).text();
+      const sessionContent = await Bun.file(sessionPath).text();
       expect(sessionContent).toContain('"description":"Subagent test task"');
       expect(sessionContent).toContain("spawn_subagent");
 
       // Wait for task completion
-      await Bun.sleep(150);
+      await Bun.sleep(10);
 
       await agent.stop();
     }, 10_000);
@@ -777,7 +782,13 @@ describe("MainAgent", () => {
 
       // Set lastChannel
       agent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(100);
+      const sessionPath = `${testDataDir}/agents/main/session/current.jsonl`;
+      await waitFor(async () => {
+        try {
+          const content = await Bun.file(sessionPath).text();
+          return content.includes("hello");
+        } catch { return false; }
+      });
 
       // Push a completed task notification via the public API (line 410)
       agent.pushSubagentNotification({
@@ -786,12 +797,15 @@ describe("MainAgent", () => {
         result: "all done",
       });
 
-      await Bun.sleep(200);
+      await waitFor(async () => {
+        try {
+          const content = await Bun.file(sessionPath).text();
+          return content.includes("[Subagent task-done-1 completed]");
+        } catch { return false; }
+      });
 
       // Verify notification was injected into session
-      const content = await Bun.file(
-        `${testDataDir}/agents/main/session/current.jsonl`,
-      ).text();
+      const content = await Bun.file(sessionPath).text();
       expect(content).toContain("[Subagent task-done-1 completed]");
 
       await agent.stop();
@@ -805,7 +819,13 @@ describe("MainAgent", () => {
       agent.onReply(() => {});
 
       agent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(100);
+      const sessionPath = `${testDataDir}/agents/main/session/current.jsonl`;
+      await waitFor(async () => {
+        try {
+          const content = await Bun.file(sessionPath).text();
+          return content.includes("hello");
+        } catch { return false; }
+      });
 
       agent.pushSubagentNotification({
         type: "failed",
@@ -813,11 +833,14 @@ describe("MainAgent", () => {
         error: "boom",
       });
 
-      await Bun.sleep(200);
+      await waitFor(async () => {
+        try {
+          const content = await Bun.file(sessionPath).text();
+          return content.includes("[Subagent task-fail-1 failed]");
+        } catch { return false; }
+      });
 
-      const content = await Bun.file(
-        `${testDataDir}/agents/main/session/current.jsonl`,
-      ).text();
+      const content = await Bun.file(sessionPath).text();
       expect(content).toContain("[Subagent task-fail-1 failed]");
 
       await agent.stop();
@@ -831,7 +854,13 @@ describe("MainAgent", () => {
       agent.onReply(() => {});
 
       agent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(100);
+      const sessionPath = `${testDataDir}/agents/main/session/current.jsonl`;
+      await waitFor(async () => {
+        try {
+          const content = await Bun.file(sessionPath).text();
+          return content.includes("hello");
+        } catch { return false; }
+      });
 
       agent.pushSubagentNotification({
         type: "notify",
@@ -839,11 +868,14 @@ describe("MainAgent", () => {
         message: "50% done",
       });
 
-      await Bun.sleep(200);
+      await waitFor(async () => {
+        try {
+          const content = await Bun.file(sessionPath).text();
+          return content.includes("[Subagent task-progress-1 update]");
+        } catch { return false; }
+      });
 
-      const content = await Bun.file(
-        `${testDataDir}/agents/main/session/current.jsonl`,
-      ).text();
+      const content = await Bun.file(sessionPath).text();
       expect(content).toContain("[Subagent task-progress-1 update]");
 
       await agent.stop();
@@ -894,7 +926,7 @@ describe("MainAgent", () => {
       agent.onReply(() => {});
 
       agent.send({ text: "test vision", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(200);
+      await waitFor(() => callCount >= 2);
 
       // Verify agent processed the tool call (buildToolContext was called with vision)
       expect(callCount).toBeGreaterThanOrEqual(2);

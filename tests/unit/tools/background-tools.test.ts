@@ -12,6 +12,7 @@ import { readFile, rm } from "node:fs/promises";
 import { ToolExecutor } from "../../../src/agents/tools/executor.ts";
 import { bg_run, bg_output, bg_stop } from "../../../src/agents/tools/builtins/background-tools.ts";
 import type { Tool, ToolContext, ToolCategory, ToolResult } from "../../../src/agents/tools/types.ts";
+import { waitFor } from "../../helpers/wait-for.ts";
 
 // ── Helpers ─────────────────────────────────────────
 
@@ -92,7 +93,7 @@ describe("BackgroundTaskManager", () => {
     const id = mgr.run("fast", {}, ctx());
 
     // Wait for the tool to finish
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => mgr.getStatus(id).status === "completed");
 
     const status = mgr.getStatus(id);
     expect(status.status).toBe("completed");
@@ -108,7 +109,7 @@ describe("BackgroundTaskManager", () => {
     const mgr = new BackgroundTaskManager(executor);
     const id = mgr.run("boom", {}, ctx());
 
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => mgr.getStatus(id).status === "failed");
 
     const status = mgr.getStatus(id);
     expect(status.status).toBe("failed");
@@ -181,7 +182,7 @@ describe("BackgroundTaskManager", () => {
     mgr.stop(id);
 
     // Wait for the tool promise to settle
-    await new Promise((r) => setTimeout(r, 300));
+    await waitFor(() => mgr.getStatus(id).status !== "running");
 
     const status = mgr.getStatus(id);
     expect(status.status).toBe("failed");
@@ -279,7 +280,7 @@ describe("BackgroundTaskManager", () => {
     const id = mgr.run("any_tool", {}, ctx(), 5000);
 
     // Wait for the promise to settle
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => mgr.getStatus(id).status === "failed");
 
     const status = mgr.getStatus(id);
     expect(status.status).toBe("failed");
@@ -484,7 +485,7 @@ describe("bg_stop integration", () => {
     const bgTaskId = mgr.run("shell_exec", { command: "sleep 60" }, ctx());
 
     // Let it start
-    await new Promise((r) => setTimeout(r, 300));
+    await waitFor(() => mgr.getStatus(bgTaskId).status === "running");
 
     // Verify it's running
     expect(mgr.getStatus(bgTaskId).status).toBe("running");
@@ -494,7 +495,7 @@ describe("bg_stop integration", () => {
     expect(stopped).toBe(true);
 
     // Wait for the tool execution to settle
-    await new Promise((r) => setTimeout(r, 1000));
+    await waitFor(() => mgr.getStatus(bgTaskId).status === "failed");
 
     // Verify it's failed (not completed)
     const status = mgr.getStatus(bgTaskId);

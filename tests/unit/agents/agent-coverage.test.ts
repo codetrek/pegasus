@@ -16,6 +16,7 @@ import { rm, mkdir, writeFile } from "node:fs/promises";
 import { EventBus } from "@pegasus/agents/events/bus";
 import { EventType, createEvent } from "@pegasus/agents/events/types";
 import { mainAgentTools } from "@pegasus/agents/tools/builtins";
+import { waitFor } from "../../helpers/wait-for.ts";
 
 let testSeq = 0;
 let testDataDir = "/tmp/pegasus-test-agent-coverage";
@@ -198,7 +199,10 @@ describe("Agent coverage", () => {
 
       // Set lastChannel by sending a message first
       agent.send({ text: "hello", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(30);
+      await waitFor(async () => {
+        const f = Bun.file(`${testDataDir}/session/current.jsonl`);
+        return await f.exists();
+      });
 
       // Push task notification
       const notification: SubagentNotificationPayload = {
@@ -208,7 +212,11 @@ describe("Agent coverage", () => {
       };
       (agent as any).pushQueue({ kind: "subagent_notify", notification });
 
-      await Bun.sleep(50);
+      // Wait for the notification to be persisted in session
+      await waitFor(async () => {
+        const content = await Bun.file(`${testDataDir}/session/current.jsonl`).text();
+        return content.includes("[Subagent task-1 completed]");
+      });
 
       // Verify the notification was added to session
       const sessionFile = Bun.file(`${testDataDir}/session/current.jsonl`);
@@ -227,7 +235,10 @@ describe("Agent coverage", () => {
       agent.onReply(() => {});
 
       agent.send({ text: "hi", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(30);
+      await waitFor(async () => {
+        const f = Bun.file(`${testDataDir}/session/current.jsonl`);
+        return await f.exists();
+      });
 
       const notification: SubagentNotificationPayload = {
         type: "failed",
@@ -236,7 +247,10 @@ describe("Agent coverage", () => {
       };
       (agent as any).pushQueue({ kind: "subagent_notify", notification });
 
-      await Bun.sleep(50);
+      await waitFor(async () => {
+        const content = await Bun.file(`${testDataDir}/session/current.jsonl`).text();
+        return content.includes("[Subagent task-2 failed]");
+      });
 
       const content = await Bun.file(`${testDataDir}/session/current.jsonl`).text();
       expect(content).toContain("[Subagent task-2 failed]");
@@ -253,7 +267,10 @@ describe("Agent coverage", () => {
       agent.onReply(() => {});
 
       agent.send({ text: "hi", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(30);
+      await waitFor(async () => {
+        const f = Bun.file(`${testDataDir}/session/current.jsonl`);
+        return await f.exists();
+      });
 
       const notification: SubagentNotificationPayload = {
         type: "notify",
@@ -262,7 +279,10 @@ describe("Agent coverage", () => {
       };
       (agent as any).pushQueue({ kind: "subagent_notify", notification });
 
-      await Bun.sleep(50);
+      await waitFor(async () => {
+        const content = await Bun.file(`${testDataDir}/session/current.jsonl`).text();
+        return content.includes("[Subagent task-3 update]");
+      });
 
       const content = await Bun.file(`${testDataDir}/session/current.jsonl`).text();
       expect(content).toContain("[Subagent task-3 update]");
@@ -279,7 +299,10 @@ describe("Agent coverage", () => {
       agent.onReply(() => {});
 
       agent.send({ text: "hi", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(30);
+      await waitFor(async () => {
+        const f = Bun.file(`${testDataDir}/session/current.jsonl`);
+        return await f.exists();
+      });
 
       const notification: SubagentNotificationPayload = {
         type: "completed",
@@ -289,7 +312,10 @@ describe("Agent coverage", () => {
       };
       (agent as any).pushQueue({ kind: "subagent_notify", notification });
 
-      await Bun.sleep(50);
+      await waitFor(async () => {
+        const content = await Bun.file(`${testDataDir}/session/current.jsonl`).text();
+        return content.includes("[Subagent task-img completed]");
+      });
 
       const content = await Bun.file(`${testDataDir}/session/current.jsonl`).text();
       expect(content).toContain("[Subagent task-img completed]");
@@ -315,7 +341,10 @@ describe("Agent coverage", () => {
 
       // First send a message so lastChannel is set
       agent.send({ text: "hi", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(30);
+      await waitFor(async () => {
+        const f = Bun.file(`${testDataDir}/session/current.jsonl`);
+        return await f.exists();
+      });
 
       // Register a pending work item so the event handler picks it up
       const childId = "child-task-1";
@@ -335,7 +364,10 @@ describe("Agent coverage", () => {
         }),
       );
 
-      await Bun.sleep(50);
+      await waitFor(async () => {
+        const content = await Bun.file(`${testDataDir}/session/current.jsonl`).text();
+        return content.includes(`Subagent ${childId} completed`);
+      });
 
       // Verify child result was injected into session
       const content = await Bun.file(`${testDataDir}/session/current.jsonl`).text();
@@ -354,7 +386,10 @@ describe("Agent coverage", () => {
       agent.onReply(() => {});
 
       agent.send({ text: "hi", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(30);
+      await waitFor(async () => {
+        const f = Bun.file(`${testDataDir}/session/current.jsonl`);
+        return await f.exists();
+      });
 
       const childId = "child-task-fail";
       agent.stateManager.addPendingWork({
@@ -372,7 +407,10 @@ describe("Agent coverage", () => {
         }),
       );
 
-      await Bun.sleep(50);
+      await waitFor(async () => {
+        const content = await Bun.file(`${testDataDir}/session/current.jsonl`).text();
+        return content.includes(`Subagent ${childId} failed`);
+      });
 
       const content = await Bun.file(`${testDataDir}/session/current.jsonl`).text();
       expect(content).toContain(`Subagent ${childId} failed`);
@@ -401,7 +439,10 @@ describe("Agent coverage", () => {
       agent.onReply(() => {});
 
       agent.send({ text: "trigger error", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(50);
+      await waitFor(async () => {
+        const f = Bun.file(`${testDataDir}/session/current.jsonl`);
+        return await f.exists();
+      });
 
       // The error is handled internally by processStep (not _drainQueue catch).
       // Verify the agent is still functional — no crash.
@@ -421,7 +462,7 @@ describe("Agent coverage", () => {
 
       // Push an unknown kind
       (agent as any).pushQueue({ kind: "unknown_kind", data: 42 });
-      await Bun.sleep(30);
+      await Bun.sleep(10);
 
       // Should not crash — just logs a warning
       await agent.stop();

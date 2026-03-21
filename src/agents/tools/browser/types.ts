@@ -10,6 +10,10 @@ export interface BrowserConfig {
   cdpUrl?: string;
   /** Directory for persistent browser profile (login sessions, cookies, etc.). */
   userDataDir: string;
+  /** Milliseconds to wait after click/submit for DOM stabilization (default 500). */
+  clickStabilizeMs?: number;
+  /** Milliseconds to wait after scroll for DOM stabilization (default 300). */
+  scrollStabilizeMs?: number;
 }
 
 /** Result of processing an ARIA snapshot */
