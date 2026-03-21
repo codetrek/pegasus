@@ -3,8 +3,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { read_file, write_file, list_files, edit_file, grep_files, glob_files } from "../../../src/agents/tools/builtins/file-tools.ts";
-import { rm, mkdir } from "node:fs/promises";
+import { read_file, write_file, list_files, edit_file, grep_files, glob_files, _resetRgCache, isRgAvailable } from "../../../src/agents/tools/builtins/file-tools.ts";
+import { rm, mkdir, chmod } from "node:fs/promises";
 
 const testDir = "/tmp/pegasus-test-files";
 
@@ -1006,6 +1006,675 @@ describe("file tools", () => {
       );
 
       expect(result.success).toBe(true);
+    }, 10_000);
+  });
+
+  // ── list_files truncation ──
+
+  describe("list_files truncation", () => {
+    it("should truncate output when entries exceed limit", async () => {
+      const context = { agentId: "test-task-id" };
+
+      // Create enough files to exceed a small limit
+      for (let i = 0; i < 10; i++) {
+        await Bun.write(`${testDir}/trunc-file-${i}.txt`, `content ${i}`);
+      }
+
+      const result = await list_files.execute(
+        { path: testDir, limit: 3 },
+        context,
+      );
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("[Truncated:");
+      expect(output).toContain("showing 3 of more entries");
+    }, 10_000);
+  });
+
+  // ── formatSize coverage (indirectly via list_files) ──
+
+  describe("list_files formatSize", () => {
+    it("should format file sizes in KB for files >= 1KB", async () => {
+      const context = { agentId: "test-task-id" };
+      // Create a file > 1KB
+      const filePath = `${testDir}/medium-file.txt`;
+      await Bun.write(filePath, "x".repeat(2048)); // 2KB
+
+      const result = await list_files.execute({ path: testDir }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("medium-file.txt");
+      // Should show KB format: "2.0K"
+      expect(output).toMatch(/\d+\.\d+K/);
+    }, 10_000);
+
+    it("should format file sizes in MB for files >= 1MB", async () => {
+      const context = { agentId: "test-task-id" };
+      // Create a file > 1MB
+      const filePath = `${testDir}/large-file.txt`;
+      await Bun.write(filePath, "x".repeat(1024 * 1024 + 1)); // ~1MB
+
+      const result = await list_files.execute({ path: testDir }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("large-file.txt");
+      // Should show MB format: "1.0M"
+      expect(output).toMatch(/\d+\.\d+M/);
+    }, 10_000);
+
+    it("should format file sizes in bytes for small files", async () => {
+      const context = { agentId: "test-task-id" };
+      // Create a small file < 1KB
+      const filePath = `${testDir}/tiny-file.txt`;
+      await Bun.write(filePath, "hi");
+
+      const result = await list_files.execute({ path: testDir }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("tiny-file.txt");
+      // Should show bytes format: "2B"
+      expect(output).toMatch(/\d+B/);
+    }, 10_000);
+  });
+
+  // ── grep_files rg execution paths ──
+
+  describe("grep_files rg path", () => {
+    let originalRgState: boolean;
+
+    beforeEach(async () => {
+      originalRgState = isRgAvailable();
+    });
+
+    afterEach(async () => {
+      _resetRgCache(originalRgState);
+    });
+
+    it("should use rg for files_with_matches mode and return file paths", async () => {
+      if (!isRgAvailable()) return;
+
+      const context = { agentId: "test-task-id" };
+      await Bun.write(`${testDir}/rg-fwm-1.txt`, "rg_fwm_test_target");
+      await Bun.write(`${testDir}/rg-fwm-2.txt`, "no match");
+
+      const result = await grep_files.execute({
+        pattern: "rg_fwm_test_target",
+        path: testDir,
+        output_mode: "files_with_matches",
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("rg-fwm-1.txt");
+      expect(output).not.toContain("rg-fwm-2.txt");
+    }, 10_000);
+
+    it("should use rg for count mode", async () => {
+      if (!isRgAvailable()) return;
+
+      const context = { agentId: "test-task-id" };
+      await Bun.write(`${testDir}/rg-cnt.txt`, "line1 cnt_target\nline2 cnt_target\nline3");
+
+      const result = await grep_files.execute({
+        pattern: "cnt_target",
+        path: `${testDir}/rg-cnt.txt`,
+        output_mode: "count",
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain(":2");
+    }, 10_000);
+
+    it("should use rg for content mode with context_lines", async () => {
+      if (!isRgAvailable()) return;
+
+      const context = { agentId: "test-task-id" };
+      await Bun.write(`${testDir}/rg-ctx.txt`, "before\nMATCH_RG_CTX\nafter");
+
+      const result = await grep_files.execute({
+        pattern: "MATCH_RG_CTX",
+        path: `${testDir}/rg-ctx.txt`,
+        context_lines: 1,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("rg-ctx.txt ===");
+      expect(output).toContain("-1-before");
+      expect(output).toContain(":2:MATCH_RG_CTX");
+      expect(output).toContain("-3-after");
+    }, 10_000);
+
+    it("should use rg for content mode with truncation", async () => {
+      if (!isRgAvailable()) return;
+
+      const context = { agentId: "test-task-id" };
+      const lines = Array.from({ length: 20 }, (_, i) => `line ${i} rg_trunc_target`);
+      await Bun.write(`${testDir}/rg-trunc.txt`, lines.join("\n"));
+
+      const result = await grep_files.execute({
+        pattern: "rg_trunc_target",
+        path: `${testDir}/rg-trunc.txt`,
+        max_results: 5,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("[20 total matches, showing first 5]");
+    }, 10_000);
+
+    it("should use rg with case_insensitive flag", async () => {
+      if (!isRgAvailable()) return;
+
+      const context = { agentId: "test-task-id" };
+      await Bun.write(`${testDir}/rg-ci.txt`, "UPPER\nlower\nMixed");
+
+      const result = await grep_files.execute({
+        pattern: "upper",
+        path: `${testDir}/rg-ci.txt`,
+        case_insensitive: true,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("1:UPPER");
+    }, 10_000);
+
+    it("should use rg with multiline flag", async () => {
+      if (!isRgAvailable()) return;
+
+      const context = { agentId: "test-task-id" };
+      await Bun.write(`${testDir}/rg-ml.txt`, "alpha\nbeta\ngamma");
+
+      const result = await grep_files.execute({
+        pattern: "alpha.beta",
+        path: `${testDir}/rg-ml.txt`,
+        multiline: true,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("alpha");
+      expect(output).toContain("beta");
+    }, 10_000);
+
+    it("should use rg with include glob filter", async () => {
+      if (!isRgAvailable()) return;
+
+      const context = { agentId: "test-task-id" };
+      await Bun.write(`${testDir}/rg-inc.ts`, "rg_inc_target");
+      await Bun.write(`${testDir}/rg-inc.py`, "rg_inc_target");
+
+      const result = await grep_files.execute({
+        pattern: "rg_inc_target",
+        path: testDir,
+        include: "*.ts",
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("rg-inc.ts");
+      expect(output).not.toContain("rg-inc.py");
+    }, 10_000);
+
+    it("should handle rg with block separators between non-contiguous context ranges", async () => {
+      if (!isRgAvailable()) return;
+
+      const context = { agentId: "test-task-id" };
+      const lines = [
+        "line1", "BLOCK_SEP_MATCH1", "line3",
+        "line4", "line5", "line6", "line7", "line8",
+        "line9", "BLOCK_SEP_MATCH2", "line11",
+      ];
+      await Bun.write(`${testDir}/rg-sep.txt`, lines.join("\n"));
+
+      const result = await grep_files.execute({
+        pattern: "BLOCK_SEP_MATCH",
+        path: `${testDir}/rg-sep.txt`,
+        context_lines: 1,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain(":2:BLOCK_SEP_MATCH1");
+      expect(output).toContain(":10:BLOCK_SEP_MATCH2");
+      expect(output).toContain("--");
+    }, 10_000);
+
+    it("should handle rg with multiple files producing separate file headers", async () => {
+      if (!isRgAvailable()) return;
+
+      const context = { agentId: "test-task-id" };
+      await Bun.write(`${testDir}/rg-multi-a.txt`, "multi_rg_target");
+      await Bun.write(`${testDir}/rg-multi-b.txt`, "multi_rg_target");
+
+      const result = await grep_files.execute({
+        pattern: "multi_rg_target",
+        path: testDir,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("rg-multi-a.txt ===");
+      expect(output).toContain("rg-multi-b.txt ===");
+    }, 10_000);
+  });
+
+  // ── grep_files JS fallback error handling ──
+
+  describe("grep_files JS fallback error handling", () => {
+    let originalRgState: boolean;
+
+    beforeEach(async () => {
+      originalRgState = isRgAvailable();
+      _resetRgCache(false); // force JS fallback
+    });
+
+    afterEach(async () => {
+      _resetRgCache(originalRgState);
+    });
+
+    it("should gracefully handle unreadable files in searchFileLineByLine", async () => {
+      const context = { agentId: "test-task-id" };
+      const unreadableDir = `${testDir}/unreadable-files`;
+      await mkdir(unreadableDir, { recursive: true });
+      const goodFile = `${unreadableDir}/good.txt`;
+      const badFile = `${unreadableDir}/bad.txt`;
+
+      await Bun.write(goodFile, "fallback_err_target");
+      await Bun.write(badFile, "fallback_err_target");
+      // Make file unreadable
+      await chmod(badFile, 0o000);
+
+      const result = await grep_files.execute({
+        pattern: "fallback_err_target",
+        path: unreadableDir,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      // Should find match in good file, skip the unreadable one
+      expect(output).toContain("good.txt");
+
+      // Restore permissions for cleanup
+      await chmod(badFile, 0o644);
+    }, 10_000);
+
+    it("should gracefully handle unreadable files in searchFileMultiline", async () => {
+      const context = { agentId: "test-task-id" };
+      const unreadableDir = `${testDir}/unreadable-ml`;
+      await mkdir(unreadableDir, { recursive: true });
+      const goodFile = `${unreadableDir}/good.txt`;
+      const badFile = `${unreadableDir}/bad.txt`;
+
+      await Bun.write(goodFile, "ml\nerr_target");
+      await Bun.write(badFile, "ml\nerr_target");
+      // Make file unreadable
+      await chmod(badFile, 0o000);
+
+      const result = await grep_files.execute({
+        pattern: "ml.err_target",
+        path: unreadableDir,
+        multiline: true,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      // Should find match in good file, skip the unreadable one
+      expect(output).toContain("good.txt");
+
+      // Restore permissions for cleanup
+      await chmod(badFile, 0o644);
+    }, 10_000);
+
+    it("should gracefully handle unreadable directories in walkDir", async () => {
+      const context = { agentId: "test-task-id" };
+      const walkErrDir = `${testDir}/walk-err`;
+      const unreadable = `${walkErrDir}/no-access`;
+      const readable = `${walkErrDir}/ok`;
+      await mkdir(unreadable, { recursive: true });
+      await mkdir(readable, { recursive: true });
+      await Bun.write(`${readable}/file.txt`, "walk_err_target");
+      await Bun.write(`${unreadable}/file.txt`, "walk_err_target");
+
+      // Make directory unreadable
+      await chmod(unreadable, 0o000);
+
+      const result = await grep_files.execute({
+        pattern: "walk_err_target",
+        path: walkErrDir,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("file.txt");
+
+      // Restore permissions for cleanup
+      await chmod(unreadable, 0o755);
+    }, 10_000);
+  });
+
+  // ── grep_files JS fallback comprehensive (covers streaming, context, modes) ──
+
+  describe("grep_files JS fallback paths", () => {
+    let originalRgState: boolean;
+
+    beforeEach(async () => {
+      originalRgState = isRgAvailable();
+      _resetRgCache(false); // force JS fallback
+    });
+
+    afterEach(async () => {
+      _resetRgCache(originalRgState);
+    });
+
+    it("should search single file with line-by-line mode", async () => {
+      const context = { agentId: "test-task-id" };
+      const filePath = `${testDir}/fb-single.txt`;
+      await Bun.write(filePath, "first line\nsecond match_fb\nthird line\nfourth match_fb");
+
+      const result = await grep_files.execute({
+        pattern: "match_fb",
+        path: filePath,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("=== ");
+      expect(output).toContain("2:second match_fb");
+      expect(output).toContain("4:fourth match_fb");
+    }, 10_000);
+
+    it("should search directory with include filter", async () => {
+      const context = { agentId: "test-task-id" };
+      await Bun.write(`${testDir}/fb-inc.ts`, "fb_inc_target");
+      await Bun.write(`${testDir}/fb-inc.py`, "fb_inc_target");
+
+      const result = await grep_files.execute({
+        pattern: "fb_inc_target",
+        path: testDir,
+        include: "*.ts",
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("fb-inc.ts");
+      expect(output).not.toContain("fb-inc.py");
+    }, 10_000);
+
+    it("should handle files_with_matches mode", async () => {
+      const context = { agentId: "test-task-id" };
+      await Bun.write(`${testDir}/fb-fwm-a.txt`, "fb_fwm_target");
+      await Bun.write(`${testDir}/fb-fwm-b.txt`, "nothing");
+
+      const result = await grep_files.execute({
+        pattern: "fb_fwm_target",
+        path: testDir,
+        output_mode: "files_with_matches",
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("fb-fwm-a.txt");
+      expect(output).not.toContain("fb-fwm-b.txt");
+    }, 10_000);
+
+    it("should handle count mode", async () => {
+      const context = { agentId: "test-task-id" };
+      await Bun.write(`${testDir}/fb-count.txt`, "x\nx\nx");
+
+      const result = await grep_files.execute({
+        pattern: "x",
+        path: `${testDir}/fb-count.txt`,
+        output_mode: "count",
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain(":3");
+    }, 10_000);
+
+    it("should handle case_insensitive in JS fallback", async () => {
+      const context = { agentId: "test-task-id" };
+      await Bun.write(`${testDir}/fb-ci.txt`, "Hello HELLO hello");
+
+      const result = await grep_files.execute({
+        pattern: "hello",
+        path: `${testDir}/fb-ci.txt`,
+        case_insensitive: true,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("Hello HELLO hello");
+    }, 10_000);
+
+    it("should handle context_lines in JS fallback", async () => {
+      const context = { agentId: "test-task-id" };
+      const filePath = `${testDir}/fb-ctx.txt`;
+      await Bun.write(filePath, "line1\nline2\nMATCH_FB_CTX\nline4\nline5");
+
+      const result = await grep_files.execute({
+        pattern: "MATCH_FB_CTX",
+        path: filePath,
+        context_lines: 1,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("-2-line2");
+      expect(output).toContain(":3:MATCH_FB_CTX");
+      expect(output).toContain("-4-line4");
+    }, 10_000);
+
+    it("should handle context with non-contiguous blocks (-- separators)", async () => {
+      const context = { agentId: "test-task-id" };
+      const filePath = `${testDir}/fb-sep.txt`;
+      const lines = [
+        "line1", "FB_SEP_MATCH1", "line3",
+        "line4", "line5", "line6", "line7", "line8",
+        "line9", "FB_SEP_MATCH2", "line11",
+      ];
+      await Bun.write(filePath, lines.join("\n"));
+
+      const result = await grep_files.execute({
+        pattern: "FB_SEP_MATCH",
+        path: filePath,
+        context_lines: 1,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain(":2:FB_SEP_MATCH1");
+      expect(output).toContain(":10:FB_SEP_MATCH2");
+      expect(output).toContain("--");
+    }, 10_000);
+
+    it("should handle multiline content mode in JS fallback", async () => {
+      const context = { agentId: "test-task-id" };
+      const filePath = `${testDir}/fb-ml.txt`;
+      await Bun.write(filePath, "start\nmatch_this\nend");
+
+      const result = await grep_files.execute({
+        pattern: "start.match_this",
+        path: filePath,
+        multiline: true,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("=== ");
+      expect(output).toContain("1:");
+    }, 10_000);
+
+    it("should handle multiline files_with_matches in JS fallback", async () => {
+      const context = { agentId: "test-task-id" };
+      await Bun.write(`${testDir}/fb-ml-fwm-a.txt`, "foo\nbar_ml_fb");
+      await Bun.write(`${testDir}/fb-ml-fwm-b.txt`, "no match");
+
+      const result = await grep_files.execute({
+        pattern: "foo.bar_ml_fb",
+        path: testDir,
+        multiline: true,
+        output_mode: "files_with_matches",
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("fb-ml-fwm-a.txt");
+      expect(output).not.toContain("fb-ml-fwm-b.txt");
+    }, 10_000);
+
+    it("should handle multiline count mode in JS fallback", async () => {
+      const context = { agentId: "test-task-id" };
+      const filePath = `${testDir}/fb-ml-cnt.txt`;
+      await Bun.write(filePath, "aa\nbb\naa\nbb");
+
+      const result = await grep_files.execute({
+        pattern: "aa.bb",
+        path: filePath,
+        multiline: true,
+        output_mode: "count",
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain(":2");
+    }, 10_000);
+
+    it("should truncate content mode results at max_results", async () => {
+      const context = { agentId: "test-task-id" };
+      const lines = Array.from({ length: 20 }, (_, i) => `line ${i} fb_trunc_match`);
+      await Bun.write(`${testDir}/fb-trunc.txt`, lines.join("\n"));
+
+      const result = await grep_files.execute({
+        pattern: "fb_trunc_match",
+        path: `${testDir}/fb-trunc.txt`,
+        max_results: 5,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("[20 total matches, showing first 5]");
+    }, 10_000);
+
+    it("should handle multiline content truncation at max_results", async () => {
+      const context = { agentId: "test-task-id" };
+      const content = Array.from({ length: 20 }, (_, i) => `start${i}\nend${i}`).join("\n");
+      await Bun.write(`${testDir}/fb-ml-trunc.txt`, content);
+
+      const result = await grep_files.execute({
+        pattern: "start\\d+.end\\d+",
+        path: `${testDir}/fb-ml-trunc.txt`,
+        multiline: true,
+        max_results: 3,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("total matches");
+    }, 10_000);
+
+    it("should handle files_with_matches truncation at max_results", async () => {
+      const context = { agentId: "test-task-id" };
+      for (let i = 0; i < 5; i++) {
+        await Bun.write(`${testDir}/fb-fwm-trunc-${i}.txt`, "fb_fwm_trunc\nfb_fwm_trunc\nfb_fwm_trunc");
+      }
+
+      const result = await grep_files.execute({
+        pattern: "fb_fwm_trunc",
+        path: testDir,
+        output_mode: "files_with_matches",
+        max_results: 2,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      const lines = output.split("\n").filter(l => l !== "" && !l.startsWith("["));
+      expect(lines).toHaveLength(2);
+      expect(output).toContain("total matches");
+    }, 10_000);
+
+    it("should handle count truncation at max_results", async () => {
+      const context = { agentId: "test-task-id" };
+      for (let i = 0; i < 5; i++) {
+        await Bun.write(`${testDir}/fb-cnt-trunc-${i}.txt`, "fb_cnt_trunc");
+      }
+
+      const result = await grep_files.execute({
+        pattern: "fb_cnt_trunc",
+        path: testDir,
+        output_mode: "count",
+        max_results: 2,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      const countLines = output.split("\n").filter(l => l !== "" && !l.startsWith("["));
+      expect(countLines).toHaveLength(2);
+    }, 10_000);
+
+    it("should search multiple files in directory", async () => {
+      const context = { agentId: "test-task-id" };
+      await Bun.write(`${testDir}/fb-dir-a.txt`, "fb_dir_target");
+      await Bun.write(`${testDir}/fb-dir-b.txt`, "fb_dir_target");
+      await Bun.write(`${testDir}/fb-dir-c.txt`, "no match");
+
+      const result = await grep_files.execute({
+        pattern: "fb_dir_target",
+        path: testDir,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("fb-dir-a.txt ===");
+      expect(output).toContain("fb-dir-b.txt ===");
+      expect(output).not.toContain("fb-dir-c.txt");
+    }, 10_000);
+
+    it("should handle multiline max_results truncation for files_with_matches", async () => {
+      const context = { agentId: "test-task-id" };
+      for (let i = 0; i < 5; i++) {
+        await Bun.write(`${testDir}/fb-ml-fwm-t-${i}.txt`, "ml\ntarget_fb");
+      }
+
+      const result = await grep_files.execute({
+        pattern: "ml.target_fb",
+        path: testDir,
+        multiline: true,
+        output_mode: "files_with_matches",
+        max_results: 2,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      const lines = output.split("\n").filter(l => l !== "" && !l.startsWith("["));
+      expect(lines).toHaveLength(2);
+    }, 10_000);
+
+    it("should handle multiline max_results truncation for count mode", async () => {
+      const context = { agentId: "test-task-id" };
+      for (let i = 0; i < 5; i++) {
+        await Bun.write(`${testDir}/fb-ml-cnt-t-${i}.txt`, "ml\ntarget_fb");
+      }
+
+      const result = await grep_files.execute({
+        pattern: "ml.target_fb",
+        path: testDir,
+        multiline: true,
+        output_mode: "count",
+        max_results: 2,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      const countLines = output.split("\n").filter(l => l !== "" && !l.startsWith("["));
+      expect(countLines).toHaveLength(2);
     }, 10_000);
   });
 });
