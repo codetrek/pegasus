@@ -14,6 +14,25 @@ on:
         value: ${{ jobs.test.outputs.coverage }}
 
 jobs:
+  # ── Typecheck (parallel with test) ──────────────────────
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Run typecheck
+        run: bun run typecheck
+
+  # ── Test + Coverage (parallel with typecheck) ───────────
   test:
     runs-on: ubuntu-latest
     outputs:
@@ -44,12 +63,25 @@ jobs:
         if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: bunx playwright install chromium --with-deps
 
+      # Cache the apt package list for Playwright system deps.
+      # install-deps runs apt-get update + install every time (~17s).
+      # By caching /var/cache/apt and the dpkg state, subsequent runs
+      # skip the network fetch and just verify packages are installed.
+      - name: Cache Playwright system deps
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        id: playwright-deps-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            /var/cache/apt/archives
+            /var/lib/dpkg
+          key: playwright-deps-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            playwright-deps-${{ runner.os }}-
+
       - name: Install Playwright system deps (cached browser)
         if: steps.playwright-cache.outputs.cache-hit == 'true'
         run: bunx playwright install-deps chromium
-
-      - name: Run typecheck
-        run: bun run typecheck
 
       - name: Run tests with coverage
         id: coverage
