@@ -6,8 +6,10 @@ import type {
 import { SettingsSchema } from "@pegasus/infra/config.ts";
 import { rm } from "node:fs/promises";
 import path from "node:path";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { ModelRegistry } from "@pegasus/infra/model-registry.ts";
+import { AuthManager } from "@pegasus/agents/auth-manager.ts";
+import { ModelLimitsCache } from "@pegasus/context/index.ts";
 import type { LLMConfig } from "@pegasus/infra/config-schema.ts";
 
 let testSeq = 0;
@@ -82,7 +84,7 @@ describe("MainAgent", () => {
     testDataDir = `/tmp/pegasus-test-main-agent-auth-${process.pid}-${testSeq}`;
   });
   afterEach(async () => {
-    await Bun.sleep(50);
+    await Bun.sleep(10);
     await rm(testDataDir, { recursive: true, force: true }).catch(() => {});
   });
 
@@ -93,9 +95,6 @@ describe("MainAgent", () => {
     function createTestAuthManager(settings?: any) {
       const model = createReplyModel("ok");
       const s = settings ?? testSettings();
-      const { ModelLimitsCache } = require("@pegasus/context/index.ts");
-      const { AuthManager } = require("@pegasus/agents/auth-manager.ts");
-      const { mkdirSync } = require("node:fs");
       const cacheDir = `/tmp/pegasus-test-mlc-auth-${process.pid}-${Date.now()}`;
       mkdirSync(cacheDir, { recursive: true });
       cacheDirs.push(cacheDir);
@@ -134,8 +133,8 @@ describe("MainAgent", () => {
       try {
         const result = mgr._loadOAuthCredentials(credPath);
         expect(result).not.toBeNull();
-        expect(result.access).toBe("test-access-token");
-        expect(result.refresh).toBe("test-refresh-token");
+        expect(result!.access).toBe("test-access-token");
+        expect(result!.refresh).toBe("test-refresh-token");
       } finally {
         await rm(credPath, { force: true }).catch(() => {});
       }
@@ -154,10 +153,10 @@ describe("MainAgent", () => {
       try {
         const result = mgr._loadOAuthCredentials(credPath);
         expect(result).not.toBeNull();
-        expect(result.access).toBe("old-access");
-        expect(result.refresh).toBe("old-refresh");
-        expect(result.expires).toBe(9999999999999);
-        expect(result.accountId).toBe("acct-123");
+        expect(result!.access).toBe("old-access");
+        expect(result!.refresh).toBe("old-refresh");
+        expect(result!.expires).toBe(9999999999999);
+        expect(result!.accountId).toBe("acct-123");
       } finally {
         await rm(credPath, { force: true }).catch(() => {});
       }
@@ -175,9 +174,9 @@ describe("MainAgent", () => {
       try {
         const result = mgr._loadOAuthCredentials(credPath);
         expect(result).not.toBeNull();
-        expect(result.access).toBe("old-access-2");
-        expect(result.refresh).toBe("old-refresh-2");
-        expect(result.accountId).toBeUndefined();
+        expect(result!.access).toBe("old-access-2");
+        expect(result!.refresh).toBe("old-refresh-2");
+        expect(result!.accountId).toBeUndefined();
       } finally {
         await rm(credPath, { force: true }).catch(() => {});
       }
@@ -214,12 +213,11 @@ describe("MainAgent", () => {
 
   describe("_initModelLimits (via AuthManager)", () => {
     const limitsCacheDirs: string[] = [];
+    let originalFetch: typeof globalThis.fetch;
+
     function createTestAuthManager(settings?: any) {
       const model = createReplyModel("ok");
       const s = settings ?? testSettings();
-      const { ModelLimitsCache } = require("@pegasus/context/index.ts");
-      const { AuthManager } = require("@pegasus/agents/auth-manager.ts");
-      const { mkdirSync } = require("node:fs");
       const cacheDir = `/tmp/pegasus-test-mlc-auth-limits-${process.pid}-${Date.now()}`;
       mkdirSync(cacheDir, { recursive: true });
       limitsCacheDirs.push(cacheDir);
@@ -232,13 +230,28 @@ describe("MainAgent", () => {
       }), cache, cacheDir };
     }
 
+    beforeEach(() => {
+      originalFetch = globalThis.fetch;
+      globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        if (url.includes("openrouter.ai")) {
+          return new Response(JSON.stringify({ data: [] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return originalFetch(input, init);
+      }) as typeof globalThis.fetch;
+    });
+
     afterEach(async () => {
+      globalThis.fetch = originalFetch;
       await Promise.all(limitsCacheDirs.map(d => rm(d, { recursive: true, force: true }).catch(() => {})));
     });
 
     afterAll(async () => {
       // Final sweep: background fetches may recreate dirs after afterEach
-      await Bun.sleep(100);
+      await Bun.sleep(10);
       await Promise.all(limitsCacheDirs.map(d => rm(d, { recursive: true, force: true }).catch(() => {})));
     });
 
@@ -281,7 +294,7 @@ describe("MainAgent", () => {
       await mgr.initialize();
 
       // Wait for background promise to settle
-      await Bun.sleep(50);
+      await Bun.sleep(20);
 
       await rm(cacheDir, { recursive: true, force: true }).catch(() => {});
     }, 10_000);
@@ -291,9 +304,6 @@ describe("MainAgent", () => {
 
   describe("_copilotTokenProvider (via AuthManager)", () => {
     it("should be undefined when copilot is not configured", async () => {
-      const { AuthManager } = require("@pegasus/agents/auth-manager.ts");
-      const { ModelLimitsCache } = require("@pegasus/context/index.ts");
-      const { mkdirSync } = require("node:fs");
       const model = createReplyModel("ok");
       const cacheDir = `/tmp/pegasus-test-mlc-cp-getter-${process.pid}-${Date.now()}`;
       mkdirSync(cacheDir, { recursive: true });

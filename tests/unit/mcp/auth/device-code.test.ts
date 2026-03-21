@@ -112,6 +112,12 @@ describe("executeDeviceCodeFlow", () => {
     console.log = mock((...args: unknown[]) => {
       consoleLogCalls.push(args);
     });
+    // Mock setTimeout to fire immediately — poll loops resolve in microseconds.
+    // Tests that need to inspect actual delay values (e.g. slow_down) override
+    // this mock within the test itself.
+    globalThis.setTimeout = ((fn: (...args: unknown[]) => void, _ms?: number, ...args: unknown[]) => {
+      return originalSetTimeout(fn, 0, ...args);
+    }) as unknown as typeof globalThis.setTimeout;
   });
 
   afterEach(() => {
@@ -202,9 +208,12 @@ describe("executeDeviceCodeFlow", () => {
     // The first sleep should use the initial interval (50ms).
     // After slow_down, the interval increases by 5000ms, so the second sleep
     // should be 5050ms. Verify via the captured setTimeout delay values.
-    expect(sleepDelays.length).toBeGreaterThanOrEqual(2);
-    expect(sleepDelays[0]).toBe(50);   // initial: 0.05s * 1000
-    expect(sleepDelays[1]).toBe(5050); // after slow_down: 50 + 5000
+    // Filter to only poll-interval delays (≥50ms) to exclude any stray 0ms
+    // timeouts from beforeEach mock or microtask scheduling.
+    const pollDelays = sleepDelays.filter(d => d >= 50);
+    expect(pollDelays.length).toBeGreaterThanOrEqual(2);
+    expect(pollDelays[0]).toBe(50);   // initial: 0.05s * 1000
+    expect(pollDelays[1]).toBe(5050); // after slow_down: 50 + 5000
   }, { timeout: 10_000 });
 
   // ── access_denied ──

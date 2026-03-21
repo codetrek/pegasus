@@ -294,7 +294,7 @@ describe("MCP Integration", () => {
     it("should handle ToolExecutor timeout for slow MCP tool", async () => {
       const slowManager = {
         callTool: mock(async () => {
-          await new Promise((r) => setTimeout(r, 5000));
+          await new Promise((r) => setTimeout(r, 500));
           return { content: [{ type: "text", text: "too slow" }] };
         }),
       } as unknown as MCPManager;

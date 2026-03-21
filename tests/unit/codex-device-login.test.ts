@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, afterEach, beforeEach } from "bun:test";
 import { mkdir, rm } from "node:fs/promises";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 // ── Credential loading tests (via AuthManager) ──
@@ -15,6 +15,7 @@ import type { LanguageModel, GenerateTextResult } from "@pegasus/infra/llm-types
 import type { LLMConfig } from "@pegasus/infra/config-schema.ts";
 import { SettingsSchema } from "@pegasus/infra/config.ts";
 import { ModelLimitsCache } from "@pegasus/context/index.ts";
+import { loginCodexDeviceCode } from "@pegasus/infra/codex-device-login.ts";
 
 const testDir = "/tmp/pegasus-test-oauth";
 
@@ -74,7 +75,6 @@ describe("OAuth credential loading", () => {
       homeDir: testDir,
     });
     const cacheDir = path.join(dataDir, "model-limits");
-    const { mkdirSync } = require("node:fs");
     mkdirSync(cacheDir, { recursive: true });
     const modelLimitsCache = new ModelLimitsCache(cacheDir);
     return new AuthManager({ settings, models, modelLimitsCache, credDir: authDir });
@@ -208,9 +208,24 @@ describe("OAuth credential loading", () => {
 
 describe("loginCodexDeviceCode", () => {
   const originalFetch = globalThis.fetch;
+  const originalSetTimeout = globalThis.setTimeout;
+  let origLog: typeof console.log;
+
+  beforeEach(() => {
+    origLog = console.log;
+    console.log = () => {};
+    // Mock setTimeout to fire immediately — poll loops resolve in microseconds
+    // instead of waiting real interval seconds. Delay values are still passed
+    // through so tests that inspect them (e.g. slow_down) still work.
+    globalThis.setTimeout = ((fn: (...args: unknown[]) => void, _ms?: number, ...args: unknown[]) => {
+      return originalSetTimeout(fn, 0, ...args);
+    }) as unknown as typeof globalThis.setTimeout;
+  });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    globalThis.setTimeout = originalSetTimeout;
+    console.log = origLog;
   });
 
   it("completes device code flow and returns OAuthCredentials", async () => {
@@ -257,22 +272,13 @@ describe("loginCodexDeviceCode", () => {
       throw new Error(`Unexpected fetch URL: ${urlStr}`);
     }) as typeof fetch;
 
-    // Suppress console.log output during test
-    const origLog = console.log;
-    console.log = () => {};
+    const creds = await loginCodexDeviceCode();
 
-    try {
-      const { loginCodexDeviceCode } = await import("@pegasus/infra/codex-device-login.ts");
-      const creds = await loginCodexDeviceCode();
-
-      expect(creds.access).toBe("codex_access_token");
-      expect(creds.refresh).toBe("codex_refresh_token");
-      expect(typeof creds.expires).toBe("number");
-      expect(creds.expires).toBeGreaterThan(Date.now());
-      expect(creds.accountId).toBe("acct_test123");
-    } finally {
-      console.log = origLog;
-    }
+    expect(creds.access).toBe("codex_access_token");
+    expect(creds.refresh).toBe("codex_refresh_token");
+    expect(typeof creds.expires).toBe("number");
+    expect(creds.expires).toBeGreaterThan(Date.now());
+    expect(creds.accountId).toBe("acct_test123");
   }, { timeout: 10000 });
 
   it("throws on device code request failure", async () => {
@@ -280,15 +286,7 @@ describe("loginCodexDeviceCode", () => {
       return new Response("Service unavailable", { status: 503 });
     }) as typeof fetch;
 
-    const origLog = console.log;
-    console.log = () => {};
-
-    try {
-      const { loginCodexDeviceCode } = await import("@pegasus/infra/codex-device-login.ts");
-      await expect(loginCodexDeviceCode()).rejects.toThrow("Device code request failed");
-    } finally {
-      console.log = origLog;
-    }
+    await expect(loginCodexDeviceCode()).rejects.toThrow("Device code request failed");
   }, { timeout: 10000 });
 
   it("throws on token exchange failure", async () => {
@@ -318,15 +316,7 @@ describe("loginCodexDeviceCode", () => {
       throw new Error(`Unexpected fetch URL: ${urlStr}`);
     }) as typeof fetch;
 
-    const origLog = console.log;
-    console.log = () => {};
-
-    try {
-      const { loginCodexDeviceCode } = await import("@pegasus/infra/codex-device-login.ts");
-      await expect(loginCodexDeviceCode()).rejects.toThrow("Token exchange failed");
-    } finally {
-      console.log = origLog;
-    }
+    await expect(loginCodexDeviceCode()).rejects.toThrow("Token exchange failed");
   }, { timeout: 10000 });
 
   it("returns empty accountId when id_token has invalid JWT payload", async () => {
@@ -361,18 +351,10 @@ describe("loginCodexDeviceCode", () => {
       throw new Error(`Unexpected fetch URL: ${urlStr}`);
     }) as typeof fetch;
 
-    const origLog = console.log;
-    console.log = () => {};
+    const creds = await loginCodexDeviceCode();
 
-    try {
-      const { loginCodexDeviceCode } = await import("@pegasus/infra/codex-device-login.ts");
-      const creds = await loginCodexDeviceCode();
-
-      expect(creds.access).toBe("codex_access");
-      expect(creds.accountId).toBe("");
-    } finally {
-      console.log = origLog;
-    }
+    expect(creds.access).toBe("codex_access");
+    expect(creds.accountId).toBe("");
   }, { timeout: 10000 });
 
   it("returns empty accountId when id_token payload is not valid JSON", async () => {
@@ -410,19 +392,11 @@ describe("loginCodexDeviceCode", () => {
       throw new Error(`Unexpected fetch URL: ${urlStr}`);
     }) as typeof fetch;
 
-    const origLog = console.log;
-    console.log = () => {};
+    const creds = await loginCodexDeviceCode();
 
-    try {
-      const { loginCodexDeviceCode } = await import("@pegasus/infra/codex-device-login.ts");
-      const creds = await loginCodexDeviceCode();
-
-      expect(creds.access).toBe("codex_access");
-      // extractAccountId catch block returns null → accountId becomes ""
-      expect(creds.accountId).toBe("");
-    } finally {
-      console.log = origLog;
-    }
+    expect(creds.access).toBe("codex_access");
+    // extractAccountId catch block returns null → accountId becomes ""
+    expect(creds.accountId).toBe("");
   }, { timeout: 10000 });
 
   it("retries on 403 then succeeds when device token returns 200", async () => {
@@ -435,7 +409,7 @@ describe("loginCodexDeviceCode", () => {
         return new Response(JSON.stringify({
           device_auth_id: "dev_auth_123",
           user_code: "ABCD-1234",
-          interval: "1", // Also tests string interval parsing
+          interval: "1", // String interval → parseInt → 1 second (tests string parsing; setTimeout is mocked)
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
 
@@ -464,18 +438,10 @@ describe("loginCodexDeviceCode", () => {
       throw new Error(`Unexpected fetch URL: ${urlStr}`);
     }) as typeof fetch;
 
-    const origLog = console.log;
-    console.log = () => {};
+    const creds = await loginCodexDeviceCode();
 
-    try {
-      const { loginCodexDeviceCode } = await import("@pegasus/infra/codex-device-login.ts");
-      const creds = await loginCodexDeviceCode();
-
-      expect(creds.access).toBe("codex_access_retry");
-      expect(pollCount).toBe(3);
-    } finally {
-      console.log = origLog;
-    }
+    expect(creds.access).toBe("codex_access_retry");
+    expect(pollCount).toBe(3);
   }, { timeout: 15000 });
 
   it("retries on 404 then succeeds", async () => {
@@ -515,18 +481,10 @@ describe("loginCodexDeviceCode", () => {
       throw new Error(`Unexpected fetch URL: ${urlStr}`);
     }) as typeof fetch;
 
-    const origLog = console.log;
-    console.log = () => {};
+    const creds = await loginCodexDeviceCode();
 
-    try {
-      const { loginCodexDeviceCode } = await import("@pegasus/infra/codex-device-login.ts");
-      const creds = await loginCodexDeviceCode();
-
-      expect(creds.access).toBe("codex_access_404");
-      expect(pollCount).toBe(2);
-    } finally {
-      console.log = origLog;
-    }
+    expect(creds.access).toBe("codex_access_404");
+    expect(pollCount).toBe(2);
   }, { timeout: 15000 });
 
   it("throws on unexpected polling status (e.g. 500)", async () => {
@@ -548,17 +506,9 @@ describe("loginCodexDeviceCode", () => {
       throw new Error(`Unexpected fetch URL: ${urlStr}`);
     }) as typeof fetch;
 
-    const origLog = console.log;
-    console.log = () => {};
-
-    try {
-      const { loginCodexDeviceCode } = await import("@pegasus/infra/codex-device-login.ts");
-      await expect(loginCodexDeviceCode()).rejects.toThrow(
-        "Device auth polling failed (500): Internal Server Error"
-      );
-    } finally {
-      console.log = origLog;
-    }
+    await expect(loginCodexDeviceCode()).rejects.toThrow(
+      "Device auth polling failed (500): Internal Server Error"
+    );
   }, { timeout: 10000 });
 
   it("returns empty accountId when no id_token", async () => {
@@ -593,18 +543,10 @@ describe("loginCodexDeviceCode", () => {
       throw new Error(`Unexpected fetch URL: ${urlStr}`);
     }) as typeof fetch;
 
-    const origLog = console.log;
-    console.log = () => {};
+    const creds = await loginCodexDeviceCode();
 
-    try {
-      const { loginCodexDeviceCode } = await import("@pegasus/infra/codex-device-login.ts");
-      const creds = await loginCodexDeviceCode();
-
-      expect(creds.access).toBe("codex_access");
-      expect(creds.accountId).toBe("");
-    } finally {
-      console.log = origLog;
-    }
+    expect(creds.access).toBe("codex_access");
+    expect(creds.accountId).toBe("");
   }, { timeout: 10000 });
 
   it("returns empty accountId when id_token JWT lacks chatgpt_account_id", async () => {
@@ -647,18 +589,10 @@ describe("loginCodexDeviceCode", () => {
       throw new Error(`Unexpected fetch URL: ${urlStr}`);
     }) as typeof fetch;
 
-    const origLog = console.log;
-    console.log = () => {};
+    const creds = await loginCodexDeviceCode();
 
-    try {
-      const { loginCodexDeviceCode } = await import("@pegasus/infra/codex-device-login.ts");
-      const creds = await loginCodexDeviceCode();
-
-      expect(creds.access).toBe("codex_access");
-      // extractAccountId returns null via ?? null → accountId becomes ""
-      expect(creds.accountId).toBe("");
-    } finally {
-      console.log = origLog;
-    }
+    expect(creds.access).toBe("codex_access");
+    // extractAccountId returns null via ?? null → accountId becomes ""
+    expect(creds.accountId).toBe("");
   }, { timeout: 10000 });
 });

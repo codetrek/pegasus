@@ -5,6 +5,7 @@ import { ToolRegistry } from "../../../src/agents/tools/registry.ts";
 import { SubAgentTypeRegistry } from "../../../src/agents/subagents/index.ts";
 import { rm } from "node:fs/promises";
 import { mkdirSync } from "node:fs";
+import { waitFor } from "../../helpers/wait-for.ts";
 
 const testModel: LanguageModel = {
   provider: "test",
@@ -63,7 +64,7 @@ describe("Agent internal tick", () => {
     }
     agents = [];
     // Small delay for background subagent tasks to settle before cleanup
-    await Bun.sleep(50);
+    await Bun.sleep(10);
     await rm(testDataDir, { recursive: true, force: true }).catch(() => {});
   });
 
@@ -92,7 +93,7 @@ describe("Agent internal tick", () => {
     expect(agent._tickIsRunning).toBe(true);
 
     // Wait for subagent to complete
-    await Bun.sleep(200);
+    await waitFor(() => agent.activeCount === 0);
 
     // After subagent completes, tick should stop
     // The notification is routed via _handleSubagentNotify → _checkStopTick

@@ -16,6 +16,7 @@ import { ProjectAdapter } from "@pegasus/projects/project-adapter.ts";
 import { WorkerAdapter } from "@pegasus/workers/worker-adapter.ts";
 import { mock } from "bun:test";
 import { createInjectedSubsystems } from "../helpers/create-injected-subsystems.ts";
+import { waitFor } from "../helpers/wait-for.ts";
 
 let testSeq = 0;
 let testDataDir = "/tmp/pegasus-test-main-agent-subagent";
@@ -95,7 +96,7 @@ describe("MainAgent", () => {
       try { await a.stop(); } catch {}
     }
     activeAgents = [];
-    await Bun.sleep(50);
+    await Bun.sleep(10);
     await rm(testDataDir, { recursive: true, force: true }).catch(() => {});
   });
 
@@ -182,7 +183,7 @@ describe("MainAgent", () => {
         text: "resume old subagent",
         channel: { type: "cli", channelId: "test" },
       });
-      await Bun.sleep(50);
+      await waitFor(() => replies.length >= 1);
 
       // Error triggers follow-up → LLM replies with "SubAgent not found"
       expect(callCount).toBeGreaterThanOrEqual(2); // 1st: resume, 2nd: follow-up
@@ -249,7 +250,7 @@ describe("MainAgent", () => {
         channel: { type: "subagent", channelId: "sa_1_12345" },
       });
 
-      await Bun.sleep(50);
+      await waitFor(() => replies.length >= 1);
 
       // MainAgent should have processed the subagent message via _think()
       // and the LLM should have produced a reply
@@ -299,7 +300,7 @@ describe("MainAgent", () => {
         },
       });
 
-      await Bun.sleep(50);
+      await waitFor(() => capturedMessages.filter((m: Message) => m.role === "user").length >= 1);
 
       // The user message sent to the LLM should have images attached
       const userMsgs = capturedMessages.filter((m: Message) => m.role === "user");
@@ -343,7 +344,7 @@ describe("MainAgent", () => {
         channel: { type: "subagent", channelId: "sa_no_img" },
       });
 
-      await Bun.sleep(50);
+      await waitFor(() => capturedMessages.filter((m: Message) => m.role === "user").length >= 1);
 
       // The user message sent to the LLM should NOT have images
       const userMsgs = capturedMessages.filter((m: Message) => m.role === "user");
@@ -390,7 +391,7 @@ describe("MainAgent", () => {
         },
       });
 
-      await Bun.sleep(50);
+      await waitFor(() => capturedMessages.filter((m: Message) => m.role === "user").length >= 1);
 
       // Should merge: existing images + imageRefs
       const userMsgs = capturedMessages.filter((m: Message) => m.role === "user");

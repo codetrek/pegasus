@@ -259,7 +259,7 @@ export class BrowserManager {
       throw new Error(`Click on ref "${ref}" failed: ${msg.split('\n')[0]}`);
     }
     // Wait for potential navigation/re-render
-    await session.page.waitForTimeout(500);
+    await session.page.waitForTimeout(this.config.clickStabilizeMs ?? 500);
     return this.takeSnapshot(agentId);
   }
 
@@ -277,7 +277,7 @@ export class BrowserManager {
       await locator.fill(text, { timeout: this.config.timeout });
       if (submit) {
         await locator.press("Enter");
-        await session.page.waitForTimeout(500);
+        await session.page.waitForTimeout(this.config.clickStabilizeMs ?? 500);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -302,7 +302,7 @@ export class BrowserManager {
         ? amount * viewportHeight
         : -(amount * viewportHeight);
     await session.page.mouse.wheel(0, delta);
-    await session.page.waitForTimeout(300);
+    await session.page.waitForTimeout(this.config.scrollStabilizeMs ?? 300);
     return this.takeSnapshot(agentId);
   }
 

@@ -35,6 +35,7 @@ import { z } from "zod";
 import { mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
+import { waitFor } from "../../helpers/wait-for.ts";
 
 // ── Helpers ──────────────────────────────────────────
 
@@ -106,11 +107,6 @@ function createAgentWithSubagents(overrides?: CreateAgentOpts): Agent {
   });
 }
 
-/** Wait for notifications to arrive (fire-and-forget needs a tick). */
-async function waitForNotifications(ms = 50): Promise<void> {
-  await new Promise((r) => setTimeout(r, ms));
-}
-
 // ── Tests ────────────────────────────────────────────
 
 describe("Agent subagent management", () => {
@@ -124,7 +120,7 @@ describe("Agent subagent management", () => {
   });
   afterAll(async () => {
     // Final sweep: blocking-model tests may recreate dirs after afterEach
-    await Bun.sleep(100);
+    await Bun.sleep(10);
     await Promise.all(allTempDirs.map(d => rm(d, { recursive: true, force: true }).catch(() => {})));
   });
 
@@ -168,7 +164,7 @@ describe("Agent subagent management", () => {
       const agent = createAgentWithSubagents({ model, onNotification });
       const agentId = agent.submit("compute", "user", "general", "Compute task");
 
-      await waitForNotifications();
+      await waitFor(() => (onNotification as any).mock.calls.length > 0);
 
       expect(onNotification).toHaveBeenCalled();
       const calls = (onNotification as any).mock.calls as SubagentNotification[][];
@@ -191,7 +187,7 @@ describe("Agent subagent management", () => {
       const agent = createAgentWithSubagents({ model, onNotification });
       const agentId = agent.submit("do stuff", "user", "general", "Failing task");
 
-      await waitForNotifications();
+      await waitFor(() => (onNotification as any).mock.calls.length > 0);
 
       expect(onNotification).toHaveBeenCalled();
       const calls = (onNotification as any).mock.calls as SubagentNotification[][];
@@ -209,7 +205,7 @@ describe("Agent subagent management", () => {
       agent.submit("do stuff", "user", "general", "Task");
       expect(agent.activeCount).toBe(1);
 
-      await waitForNotifications();
+      await waitFor(() => agent.activeCount === 0);
 
       expect(agent.activeCount).toBe(0);
     }, 5000);
@@ -338,7 +334,7 @@ describe("Agent subagent management", () => {
 
       expect(agent.activeCount).toBeGreaterThanOrEqual(1);
 
-      await waitForNotifications();
+      await waitFor(() => agent.activeCount === 0);
 
       // Both should have completed
       expect(agent.activeCount).toBe(0);
@@ -389,7 +385,7 @@ describe("Agent subagent management", () => {
       const agent = createAgentWithSubagents({ model, onNotification });
       agent.submit("do work", "user", "general", "Notify test");
 
-      await waitForNotifications(100);
+      await waitFor(() => notifications.some((n) => n.type === "notify"));
 
       const notifyCall = notifications.find((n) => n.type === "notify");
       expect(notifyCall).toBeDefined();
@@ -434,7 +430,7 @@ describe("Agent subagent management", () => {
         const agent = createAgentWithSubagents({ onNotification });
         agent.submit("do stuff", "user", "general", "Failing task");
 
-        await waitForNotifications(100);
+        await waitFor(() => notifications.some((n) => n.type === "failed"));
 
         // The .catch() branch should fire, producing a "failed" notification
         const failedCall = notifications.find((n) => n.type === "failed");
@@ -464,7 +460,7 @@ describe("Agent subagent management", () => {
         const agent = createAgentWithSubagents({ onNotification });
         agent.submit("do stuff", "user", "general", "String error task");
 
-        await waitForNotifications(100);
+        await waitFor(() => notifications.some((n) => n.type === "failed"));
 
         const failedCall = notifications.find((n) => n.type === "failed");
         expect(failedCall).toBeDefined();
@@ -527,7 +523,7 @@ describe("Agent subagent management", () => {
 
       agent.submit("run spy", "user", "general", "Spy task");
 
-      await waitForNotifications(100);
+      await waitFor(() => capturedContext !== null);
 
       expect(capturedContext).not.toBeNull();
       expect(capturedContext!.storeImage).toBe(mockStoreImage);
@@ -575,7 +571,7 @@ describe("Agent subagent management", () => {
       agent.setAdditionalTools([spyTool]);
       agent.submit("run spy", "user", "general", "No image task");
 
-      await waitForNotifications(100);
+      await waitFor(() => capturedContext !== null);
 
       expect(capturedContext).not.toBeNull();
       expect(capturedContext!.storeImage).toBeUndefined();
@@ -634,7 +630,7 @@ describe("Agent subagent management", () => {
       agent.setAdditionalTools([imageTool]);
       agent.submit("take screenshot", "user", "general", "Image task");
 
-      await waitForNotifications(100);
+      await waitFor(() => notifications.some((n) => n.type === "completed"));
 
       const completed = notifications.find((n) => n.type === "completed");
       expect(completed).toBeDefined();
@@ -658,7 +654,7 @@ describe("Agent subagent management", () => {
       const agent = createAgentWithSubagents({ onNotification });
       agent.submit("no images", "user", "general", "Plain task");
 
-      await waitForNotifications(100);
+      await waitFor(() => notifications.some((n) => n.type === "completed"));
 
       const completed = notifications.find((n) => n.type === "completed");
       expect(completed).toBeDefined();
@@ -730,7 +726,7 @@ describe("Agent subagent management", () => {
       agent.setAdditionalTools([storeTestTool]);
 
       agent.submit("store an image", "user", "general", "Store test");
-      await waitForNotifications(200);
+      await waitFor(() => storedImage === true);
 
       expect(mockStoreImage).toHaveBeenCalled();
       expect(storedImage).toBe(true);
@@ -744,7 +740,7 @@ describe("Agent subagent management", () => {
       });
 
       agent.submit("no image needed", "user", "general", "Plain task");
-      await waitForNotifications(100);
+      await waitFor(() => notifications.some(n => n.type === "completed"));
 
       const completed = notifications.find(n => n.type === "completed");
       expect(completed).toBeDefined();
@@ -787,7 +783,7 @@ describe("Agent subagent management", () => {
       });
 
       agent.submit("explore something", "user", "explore", "Explore task");
-      await waitForNotifications(100);
+      await waitFor(() => usedModelId === "fast-model");
 
       expect(usedModelId).toBe("fast-model");
     }, 5000);
@@ -824,7 +820,7 @@ describe("Agent subagent management", () => {
       });
 
       agent.submit("do work", "user", "general", "General task");
-      await waitForNotifications(100);
+      await waitFor(() => usedParentModel === true);
 
       // resolveModel should NOT be called since SubAgentType has no model
       expect(resolveModel).not.toHaveBeenCalled();
@@ -873,7 +869,7 @@ describe("Agent subagent management", () => {
       agent.setAdditionalTools([mockTool]);
 
       agent.submit("compute", "user", "general", "Compute task");
-      await waitForNotifications(200);
+      await waitFor(() => (onNotification as any).mock.calls.length > 0);
 
       expect(onNotification).toHaveBeenCalled();
       const calls = (onNotification as any).mock.calls as SubagentNotification[][];
@@ -907,7 +903,7 @@ describe("Agent subagent management", () => {
       await agent.start();
 
       agent.submit("do something", "test", "general", "do something");
-      await waitForNotifications(200);
+      await waitFor(() => appStats.subagents.active === 0 && appStats.subagents.completed === 1);
 
       expect(appStats.subagents.active).toBe(0);
       expect(appStats.subagents.completed).toBe(1);
@@ -940,7 +936,7 @@ describe("Agent subagent management", () => {
       await agent.start();
 
       agent.submit("do something", "test", "general", "do something");
-      await waitForNotifications(200);
+      await waitFor(() => appStats.subagents.active === 0 && appStats.subagents.failed === 1);
 
       expect(appStats.subagents.active).toBe(0);
       expect(appStats.subagents.completed).toBe(0);

@@ -8,6 +8,7 @@ import { describe, expect, test } from "bun:test";
 import { join } from "path";
 import { tmpdir } from "os";
 import { mkdirSync, readFileSync, readdirSync, rmSync } from "fs";
+import { waitFor } from "../helpers/wait-for.ts";
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const lineTransport = require("../../src/infra/line-transport.js");
@@ -173,10 +174,15 @@ describe("line-transport", () => {
         };
         transport.write(JSON.stringify(obj) + "\n");
 
-        // Wait for async pipeline to flush
-        await new Promise((r) => setTimeout(r, 500));
+        // Wait for async pipeline to flush and write file
+        await waitFor(() => readdirSync(testDir).length > 0);
         transport.end();
-        await new Promise((r) => setTimeout(r, 300));
+        await waitFor(() => {
+          const files = readdirSync(testDir);
+          if (files.length === 0) return false;
+          const content = readFileSync(join(testDir, files[0]!), "utf-8");
+          return content.includes("integration_test");
+        });
 
         // pino-roll creates numbered files (e.g. test.1.log)
         const files = readdirSync(testDir);
@@ -199,7 +205,9 @@ describe("line-transport", () => {
         const transport = await lineTransport({ file: logFile, mkdir: true });
         // Calling end triggers the close callback
         transport.end();
-        await new Promise((r) => setTimeout(r, 300));
+        await waitFor(() => {
+          try { return transport.destroyed || transport.closed; } catch { return true; }
+        });
         // Should not throw — transport closed cleanly
       } finally {
         rmSync(testDir, { recursive: true, force: true });

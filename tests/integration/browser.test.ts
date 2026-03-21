@@ -17,6 +17,8 @@ const config: BrowserConfig = {
   viewport: { width: 1280, height: 720 },
   timeout: 15000,
   userDataDir: "/tmp/test-browser-profile-integration",
+  clickStabilizeMs: 10,    // fast for static test pages
+  scrollStabilizeMs: 10,   // fast for static test pages
 };
 
 // ── Local test server ──────────────────────────────────────────────

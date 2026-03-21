@@ -8,11 +8,12 @@ import type {
 import type { Persona } from "@pegasus/identity/persona.ts";
 import { SettingsSchema } from "@pegasus/infra/config.ts";
 import type { Settings } from "@pegasus/infra/config.ts";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, rm, readdir } from "node:fs/promises";
 import { writeFileSync } from "node:fs";
 import { ModelRegistry } from "@pegasus/infra/model-registry.ts";
 import type { LLMConfig } from "@pegasus/infra/config-schema.ts";
 import { createInjectedSubsystems } from "../helpers/create-injected-subsystems.ts";
+import { waitFor } from "../helpers/wait-for.ts";
 
 let testSeq = 0;
 let testDataDir = "/tmp/pegasus-test-main-agent-compact";
@@ -89,7 +90,7 @@ describe("MainAgent", () => {
       try { await a.stop(); } catch {}
     }
     activeAgents = [];
-    await Bun.sleep(50);
+    await Bun.sleep(10);
     await rm(testDataDir, { recursive: true, force: true }).catch(() => {});
   });
 
@@ -171,7 +172,7 @@ describe("MainAgent", () => {
 
       // Send message — beforeLLMCall detects char threshold exceeded → compacts → reflection fires
       agent.send({ text: "One last thing", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(200); // Wait for compact + reflection to fire
+      await waitFor(() => reflectionCalled, 5000); // Wait for compact + reflection to fire
 
       // Verify compact happened
       const { readdir } = await import("node:fs/promises");
@@ -256,7 +257,11 @@ describe("MainAgent", () => {
 
       // Send message — triggers compact → reflection (which throws) → .catch() handles it
       agent.send({ text: "One last thing", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(200);
+      // Wait for compact to complete (archive file appears in session dir)
+      await waitFor(async () => {
+        const files = await readdir(sessionDir).catch(() => [] as string[]);
+        return files.some((f: string) => f.endsWith(".jsonl") && f !== "current.jsonl");
+      }, 5000);
 
       // Agent should still be operational (error was caught, not propagated)
       // Just verifying no crash occurred
@@ -330,7 +335,11 @@ describe("MainAgent", () => {
       // Send message — triggers compact. preCompactMessages has 0 seed user + 1 incoming = 1 user.
       // shouldReflect returns false (userMessages < 2).
       agent.send({ text: "test", channel: { type: "cli", channelId: "test" } });
-      await Bun.sleep(200);
+      // Wait for compact to complete (archive file appears), then verify reflection was NOT called
+      await waitFor(async () => {
+        const files = await readdir(sessionDir).catch(() => [] as string[]);
+        return files.some((f: string) => f.endsWith(".jsonl") && f !== "current.jsonl");
+      }, 5000);
 
       // Reflection should NOT have been called (only 1 user message)
       expect(reflectionCalled).toBe(false);

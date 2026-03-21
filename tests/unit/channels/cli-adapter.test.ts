@@ -7,6 +7,7 @@ import { describe, it, expect, afterEach } from "bun:test";
 import { CLIAdapter } from "@pegasus/channels/cli-adapter.ts";
 import type { InboundMessage, OutboundMessage } from "@pegasus/channels/types.ts";
 import { PassThrough } from "stream";
+import { waitFor } from "../../helpers/wait-for.ts";
 
 /**
  * Helper: patch process.stdin and process.stdout with mocks,
@@ -86,7 +87,7 @@ describe("CLIAdapter", () => {
       });
 
       mockStdin.write("hello world\n");
-      await Bun.sleep(50);
+      await waitFor(() => received.length >= 1);
 
       expect(received).toHaveLength(1);
       expect(received[0]!.text).toBe("hello world");
@@ -107,7 +108,7 @@ describe("CLIAdapter", () => {
 
       mockStdin.write("\n");
       mockStdin.write("   \n");
-      await Bun.sleep(50);
+      await Bun.sleep(10);
 
       expect(received).toHaveLength(0);
     });
@@ -131,7 +132,7 @@ describe("CLIAdapter", () => {
         });
 
         mockStdin.write("/help\n");
-        await Bun.sleep(50);
+        await waitFor(() => logged.some((l) => l.includes("/help")));
 
         expect(received).toHaveLength(0);
         expect(logged.some((l) => l.includes("/help"))).toBe(true);
@@ -156,7 +157,7 @@ describe("CLIAdapter", () => {
         await adapter.start({ send: () => {} });
 
         mockStdin.write("/exit\n");
-        await Bun.sleep(100);
+        await waitFor(() => exitCalled);
 
         expect(exitCalled).toBe(true);
       } finally {
@@ -180,7 +181,7 @@ describe("CLIAdapter", () => {
         await adapter.start({ send: () => {} });
 
         mockStdin.write("/quit\n");
-        await Bun.sleep(100);
+        await waitFor(() => exitCalled);
 
         expect(exitCalled).toBe(true);
       } finally {
@@ -200,7 +201,7 @@ describe("CLIAdapter", () => {
       });
 
       mockStdin.write("/unknown_command\n");
-      await Bun.sleep(50);
+      await waitFor(() => received.length >= 1);
 
       expect(received).toHaveLength(1);
       expect(received[0]!.text).toBe("/unknown_command");
@@ -246,7 +247,7 @@ describe("CLIAdapter", () => {
       try {
         await adapter.start({ send: () => {} });
         mockStdin.write("/exit\n");
-        await Bun.sleep(100);
+        await Bun.sleep(10);
         // Should not crash
       } finally {
         console.log = origLog;

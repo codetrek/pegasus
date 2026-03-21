@@ -30,7 +30,7 @@ describe("logger", () => {
     // test dirs during subsequent test files (pino logger is a global singleton).
     initLogger("/dev/null", "json", "silent");
     // Final cleanup: sweep all test dirs
-    await Bun.sleep(100);
+    await Bun.sleep(20);
     for (const dir of allTestDirs) {
       try { rmSync(dir, { recursive: true, force: true }); } catch (_e) { /* ignore */ }
     }

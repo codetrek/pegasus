@@ -179,4 +179,16 @@ export class ProjectAdapter implements ChannelAdapter {
   getWorkerAdapter(): WorkerAdapter {
     return this.workerAdapter;
   }
+
+  /**
+   * Wait for a project Worker to send its "ready" signal.
+   *
+   * Delegates to WorkerAdapter.waitForReady(). Call immediately after
+   * startProject() to await the Worker's initialization without sleeping.
+   *
+   * @param timeout — max ms to wait (default 5000). Rejects on timeout.
+   */
+  waitForReady(projectId: string, timeout?: number): Promise<void> {
+    return this.workerAdapter.waitForReady("project", projectId, timeout);
+  }
 }

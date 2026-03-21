@@ -7,6 +7,7 @@ import { shell_exec } from "../../../src/agents/tools/builtins/shell-tools.ts";
 import { ToolCategory } from "../../../src/agents/tools/types.ts";
 import os from "node:os";
 import fs from "node:fs";
+import { waitFor } from "../../helpers/wait-for.ts";
 
 const context = { agentId: "test-task-id" };
 
@@ -293,8 +294,15 @@ describe("shell_exec tool", () => {
         { agentId: "test", abortSignal: ac.signal },
       );
 
-      // Abort after 200ms
-      await new Promise((r) => setTimeout(r, 200));
+      // Wait for the process to spawn before aborting
+      let aborted = false;
+      await waitFor(() => {
+        if (!aborted) {
+          aborted = true;
+          return false; // yield one polling cycle to let spawn complete
+        }
+        return true;
+      }, 2000);
       ac.abort();
 
       const result = await resultPromise;

@@ -2,6 +2,7 @@
  * Tests for TUI store — reactive message bridge.
  */
 import { describe, it, expect, beforeEach } from "bun:test";
+import { waitFor } from "../../helpers/wait-for.ts";
 import {
   chatStore,
   addMessage,
@@ -121,7 +122,7 @@ describe("TUI Store", () => {
     it("should auto-clear after timeout", async () => {
       showHint("will disappear", 50);
       expect(statusHint()).toBe("will disappear");
-      await Bun.sleep(100);
+      await waitFor(() => statusHint() === "");
       expect(statusHint()).toBe("");
     });
 

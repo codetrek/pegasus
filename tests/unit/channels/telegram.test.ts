@@ -8,6 +8,7 @@
 import { describe, it, expect, beforeEach, mock } from "bun:test";
 import { TelegramAdapter } from "@pegasus/channels/telegram.ts";
 import type { InboundMessage, OutboundMessage } from "@pegasus/channels/types.ts";
+import { waitFor } from "../../helpers/wait-for.ts";
 
 /** Fake bot info to initialize Grammy without API call. */
 const FAKE_BOT_INFO = {
@@ -413,8 +414,8 @@ describe("TelegramAdapter", () => {
         };
 
         await bot.handleUpdate(mockPhotoUpdate);
-        // Grammy middleware is async — give it a tick
-        await Bun.sleep(100);
+        // Grammy middleware is async — poll until message is received
+        await waitFor(() => received.length >= 1);
 
         expect(received).toHaveLength(1);
         expect(received[0]!.text).toBe("Check out this image!");
@@ -462,7 +463,7 @@ describe("TelegramAdapter", () => {
         };
 
         await bot.handleUpdate(mockPhotoUpdate);
-        await Bun.sleep(100);
+        await waitFor(() => received.length >= 1);
 
         expect(received).toHaveLength(1);
         expect(received[0]!.text).toBe("");
@@ -501,7 +502,7 @@ describe("TelegramAdapter", () => {
         };
 
         await bot.handleUpdate(mockPhotoUpdate);
-        await Bun.sleep(100);
+        await waitFor(() => received.length >= 1);
 
         expect(received).toHaveLength(1);
         expect(received[0]!.channel.replyTo).toBe("42");
@@ -537,7 +538,8 @@ describe("TelegramAdapter", () => {
         };
 
         await bot.handleUpdate(mockPhotoUpdate);
-        await Bun.sleep(100);
+        // Wait for storeImage to have been called (it will throw, caught internally)
+        await waitFor(() => (mockStoreImage as any).mock.calls.length >= 1);
 
         // Should NOT throw or crash — error is caught internally
         expect(received).toHaveLength(0);
