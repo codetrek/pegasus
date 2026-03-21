@@ -15,12 +15,12 @@ export async function waitFor(
   interval = 5,
 ): Promise<void> {
   const deadline = Date.now() + timeout;
-  while (true) {
-    const result = await condition();
-    if (result) return;
-    if (Date.now() >= deadline) {
-      throw new Error(`waitFor timed out after ${timeout}ms`);
-    }
+  // Check immediately first
+  if (await condition()) return;
+  // Then poll with sleep
+  while (Date.now() < deadline) {
     await Bun.sleep(interval);
+    if (await condition()) return;
   }
+  throw new Error(`waitFor timed out after ${timeout}ms`);
 }
