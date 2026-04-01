@@ -1676,5 +1676,334 @@ describe("file tools", () => {
       const countLines = output.split("\n").filter(l => l !== "" && !l.startsWith("["));
       expect(countLines).toHaveLength(2);
     }, 10_000);
+
+    it("should skip binary files in JS fallback line-by-line mode", async () => {
+      const context = { agentId: "test-task-id" };
+      const binaryFile = `${testDir}/fb-binary.dat`;
+      // Create a file with null bytes (binary)
+      const buf = Buffer.alloc(100);
+      buf[10] = 0; // null byte → binary
+      buf.write("searchable_text", 20);
+      await Bun.write(binaryFile, buf);
+
+      const textFile = `${testDir}/fb-text.txt`;
+      await Bun.write(textFile, "searchable_text here");
+
+      const result = await grep_files.execute({
+        pattern: "searchable_text",
+        path: testDir,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      // Should find in text file but not binary
+      expect(output).toContain("fb-text.txt");
+      expect(output).not.toContain("fb-binary.dat");
+    }, 10_000);
+
+    it("should skip binary files in JS fallback multiline mode", async () => {
+      const context = { agentId: "test-task-id" };
+      const binaryFile = `${testDir}/fb-ml-binary.dat`;
+      const buf = Buffer.alloc(100);
+      buf[10] = 0;
+      buf.write("ml_binary_target", 20);
+      await Bun.write(binaryFile, buf);
+
+      const textFile = `${testDir}/fb-ml-text.txt`;
+      await Bun.write(textFile, "ml\nbinary_target");
+
+      const result = await grep_files.execute({
+        pattern: "ml.binary_target",
+        path: testDir,
+        multiline: true,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("fb-ml-text.txt");
+      expect(output).not.toContain("fb-ml-binary.dat");
+    }, 10_000);
+
+    it("should handle zero-length regex matches in multiline mode", async () => {
+      const context = { agentId: "test-task-id" };
+      const filePath = `${testDir}/fb-zero-match.txt`;
+      await Bun.write(filePath, "abc");
+
+      // Pattern that can produce zero-length match
+      const result = await grep_files.execute({
+        pattern: "a?",
+        path: filePath,
+        multiline: true,
+      }, context);
+
+      expect(result.success).toBe(true);
+    }, 10_000);
+
+    it("should respect .gitignore patterns in JS fallback directory search", async () => {
+      const context = { agentId: "test-task-id" };
+      const searchDir = `${testDir}/gitignore-test`;
+      await mkdir(`${searchDir}/included`, { recursive: true });
+      await mkdir(`${searchDir}/ignored-dir`, { recursive: true });
+
+      // Create .gitignore
+      await Bun.write(`${searchDir}/.gitignore`, "ignored-dir/\nignored-file.txt\n");
+      // Create files
+      await Bun.write(`${searchDir}/included/good.txt`, "gitignore_target");
+      await Bun.write(`${searchDir}/ignored-dir/bad.txt`, "gitignore_target");
+      await Bun.write(`${searchDir}/ignored-file.txt`, "gitignore_target");
+      await Bun.write(`${searchDir}/visible.txt`, "gitignore_target");
+
+      const result = await grep_files.execute({
+        pattern: "gitignore_target",
+        path: searchDir,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("good.txt");
+      expect(output).toContain("visible.txt");
+      // gitignored files should be skipped
+      expect(output).not.toContain("ignored-dir");
+      expect(output).not.toContain("ignored-file.txt");
+    }, 10_000);
+
+    it("should skip SKIP_DIRS like node_modules in JS fallback", async () => {
+      const context = { agentId: "test-task-id" };
+      const searchDir = `${testDir}/skipdir-test`;
+      await mkdir(`${searchDir}/node_modules`, { recursive: true });
+      await mkdir(`${searchDir}/src`, { recursive: true });
+
+      await Bun.write(`${searchDir}/node_modules/pkg.txt`, "skipdir_target");
+      await Bun.write(`${searchDir}/src/app.txt`, "skipdir_target");
+
+      const result = await grep_files.execute({
+        pattern: "skipdir_target",
+        path: searchDir,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("app.txt");
+      expect(output).not.toContain("node_modules");
+    }, 10_000);
+
+    it("should handle include filter with {ts,js} alternation via globToRegex", async () => {
+      const context = { agentId: "test-task-id" };
+      await Bun.write(`${testDir}/fb-alt.ts`, "alt_target");
+      await Bun.write(`${testDir}/fb-alt.js`, "alt_target");
+      await Bun.write(`${testDir}/fb-alt.py`, "alt_target");
+
+      const result = await grep_files.execute({
+        pattern: "alt_target",
+        path: testDir,
+        include: "*.{ts,js}",
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("fb-alt.ts");
+      expect(output).toContain("fb-alt.js");
+      expect(output).not.toContain("fb-alt.py");
+    }, 10_000);
+
+    it("should handle streaming with remaining buffer (last line without newline)", async () => {
+      const context = { agentId: "test-task-id" };
+      const filePath = `${testDir}/fb-noeol.txt`;
+      // File without trailing newline
+      await Bun.write(filePath, "line1\nfb_noeol_match");
+
+      const result = await grep_files.execute({
+        pattern: "fb_noeol_match",
+        path: filePath,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("2:fb_noeol_match");
+    }, 10_000);
+
+    it("should handle context_lines with remaining buffer match at EOF", async () => {
+      const context = { agentId: "test-task-id" };
+      const filePath = `${testDir}/fb-ctx-eof.txt`;
+      await Bun.write(filePath, "before\nFB_CTX_EOF_MATCH");
+
+      const result = await grep_files.execute({
+        pattern: "FB_CTX_EOF_MATCH",
+        path: filePath,
+        context_lines: 1,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toContain("-1-before");
+      expect(output).toContain(":2:FB_CTX_EOF_MATCH");
+    }, 10_000);
+
+    it("should handle multiline match > 200 chars truncation", async () => {
+      const context = { agentId: "test-task-id" };
+      const filePath = `${testDir}/fb-ml-long.txt`;
+      const longContent = "start_" + "x".repeat(300) + "_end";
+      await Bun.write(filePath, longContent);
+
+      const result = await grep_files.execute({
+        pattern: "start_x+_end",
+        path: filePath,
+        multiline: true,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      // Match should be truncated to 200 chars + "..."
+      expect(output).toContain("...");
+    }, 10_000);
+  });
+
+  // ── grep_files rg parser edge cases ──
+
+  describe("grep_files rg parser paths", () => {
+    let originalRgState: boolean;
+
+    beforeEach(async () => {
+      originalRgState = isRgAvailable();
+    });
+
+    afterEach(async () => {
+      _resetRgCache(originalRgState);
+    });
+
+    it("should handle rg content mode with no context (no leading colon)", async () => {
+      if (!isRgAvailable()) return;
+
+      const context = { agentId: "test-task-id" };
+      await Bun.write(`${testDir}/rg-nocol.txt`, "no_ctx_match_line\nother");
+
+      const result = await grep_files.execute({
+        pattern: "no_ctx_match_line",
+        path: `${testDir}/rg-nocol.txt`,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      // Without context, match format is "lineNum:content" (no leading colon)
+      expect(output).toContain("1:no_ctx_match_line");
+    }, 10_000);
+
+    it("should handle rg with empty output (no matches)", async () => {
+      if (!isRgAvailable()) return;
+
+      const context = { agentId: "test-task-id" };
+      await Bun.write(`${testDir}/rg-empty.txt`, "nothing here");
+
+      const result = await grep_files.execute({
+        pattern: "zzzzz_absolutely_not_found",
+        path: `${testDir}/rg-empty.txt`,
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toBe("");
+    }, 10_000);
+
+    it("should handle rg count mode with empty output", async () => {
+      if (!isRgAvailable()) return;
+
+      const context = { agentId: "test-task-id" };
+      await Bun.write(`${testDir}/rg-cnt-empty.txt`, "nothing here");
+
+      const result = await grep_files.execute({
+        pattern: "zzzzz_not_found_count",
+        path: `${testDir}/rg-cnt-empty.txt`,
+        output_mode: "count",
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toBe("");
+    }, 10_000);
+
+    it("should handle rg files_with_matches with empty output", async () => {
+      if (!isRgAvailable()) return;
+
+      const context = { agentId: "test-task-id" };
+      await Bun.write(`${testDir}/rg-fwm-empty.txt`, "nothing here");
+
+      const result = await grep_files.execute({
+        pattern: "zzzzz_not_found_fwm",
+        path: `${testDir}/rg-fwm-empty.txt`,
+        output_mode: "files_with_matches",
+      }, context);
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      expect(output).toBe("");
+    }, 10_000);
+  });
+
+  // ── write_file parent directory creation ──
+
+  describe("write_file parent directory creation", () => {
+    it("should create parent directories automatically", async () => {
+      const context = { agentId: "test-task-id" };
+      const deepPath = `${testDir}/deep/nested/dir/file.txt`;
+
+      const result = await write_file.execute({
+        path: deepPath,
+        content: "deep content",
+      }, context);
+
+      expect(result.success).toBe(true);
+      const content = await Bun.file(deepPath).text();
+      expect(content).toBe("deep content");
+    }, 10_000);
+  });
+
+  // ── list_files limit clamping ──
+
+  describe("list_files limit clamping", () => {
+    it("should clamp limit to minimum 1", async () => {
+      const context = { agentId: "test-task-id" };
+      await Bun.write(`${testDir}/clamp.txt`, "content");
+
+      const result = await list_files.execute(
+        { path: testDir, limit: 0 },
+        context,
+      );
+
+      expect(result.success).toBe(true);
+      const output = result.result as string;
+      // With limit clamped to 1, should show at most 1 entry
+      const lines = output.split("\n").filter(l => l !== "" && !l.startsWith("["));
+      expect(lines.length).toBeLessThanOrEqual(1);
+    }, 10_000);
+
+    it("should clamp limit to maximum 2000", async () => {
+      const context = { agentId: "test-task-id" };
+      await Bun.write(`${testDir}/clamp-max.txt`, "content");
+
+      const result = await list_files.execute(
+        { path: testDir, limit: 9999 },
+        context,
+      );
+
+      expect(result.success).toBe(true);
+      // Should not error — limit silently clamped
+    }, 10_000);
+  });
+
+  // ── glob_files abort signal ──
+
+  describe("glob_files edge cases", () => {
+    it("should use cwd when cwd param is not provided", async () => {
+      const context = { agentId: "test-task-id" };
+
+      // Just run without cwd — should use process.cwd()
+      const result = await glob_files.execute(
+        { pattern: "*.nonexistent_glob_test_ext_xyz" },
+        context,
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.result).toBe("");
+    }, 10_000);
   });
 });

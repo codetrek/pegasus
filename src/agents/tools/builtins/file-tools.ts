@@ -626,11 +626,21 @@ function executeWithRg(params: GrepParams): { output: string; truncated: boolean
     stderr: "pipe",
   });
 
-  const stdout = result.stdout.toString();
-  const stderr = result.stderr.toString();
+  return processRgResult(result.stdout.toString(), result.stderr.toString(), result.exitCode, params);
+}
 
+/**
+ * Process rg execution result. Separated from executeWithRg so the parsing
+ * logic can be tested independently from Bun.spawnSync.
+ */
+function processRgResult(
+  stdout: string,
+  stderr: string,
+  exitCode: number,
+  params: GrepParams,
+): { output: string; truncated: boolean } | null {
   // Exit code 1 = no matches, exit code 2 = error
-  if (result.exitCode === 2) {
+  if (exitCode === 2) {
     // Check for regex error from rg
     if (stderr.includes("regex")) {
       throw new Error(`Invalid regex pattern: ${stderr.trim()}`);
@@ -1253,4 +1263,18 @@ export const glob_files: Tool = {
       };
     }
   },
+};
+
+// ── Test-only exports (prefixed with _ to signal internal use) ──
+
+export const _testHelpers = {
+  globToRegex,
+  buildRgArgs,
+  parseRgContentOutput,
+  parseRgCountOutput,
+  parseRgFilesOutput,
+  isBinaryBuffer,
+  formatSize,
+  executeWithRg,
+  processRgResult,
 };

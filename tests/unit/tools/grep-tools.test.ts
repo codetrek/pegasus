@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { grep_files, _resetRgCache, isRgAvailable, getMaxFileSize } from "../../../src/agents/tools/builtins/file-tools.ts";
+import { grep_files, _resetRgCache, isRgAvailable, getMaxFileSize, _testHelpers } from "../../../src/agents/tools/builtins/file-tools.ts";
 import { rm, mkdir } from "node:fs/promises";
 import { SettingsSchema, setSettings, resetSettings } from "../../../src/infra/config.ts";
 
@@ -1036,4 +1036,540 @@ describe("grep_files JS fallback — streaming and maxFileSize", () => {
     expect(output).toContain("under-limit.txt");
     expect(output).not.toContain("over-limit.txt");
   }, 10000);
+});
+
+// ── Internal helper function tests ──
+
+describe("globToRegex", () => {
+  const { globToRegex } = _testHelpers;
+
+  it("should match *.ts files", () => {
+    const re = globToRegex("*.ts");
+    expect(re.test("file.ts")).toBe(true);
+    expect(re.test("file.js")).toBe(false);
+    expect(re.test("deep/path/file.ts")).toBe(true);
+  });
+
+  it("should handle {a,b} alternation", () => {
+    const re = globToRegex("*.{ts,js}");
+    expect(re.test("file.ts")).toBe(true);
+    expect(re.test("file.js")).toBe(true);
+    expect(re.test("file.py")).toBe(false);
+  });
+
+  it("should escape regex special chars like dots", () => {
+    const re = globToRegex("*.config.ts");
+    expect(re.test("app.config.ts")).toBe(true);
+    expect(re.test("appXconfigXts")).toBe(false);
+  });
+
+  it("should handle simple wildcard", () => {
+    const re = globToRegex("test*");
+    expect(re.test("test.ts")).toBe(true);
+    expect(re.test("testfile")).toBe(true);
+    expect(re.test("notest")).toBe(true); // matches at end
+  });
+});
+
+describe("buildRgArgs", () => {
+  const { buildRgArgs } = _testHelpers;
+
+  it("should build basic args for content mode", () => {
+    const args = buildRgArgs({
+      pattern: "test",
+      path: "/tmp/dir",
+      max_results: 50,
+      case_insensitive: false,
+      output_mode: "content",
+      multiline: false,
+    });
+    expect(args).toContain("--heading");
+    expect(args).toContain("--line-number");
+    expect(args).toContain("--no-column");
+    expect(args).toContain("--color");
+    expect(args).toContain("never");
+    expect(args).toContain("--with-filename");
+    expect(args).toContain("--");
+    expect(args).toContain("test");
+    expect(args).toContain("/tmp/dir");
+    expect(args).not.toContain("-i");
+    expect(args).not.toContain("-U");
+    expect(args).not.toContain("-l");
+    expect(args).not.toContain("-c");
+  });
+
+  it("should add -i for case_insensitive", () => {
+    const args = buildRgArgs({
+      pattern: "test",
+      path: "/tmp/dir",
+      max_results: 50,
+      case_insensitive: true,
+      output_mode: "content",
+      multiline: false,
+    });
+    expect(args).toContain("-i");
+  });
+
+  it("should add -U and --multiline-dotall for multiline", () => {
+    const args = buildRgArgs({
+      pattern: "test",
+      path: "/tmp/dir",
+      max_results: 50,
+      case_insensitive: false,
+      output_mode: "content",
+      multiline: true,
+    });
+    expect(args).toContain("-U");
+    expect(args).toContain("--multiline-dotall");
+  });
+
+  it("should add --glob for include pattern", () => {
+    const args = buildRgArgs({
+      pattern: "test",
+      path: "/tmp/dir",
+      include: "*.ts",
+      max_results: 50,
+      case_insensitive: false,
+      output_mode: "content",
+      multiline: false,
+    });
+    expect(args).toContain("--glob");
+    expect(args).toContain("*.ts");
+  });
+
+  it("should add -l for files_with_matches", () => {
+    const args = buildRgArgs({
+      pattern: "test",
+      path: "/tmp/dir",
+      max_results: 50,
+      case_insensitive: false,
+      output_mode: "files_with_matches",
+      multiline: false,
+    });
+    expect(args).toContain("-l");
+    expect(args).not.toContain("-c");
+  });
+
+  it("should add -c for count mode", () => {
+    const args = buildRgArgs({
+      pattern: "test",
+      path: "/tmp/dir",
+      max_results: 50,
+      case_insensitive: false,
+      output_mode: "count",
+      multiline: false,
+    });
+    expect(args).toContain("-c");
+    expect(args).not.toContain("-l");
+  });
+
+  it("should add -C for context_lines in content mode", () => {
+    const args = buildRgArgs({
+      pattern: "test",
+      path: "/tmp/dir",
+      max_results: 50,
+      case_insensitive: false,
+      output_mode: "content",
+      context_lines: 3,
+      multiline: false,
+    });
+    expect(args).toContain("-C");
+    expect(args).toContain("3");
+  });
+
+  it("should not add -C when context_lines is 0", () => {
+    const args = buildRgArgs({
+      pattern: "test",
+      path: "/tmp/dir",
+      max_results: 50,
+      case_insensitive: false,
+      output_mode: "content",
+      context_lines: 0,
+      multiline: false,
+    });
+    expect(args).not.toContain("-C");
+  });
+
+  it("should not add -C for non-content modes even with context_lines", () => {
+    const args = buildRgArgs({
+      pattern: "test",
+      path: "/tmp/dir",
+      max_results: 50,
+      case_insensitive: false,
+      output_mode: "files_with_matches",
+      context_lines: 3,
+      multiline: false,
+    });
+    expect(args).not.toContain("-C");
+  });
+});
+
+describe("parseRgContentOutput", () => {
+  const { parseRgContentOutput } = _testHelpers;
+
+  it("should return empty for empty input", () => {
+    const result = parseRgContentOutput("", 50, false);
+    expect(result.lines).toEqual([]);
+    expect(result.totalMatches).toBe(0);
+    expect(result.truncated).toBe(false);
+  });
+
+  it("should return empty for whitespace-only input", () => {
+    const result = parseRgContentOutput("   \n  \n", 50, false);
+    expect(result.lines).toEqual([]);
+    expect(result.totalMatches).toBe(0);
+  });
+
+  it("should parse single file with matches (no context)", () => {
+    const raw = "file.txt\n1:first match\n3:second match\n";
+    const result = parseRgContentOutput(raw, 50, false);
+    expect(result.lines).toContain("=== file.txt ===");
+    expect(result.lines).toContain("1:first match");
+    expect(result.lines).toContain("3:second match");
+    expect(result.totalMatches).toBe(2);
+    expect(result.truncated).toBe(false);
+  });
+
+  it("should parse single file with matches (with context)", () => {
+    const raw = "file.txt\n1-context before\n2:match line\n3-context after\n";
+    const result = parseRgContentOutput(raw, 50, true);
+    expect(result.lines).toContain("=== file.txt ===");
+    expect(result.lines).toContain(":2:match line");
+    expect(result.lines).toContain("-1-context before");
+    expect(result.lines).toContain("-3-context after");
+    expect(result.totalMatches).toBe(1);
+  });
+
+  it("should handle block separators (--)", () => {
+    const raw = "file.txt\n2:match1\n--\n10:match2\n";
+    const result = parseRgContentOutput(raw, 50, false);
+    expect(result.lines).toContain("--");
+    expect(result.totalMatches).toBe(2);
+  });
+
+  it("should handle multiple files separated by blank lines", () => {
+    const raw = "file1.txt\n1:match1\n\nfile2.txt\n2:match2\n";
+    const result = parseRgContentOutput(raw, 50, false);
+    expect(result.lines).toContain("=== file1.txt ===");
+    expect(result.lines).toContain("=== file2.txt ===");
+    expect(result.lines).toContain("1:match1");
+    expect(result.lines).toContain("2:match2");
+    expect(result.totalMatches).toBe(2);
+    // Should have blank line between files
+    expect(result.lines).toContain("");
+  });
+
+  it("should truncate at maxResults", () => {
+    const raw = "file.txt\n1:match1\n2:match2\n3:match3\n4:match4\n5:match5\n";
+    const result = parseRgContentOutput(raw, 3, false);
+    expect(result.totalMatches).toBe(5);
+    expect(result.truncated).toBe(true);
+    // Should only include 3 match lines
+    const matchLines = result.lines.filter(l => l.match(/^\d+:/));
+    expect(matchLines).toHaveLength(3);
+  });
+
+  it("should suppress context lines after hitting limit", () => {
+    const raw = "file.txt\n1-before\n2:match1\n3-after\n--\n5-before2\n6:match2\n7-after2\n";
+    const result = parseRgContentOutput(raw, 1, true);
+    expect(result.totalMatches).toBe(2);
+    expect(result.truncated).toBe(true);
+    // First match and its context should be included
+    expect(result.lines).toContain(":2:match1");
+    expect(result.lines).toContain("-1-before");
+    expect(result.lines).toContain("-3-after");
+  });
+
+  it("should handle same file appearing twice (no duplicate header)", () => {
+    const raw = "file.txt\n1:match\n";
+    const result = parseRgContentOutput(raw, 50, false);
+    const headerCount = result.lines.filter(l => l === "=== file.txt ===").length;
+    expect(headerCount).toBe(1);
+  });
+});
+
+describe("parseRgCountOutput", () => {
+  const { parseRgCountOutput } = _testHelpers;
+
+  it("should return empty array for empty input", () => {
+    expect(parseRgCountOutput("", 50)).toEqual([]);
+  });
+
+  it("should return empty array for whitespace-only input", () => {
+    expect(parseRgCountOutput("   ", 50)).toEqual([]);
+  });
+
+  it("should parse count lines", () => {
+    const raw = "file1.txt:3\nfile2.txt:1\n";
+    const result = parseRgCountOutput(raw, 50);
+    expect(result).toEqual(["file1.txt:3", "file2.txt:1"]);
+  });
+
+  it("should respect maxResults", () => {
+    const raw = "a.txt:1\nb.txt:2\nc.txt:3\n";
+    const result = parseRgCountOutput(raw, 2);
+    expect(result).toHaveLength(2);
+    expect(result).toEqual(["a.txt:1", "b.txt:2"]);
+  });
+
+  it("should filter out empty lines", () => {
+    const raw = "a.txt:1\n\nb.txt:2\n\n";
+    const result = parseRgCountOutput(raw, 50);
+    expect(result).toEqual(["a.txt:1", "b.txt:2"]);
+  });
+});
+
+describe("parseRgFilesOutput", () => {
+  const { parseRgFilesOutput } = _testHelpers;
+
+  it("should return empty array for empty input", () => {
+    expect(parseRgFilesOutput("", 50)).toEqual([]);
+  });
+
+  it("should return empty array for whitespace-only input", () => {
+    expect(parseRgFilesOutput("   ", 50)).toEqual([]);
+  });
+
+  it("should parse file paths", () => {
+    const raw = "/tmp/file1.txt\n/tmp/file2.txt\n";
+    const result = parseRgFilesOutput(raw, 50);
+    expect(result).toEqual(["/tmp/file1.txt", "/tmp/file2.txt"]);
+  });
+
+  it("should respect maxResults", () => {
+    const raw = "a.txt\nb.txt\nc.txt\n";
+    const result = parseRgFilesOutput(raw, 2);
+    expect(result).toHaveLength(2);
+  });
+
+  it("should filter out empty lines", () => {
+    const raw = "a.txt\n\nb.txt\n";
+    const result = parseRgFilesOutput(raw, 50);
+    expect(result).toEqual(["a.txt", "b.txt"]);
+  });
+});
+
+describe("isBinaryBuffer", () => {
+  const { isBinaryBuffer } = _testHelpers;
+
+  it("should detect binary content (null bytes)", () => {
+    const buf = new Uint8Array([0x48, 0x65, 0x6c, 0x00, 0x6f]);
+    expect(isBinaryBuffer(buf)).toBe(true);
+  });
+
+  it("should return false for text content", () => {
+    const buf = new Uint8Array([0x48, 0x65, 0x6c, 0x6c, 0x6f]); // "Hello"
+    expect(isBinaryBuffer(buf)).toBe(false);
+  });
+
+  it("should return false for empty buffer", () => {
+    const buf = new Uint8Array(0);
+    expect(isBinaryBuffer(buf)).toBe(false);
+  });
+
+  it("should only check first 8KB", () => {
+    // Create buffer with null byte after 8KB
+    const buf = new Uint8Array(10000);
+    buf.fill(0x41); // 'A'
+    buf[9000] = 0; // null byte after 8KB
+    expect(isBinaryBuffer(buf)).toBe(false); // should not detect it
+  });
+
+  it("should detect null byte within first 8KB", () => {
+    const buf = new Uint8Array(10000);
+    buf.fill(0x41);
+    buf[8000] = 0; // null byte within 8KB
+    expect(isBinaryBuffer(buf)).toBe(true);
+  });
+});
+
+describe("formatSize", () => {
+  const { formatSize } = _testHelpers;
+
+  it("should format bytes for small sizes", () => {
+    expect(formatSize(0)).toBe("0B");
+    expect(formatSize(100)).toBe("100B");
+    expect(formatSize(1023)).toBe("1023B");
+  });
+
+  it("should format KB for medium sizes", () => {
+    expect(formatSize(1024)).toBe("1.0K");
+    expect(formatSize(2048)).toBe("2.0K");
+    expect(formatSize(1024 * 500)).toBe("500.0K");
+  });
+
+  it("should format MB for large sizes", () => {
+    expect(formatSize(1024 * 1024)).toBe("1.0M");
+    expect(formatSize(1024 * 1024 * 5)).toBe("5.0M");
+  });
+});
+
+describe("executeWithRg", () => {
+  const { executeWithRg } = _testHelpers;
+
+  beforeEach(async () => {
+    await rm(testDir, { recursive: true, force: true }).catch(() => {});
+    await mkdir(testDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true }).catch(() => {});
+  });
+
+  it("should return results for content mode", () => {
+    if (!isRgAvailable()) return;
+
+    const filePath = `${testDir}/rg-exec-test.txt`;
+    Bun.spawnSync(["bash", "-c", `echo "hello rg_exec_target" > "${filePath}"`]);
+
+    const result = executeWithRg({
+      pattern: "rg_exec_target",
+      path: filePath,
+      max_results: 50,
+      case_insensitive: false,
+      output_mode: "content",
+      multiline: false,
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.output).toContain("rg_exec_target");
+  });
+
+  it("should handle no matches (exit code 1)", () => {
+    if (!isRgAvailable()) return;
+
+    const filePath = `${testDir}/rg-exec-nomatch.txt`;
+    Bun.spawnSync(["bash", "-c", `echo "no match content" > "${filePath}"`]);
+
+    const result = executeWithRg({
+      pattern: "zzzzz_not_found_xyz",
+      path: filePath,
+      max_results: 50,
+      case_insensitive: false,
+      output_mode: "content",
+      multiline: false,
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.output).toBe("");
+  });
+});
+
+describe("processRgResult", () => {
+  const { processRgResult } = _testHelpers;
+
+  const baseParams = {
+    pattern: "test",
+    path: "/tmp",
+    max_results: 50,
+    case_insensitive: false,
+    output_mode: "content" as const,
+    multiline: false,
+  };
+
+  it("should return null for rg error (exit code 2, non-regex)", () => {
+    const result = processRgResult("", "some rg error", 2, baseParams);
+    expect(result).toBeNull();
+  });
+
+  it("should throw for regex error from rg (exit code 2)", () => {
+    expect(() => {
+      processRgResult("", "error: regex parse error", 2, baseParams);
+    }).toThrow("Invalid regex pattern");
+  });
+
+  it("should handle content mode with matches", () => {
+    const stdout = "file.txt\n1:match line\n";
+    const result = processRgResult(stdout, "", 0, baseParams);
+
+    expect(result).not.toBeNull();
+    expect(result!.output).toContain("=== file.txt ===");
+    expect(result!.output).toContain("1:match line");
+    expect(result!.truncated).toBe(false);
+  });
+
+  it("should handle content mode with context", () => {
+    const stdout = "file.txt\n1-before\n2:match\n3-after\n";
+    const params = { ...baseParams, context_lines: 1 };
+    const result = processRgResult(stdout, "", 0, params);
+
+    expect(result).not.toBeNull();
+    expect(result!.output).toContain(":2:match");
+    expect(result!.output).toContain("-1-before");
+    expect(result!.output).toContain("-3-after");
+  });
+
+  it("should handle content mode with truncation", () => {
+    const stdout = "file.txt\n1:m1\n2:m2\n3:m3\n4:m4\n5:m5\n";
+    const params = { ...baseParams, max_results: 3 };
+    const result = processRgResult(stdout, "", 0, params);
+
+    expect(result).not.toBeNull();
+    expect(result!.truncated).toBe(true);
+    expect(result!.output).toContain("total matches, showing first 3");
+  });
+
+  it("should handle files_with_matches mode", () => {
+    const stdout = "/tmp/file1.txt\n/tmp/file2.txt\n";
+    const params = { ...baseParams, output_mode: "files_with_matches" as const };
+    const result = processRgResult(stdout, "", 0, params);
+
+    expect(result).not.toBeNull();
+    expect(result!.output).toBe("/tmp/file1.txt\n/tmp/file2.txt");
+    expect(result!.truncated).toBe(false);
+  });
+
+  it("should handle count mode", () => {
+    const stdout = "file1.txt:3\nfile2.txt:1\n";
+    const params = { ...baseParams, output_mode: "count" as const };
+    const result = processRgResult(stdout, "", 0, params);
+
+    expect(result).not.toBeNull();
+    expect(result!.output).toBe("file1.txt:3\nfile2.txt:1");
+    expect(result!.truncated).toBe(false);
+  });
+
+  it("should handle empty output (no matches, exit code 1)", () => {
+    const result = processRgResult("", "", 1, baseParams);
+
+    expect(result).not.toBeNull();
+    expect(result!.output).toBe("");
+    expect(result!.truncated).toBe(false);
+  });
+
+  it("should handle empty output for files_with_matches", () => {
+    const params = { ...baseParams, output_mode: "files_with_matches" as const };
+    const result = processRgResult("", "", 1, params);
+
+    expect(result).not.toBeNull();
+    expect(result!.output).toBe("");
+  });
+
+  it("should handle empty output for count mode", () => {
+    const params = { ...baseParams, output_mode: "count" as const };
+    const result = processRgResult("", "", 1, params);
+
+    expect(result).not.toBeNull();
+    expect(result!.output).toBe("");
+  });
+
+  it("should handle multiple files in content mode", () => {
+    const stdout = "file1.txt\n1:match1\n\nfile2.txt\n2:match2\n";
+    const result = processRgResult(stdout, "", 0, baseParams);
+
+    expect(result).not.toBeNull();
+    expect(result!.output).toContain("=== file1.txt ===");
+    expect(result!.output).toContain("=== file2.txt ===");
+  });
+
+  it("should handle block separators (--) in content mode with context", () => {
+    const stdout = "file.txt\n1-ctx\n2:match1\n3-ctx\n--\n8-ctx\n9:match2\n10-ctx\n";
+    const params = { ...baseParams, context_lines: 1 };
+    const result = processRgResult(stdout, "", 0, params);
+
+    expect(result).not.toBeNull();
+    expect(result!.output).toContain("--");
+    expect(result!.output).toContain(":2:match1");
+    expect(result!.output).toContain(":9:match2");
+  });
 });
