@@ -68,6 +68,7 @@ import { sanitizeForPrompt } from "../infra/sanitize.ts";
 import { formatNumber, formatToolStats } from "../infra/format.ts";
 import { formatSize, buildSystemPrompt } from "./prompts/index.ts";
 import type { Reflection } from "./reflection.ts";
+import type { TelemetryCollector } from "../telemetry/collector.ts";
 import type { SubAgentTypeRegistry } from "./subagents/registry.ts";
 import { BackgroundTaskManager, MAX_TOOL_TIMEOUT } from "./tools/background.ts";
 import { PendingTracker } from "./pending-tracker.ts";
@@ -167,6 +168,8 @@ export interface AgentDeps {
   subagentConfig?: SubagentConfig;
   /** Optional shared AppStats for LLM/tool/subagent tracking. */
   appStats?: AppStats;
+  /** Optional TelemetryCollector for trace/metrics recording. */
+  telemetry?: TelemetryCollector;
 }
 
 // ── Helpers ──────────────────────────────────────────
@@ -311,6 +314,9 @@ export class Agent {
   /** Per-tool-name call stats: { ok, fail } counts. */
   private _toolStats = new Map<string, { ok: number; fail: number }>();
 
+  /** Pending traceId to assign to next created execution state. */
+  private _pendingTraceId?: string;
+
   /** Task IDs that should persist messages incrementally (run with persistSession=true). */
   private _persistingTasks = new Set<string>();
 
@@ -337,6 +343,9 @@ export class Agent {
 
   /** Optional shared AppStats for LLM/tool/subagent tracking. */
   protected _appStats: AppStats | null = null;
+
+  /** Optional TelemetryCollector for trace/metrics recording. */
+  protected _telemetry: TelemetryCollector | null = null;
 
   constructor(deps: AgentDeps) {
     this.agentId = deps.agentId;
@@ -374,6 +383,7 @@ export class Agent {
     this._reflection = deps.reflectionOrchestrator;
     this._subagentConfig = deps.subagentConfig;
     this._appStats = deps.appStats ?? null;
+    this._telemetry = deps.telemetry ?? null;
   }
 
   // ═══════════════════════════════════════════════════
@@ -605,7 +615,7 @@ export class Agent {
   protected async onStop(): Promise<void> {}
 
   /** Accumulate token usage from each LLM call. Subclasses may override but should call super. */
-  protected async onLLMUsage(result: GenerateTextResult): Promise<void> {
+  protected async onLLMUsage(result: GenerateTextResult, durationMs?: number): Promise<void> {
     this._totalPromptTokens += result.usage.promptTokens ?? 0;
     this._totalCacheReadTokens += result.usage.cacheReadTokens ?? 0;
     this._totalOutputTokens += result.usage.completionTokens ?? 0;
@@ -616,8 +626,36 @@ export class Agent {
         cacheReadTokens: result.usage.cacheReadTokens ?? 0,
         cacheWriteTokens: result.usage.cacheWriteTokens ?? 0,
         outputTokens: result.usage.completionTokens ?? 0,
-        latencyMs: 0,
+        latencyMs: durationMs ?? 0,
       });
+    }
+
+    // Telemetry: record LLM call span
+    if (this._telemetry) {
+      const state = this.subagentStates.get(this.agentId);
+      const traceId = state?.traceId;
+      if (traceId) {
+        this._telemetry.recordSpan({
+          traceId,
+          spanId: shortId(),
+          parentSpanId: state?.currentSpanId ?? null,
+          name: "llm.call",
+          kind: "llm",
+          startMs: Date.now() - (durationMs ?? 0),
+          durationMs: durationMs ?? 0,
+          status: "ok",
+          attributes: {
+            model: this.model.modelId,
+            promptTokens: result.usage.promptTokens ?? 0,
+            outputTokens: result.usage.completionTokens ?? 0,
+            cacheReadTokens: result.usage.cacheReadTokens ?? 0,
+            cacheWriteTokens: result.usage.cacheWriteTokens ?? 0,
+            latencyMs: durationMs ?? 0,
+            agentId: this.agentId,
+            iteration: state?.iteration ?? 0,
+          },
+        });
+      }
     }
   }
 
@@ -691,6 +729,10 @@ export class Agent {
     if (!ctx.backgroundManager) {
       ctx.backgroundManager = this._backgroundManager;
     }
+    // Auto-inject telemetry collector for telemetry_query tool
+    if (this._telemetry) {
+      (ctx as any)._telemetryCollector = this._telemetry;
+    }
     return ctx;
   }
 
@@ -727,6 +769,8 @@ export class Agent {
     const tools = this.getTools();
 
     try {
+      // Telemetry: time LLM call (after beforeLLMCall to exclude compaction)
+      const llmStartMs = Date.now();
       const result = await this.model.generate({
         system: this.buildSystemPrompt(agentId),
         messages: state.messages,
@@ -735,12 +779,13 @@ export class Agent {
         agentId: this.agentId,
         requestId: shortId(),
       });
+      const llmDurationMs = Date.now() - llmStartMs;
 
       state.iteration++;
       // Track actual prompt token count for accurate compaction decisions
       state.lastPromptTokens =
         (result.usage.promptTokens ?? 0) + (result.usage.cacheReadTokens ?? 0);
-      await this.onLLMUsage(result);
+      await this.onLLMUsage(result, llmDurationMs);
       this._overflowRetryCount = 0; // Reset on successful LLM call
 
       // Guard: detect extreme repetition loops (e.g. same phrase repeated 50+ times)
@@ -880,6 +925,30 @@ export class Agent {
       // Record AppStats tool call
       if (this._appStats) {
         recordToolCall(this._appStats, result.success);
+      }
+
+      // Telemetry: record tool span
+      if (this._telemetry && state?.traceId) {
+        const isMemory = tc.name.startsWith("memory_");
+        const kind = isMemory ? "memory" as const : "tool" as const;
+        const spanName = isMemory ? `memory.${tc.name.replace("memory_", "")}` : `tool.${tc.name}`;
+        this._telemetry.recordSpan({
+          traceId: state.traceId,
+          spanId: shortId(),
+          parentSpanId: state.currentSpanId ?? null,
+          name: spanName,
+          kind,
+          startMs: result.startedAt ?? Date.now(),
+          durationMs: result.durationMs ?? 0,
+          status: result.success ? "ok" : "error",
+          errorMessage: result.success ? undefined : result.error,
+          attributes: {
+            toolName: tc.name,
+            success: result.success,
+            durationMs: result.durationMs ?? 0,
+            agentId: state.agentId,
+          },
+        });
       }
 
       // Record per-tool-name stats
@@ -1082,6 +1151,11 @@ export class Agent {
       maxIterations: opts?.maxIterations ?? this.maxIterations,
       ...opts,
     });
+    // Apply pending traceId from _handleMessage
+    if (this._pendingTraceId) {
+      state.traceId = this._pendingTraceId;
+      this._pendingTraceId = undefined;
+    }
     this.subagentStates.set(agentId, state);
     return state;
   }
@@ -1100,6 +1174,8 @@ export class Agent {
     const state = this.subagentStates.get(agentId);
     if (!state) return;
 
+    const compactStartMs = Date.now();
+    const beforeMessages = state.messages.length;
     const preCompactMessages = [...state.messages];
 
     let summary: string;
@@ -1127,6 +1203,25 @@ export class Agent {
       "state_compacted",
     );
 
+    // Telemetry: record compact span
+    if (this._telemetry && state.traceId) {
+      this._telemetry.recordSpan({
+        traceId: state.traceId,
+        spanId: shortId(),
+        parentSpanId: state.currentSpanId ?? null,
+        name: "agent.compact",
+        kind: "agent",
+        startMs: compactStartMs,
+        durationMs: Date.now() - compactStartMs,
+        status: "ok",
+        attributes: {
+          agentId,
+          beforeMessages,
+          afterMessages: state.messages.length,
+        },
+      });
+    }
+
     await this.onCompacted(preCompactMessages);
   }
 
@@ -1143,7 +1238,8 @@ export class Agent {
 
     // Fire-and-forget reflection on the archived session
     if (this._reflection?.shouldReflect(preCompactMessages)) {
-      this._reflection.runReflection(this.agentId, preCompactMessages).catch((err) => {
+      const state = this.subagentStates.get(this.agentId);
+      this._reflection.runReflection(this.agentId, preCompactMessages, state?.traceId).catch((err) => {
         logger.warn({ error: err instanceof Error ? err.message : String(err) }, "reflection_failed");
       });
     }
@@ -1216,6 +1312,14 @@ export class Agent {
 
   protected async _handleMessage(message: InboundMessage): Promise<void> {
     this.lastChannel = message.channel;
+
+    // Telemetry: propagate traceId from message metadata
+    const traceId = (message.metadata as any)?._traceId as string | undefined;
+    if (traceId) {
+      this._pendingTraceId = traceId;
+      const state = this.subagentStates.get("session");
+      if (state) state.traceId = traceId;
+    }
 
     // Sanitize input — strip control characters that could be used for prompt injection
     const text = sanitizeForPrompt(message.text.trim());

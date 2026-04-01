@@ -17,6 +17,8 @@ import { PostTaskReflector } from "./cognitive/reflect.ts";
 import { createReflectionContext } from "./cognitive/reflect.ts";
 import { computeTokenBudget, type ModelLimitsCache } from "../context/index.ts";
 import { getLogger } from "../infra/logger.ts";
+import { shortId } from "../infra/id.ts";
+import type { TelemetryCollector } from "../telemetry/collector.ts";
 
 const logger = getLogger("reflection_orchestrator");
 
@@ -27,6 +29,7 @@ export interface ReflectionDeps {
   memoryDir: string;
   settings: Settings;
   modelLimitsCache?: ModelLimitsCache;
+  telemetry?: TelemetryCollector;
 }
 
 export class Reflection {
@@ -36,6 +39,7 @@ export class Reflection {
   private readonly memoryDir: string;
   private readonly settings: Settings;
   private readonly modelLimitsCache?: ModelLimitsCache;
+  private readonly _telemetry?: TelemetryCollector;
 
   constructor(deps: ReflectionDeps) {
     this.models = deps.models;
@@ -44,6 +48,7 @@ export class Reflection {
     this.memoryDir = deps.memoryDir;
     this.settings = deps.settings;
     this.modelLimitsCache = deps.modelLimitsCache;
+    this._telemetry = deps.telemetry;
   }
 
   /**
@@ -65,7 +70,8 @@ export class Reflection {
    * Run PostTaskReflector on the archived session messages to extract
    * facts/episodes for long-term memory. Fire-and-forget.
    */
-  async runReflection(agentId: string, sessionMessages: Message[]): Promise<void> {
+  async runReflection(agentId: string, sessionMessages: Message[], traceId?: string): Promise<void> {
+    const reflectionStartMs = Date.now();
     logger.info({ agentId, messageCount: sessionMessages.length }, "reflection_start");
 
     // 1. Build a ReflectionContext from session messages
@@ -150,5 +156,25 @@ export class Reflection {
       { agentId, toolCalls: reflection.toolCallsCount, assessment: reflection.assessment },
       "reflection_complete",
     );
+
+    // Telemetry: record reflection span
+    if (this._telemetry) {
+      this._telemetry.recordSpan({
+        traceId: traceId ?? shortId(),
+        spanId: shortId(),
+        parentSpanId: null,
+        name: "reflection.run",
+        kind: "reflection",
+        startMs: reflectionStartMs,
+        durationMs: Date.now() - reflectionStartMs,
+        status: "ok",
+        attributes: {
+          agentId,
+          messageCount: sessionMessages.length,
+          toolCallsCount: reflection.toolCallsCount,
+          assessment: reflection.assessment,
+        },
+      });
+    }
   }
 }

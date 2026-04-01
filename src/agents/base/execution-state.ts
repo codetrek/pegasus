@@ -27,6 +27,10 @@ export interface AgentExecutionState {
   metadata: Record<string, unknown>;
   /** Last known prompt token count from API (promptTokens + cacheReadTokens). */
   lastPromptTokens: number;
+  /** Telemetry: trace ID for the current processing chain. */
+  traceId?: string;
+  /** Telemetry: current active span ID for parent-child relationships. */
+  currentSpanId?: string;
   /** Resolved when task finishes (for ConversationAgent await pattern). */
   onComplete?: () => void;
 }

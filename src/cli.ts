@@ -11,6 +11,7 @@ import { loadSettings } from "./infra/config-loader.ts";
 import { initLogger } from "./infra/logger.ts";
 import { ModelRegistry } from "./infra/model-registry.ts";
 import { CLIAdapter } from "./channels/cli-adapter.ts";
+import { handleSubcommand } from "./cli-commands.ts";
 
 /** Print a styled banner. */
 function printBanner(personaName: string, personaRole: string) {
@@ -61,8 +62,15 @@ export async function startCLI(): Promise<void> {
 
 // Entry point: run CLI when this file is executed directly
 if (import.meta.main) {
-  startCLI().catch((err) => {
-    console.error("Fatal error:", err);
-    process.exit(1);
+  // Check for subcommands (trace, health) before starting full REPL
+  handleSubcommand(process.argv).then((handled) => {
+    if (handled) {
+      process.exit(0);
+    } else {
+      startCLI().catch((err) => {
+        console.error("Fatal error:", err);
+        process.exit(1);
+      });
+    }
   });
 }

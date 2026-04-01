@@ -96,6 +96,8 @@ export interface InjectedSubsystems {
   browserManager?: BrowserManagerLike;
   /** Optional shared AppStats for LLM/tool/subagent tracking. */
   appStats?: AppStats;
+  /** Optional TelemetryCollector for trace/metrics recording. */
+  telemetry?: import("../telemetry/collector.ts").TelemetryCollector;
 }
 
 export interface MainAgentDeps {
@@ -165,6 +167,7 @@ export class MainAgent extends Agent {
         getSkillMetadata: () => this.skillRegistry.getMetadataForPrompt(16_000) || undefined,
       },
       appStats: deps.injected.appStats,
+      telemetry: deps.injected.telemetry,
     });
 
     this.models = deps.models;

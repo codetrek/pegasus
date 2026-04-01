@@ -53,6 +53,8 @@ import { EventType } from "./agents/events/types.ts";
 import { BrowserManager } from "./agents/tools/browser/browser-manager.ts";
 import type { BrowserConfig } from "./agents/tools/browser/types.ts";
 import { createEvent } from "./agents/events/types.ts";
+import { TelemetryCollector } from "./telemetry/index.ts";
+import { shortId } from "./infra/id.ts";
 
 const logger = getLogger("pegasus_app");
 
@@ -89,6 +91,9 @@ export class Pegasus {
 
   // ── Stats ──
   private _appStats: AppStats | null = null;
+
+  // ── Telemetry ──
+  private _telemetry: TelemetryCollector | null = null;
 
   // ── Security ──
   private ownerStore!: OwnerStore;
@@ -160,6 +165,28 @@ export class Pegasus {
       logger.warn("route_message_before_start");
       return;
     }
+
+    // Telemetry: generate traceId for this message processing chain
+    const traceId = shortId();
+    if (this._telemetry) {
+      this._telemetry.recordSpan({
+        traceId,
+        spanId: shortId(),
+        parentSpanId: null,
+        name: "message.received",
+        kind: "system",
+        startMs: Date.now(),
+        durationMs: 0,
+        status: "ok",
+        attributes: {
+          channel: message.channel.type,
+          channelId: message.channel.channelId ?? "",
+        },
+      });
+    }
+    // Attach traceId to message metadata for Agent to pick up
+    if (!message.metadata) (message as any).metadata = {};
+    (message as any).metadata._traceId = traceId;
 
     // Mirror inbound non-cli messages to cli adapter (TUI sees all conversations)
     if (message.channel.type !== "cli") {
@@ -413,6 +440,13 @@ export class Pegasus {
     this._appStats.tools.mcp = mcpCount;
     this._appStats.tools.total = builtinCount + mcpCount;
 
+    // 10b. Create TelemetryCollector
+    const telemetryDir = path.join(this.settings.homeDir, "telemetry");
+    this._telemetry = new TelemetryCollector({ telemetryDir });
+
+    // Inject telemetry into Reflection (created earlier in step 2)
+    (this.reflectionOrchestrator as any)._telemetry = this._telemetry;
+
     // 11. Create MainAgent with injected deps (Agent owns subagent management + tick via subagentConfig)
     const injected: InjectedSubsystems = {
       modelLimitsCache: this.modelLimitsCache,
@@ -430,6 +464,7 @@ export class Pegasus {
       ownerStore: this.ownerStore,
       browserManager: this._browserManager ?? undefined,
       appStats: this._appStats,
+      telemetry: this._telemetry,
     };
 
     this._mainAgent = new MainAgent({
@@ -561,6 +596,13 @@ export class Pegasus {
     }
 
     this._mainAgent = null;
+
+    // 7. Flush and close telemetry
+    if (this._telemetry) {
+      await this._telemetry.shutdown();
+      this._telemetry = null;
+    }
+
     this._started = false;
     logger.info("pegasus_app_stopped");
   }

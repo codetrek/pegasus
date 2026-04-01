@@ -4,6 +4,9 @@
 
 import type { Tool } from "../types.ts";
 
+// Telemetry tools
+import { telemetry_query } from "./telemetry-tools.ts";
+
 // System tools
 import * as systemToolsModule from "./system-tools.ts";
 const current_time = systemToolsModule.current_time;
@@ -250,6 +253,8 @@ export const mainAgentTools: Tool[] = [
   enable_project,
   archive_project,
   trust,
+  // Telemetry — self-query for debugging and monitoring
+  telemetry_query,
 ];
 
 /** Memory tools available to PostTaskReflector (no memory_list — info is pre-loaded). */

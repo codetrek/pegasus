@@ -107,6 +107,12 @@ export interface ToolContext {
   onNotify?: (message: string) => void;
   /** AbortSignal for cancellation — set by BackgroundTaskManager when running tools in background. */
   abortSignal?: AbortSignal;
+  /** Telemetry: trace ID for the current processing chain. */
+  traceId?: string;
+  /** Telemetry: parent span ID for nesting. */
+  parentSpanId?: string;
+  /** Telemetry: tool kind override ('memory' for memory tools). */
+  toolKind?: "tool" | "memory";
 }
 
 // ── ToolStats ─────────────────────────────────
